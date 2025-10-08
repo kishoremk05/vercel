@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { getSmsServerUrl } from "../lib/firebaseConfig"; // dynamic API base
-import { fetchWithTokenRefresh, setupAutoTokenRefresh } from "../lib/tokenRefresh";
+import {
+  fetchWithTokenRefresh,
+  setupAutoTokenRefresh,
+} from "../lib/tokenRefresh";
 import {
   LineChart,
   Line,
@@ -82,10 +85,10 @@ const AdminPage: React.FC<AdminPageProps> = ({
       try {
         const base = await getSmsServerUrl();
         const url = `${base}/admin/credentials`;
-        
+
         // Use fetchWithTokenRefresh for automatic token refresh
         const response = await fetchWithTokenRefresh(url);
-        
+
         if (response.ok) {
           const data = await response.json();
           const creds = data?.credentials || {};
@@ -122,13 +125,13 @@ const AdminPage: React.FC<AdminPageProps> = ({
         const base = await getSmsServerUrl();
         const statsUrl = `${base}/admin/global-stats`;
         const usersUrl = `${base}/admin/firebase-users`;
-        
+
         // Use fetchWithTokenRefresh for both requests
         const [statsRes, usersRes] = await Promise.all([
           fetchWithTokenRefresh(statsUrl),
           fetchWithTokenRefresh(usersUrl),
         ]);
-        
+
         if (statsRes.ok) {
           let data: any = null;
           try {
@@ -195,18 +198,21 @@ const AdminPage: React.FC<AdminPageProps> = ({
 
     try {
       const base = await getSmsServerUrl();
-      
+
       // Use fetchWithTokenRefresh with POST method
-      const response = await fetchWithTokenRefresh(`${base}/admin/credentials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountSid: localTwilioSid,
-          authToken: localTwilioToken,
-          phoneNumber: localTwilioPhone,
-          messagingServiceSid: localMessagingServiceSid,
-        }),
-      });
+      const response = await fetchWithTokenRefresh(
+        `${base}/admin/credentials`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountSid: localTwilioSid,
+            authToken: localTwilioToken,
+            phoneNumber: localTwilioPhone,
+            messagingServiceSid: localMessagingServiceSid,
+          }),
+        }
+      );
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -237,16 +243,19 @@ const AdminPage: React.FC<AdminPageProps> = ({
 
     try {
       const base = await getSmsServerUrl();
-      
+
       // Use fetchWithTokenRefresh with POST method
-      const response = await fetchWithTokenRefresh(`${base}/admin/feedback-urls`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          feedbackPageUrl,
-          smsServerPort,
-        }),
-      });
+      const response = await fetchWithTokenRefresh(
+        `${base}/admin/feedback-urls`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            feedbackPageUrl,
+            smsServerPort,
+          }),
+        }
+      );
 
       if (!response.ok) {
         const errorData = await response.json();
