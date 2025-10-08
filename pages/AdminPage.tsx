@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getSmsServerUrl } from "../lib/firebaseConfig"; // dynamic API base
+import { fetchWithTokenRefresh, setupAutoTokenRefresh } from "../lib/tokenRefresh";
 import {
   LineChart,
   Line,
@@ -69,21 +70,22 @@ const AdminPage: React.FC<AdminPageProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 3;
 
+  // Setup automatic token refresh on component mount
+  useEffect(() => {
+    const cleanup = setupAutoTokenRefresh();
+    return cleanup; // Cleanup on unmount
+  }, []);
+
   // Load global admin credentials on mount
   useEffect(() => {
     const loadCredentials = async () => {
       try {
-        // Get admin token from localStorage
-        let authHeaders: any = {};
-        const token = localStorage.getItem("adminToken");
-        if (token) {
-          authHeaders = { Authorization: `Bearer ${token}` };
-        }
         const base = await getSmsServerUrl();
         const url = `${base}/admin/credentials`;
-        const response = await fetch(url, {
-          headers: { ...authHeaders },
-        });
+        
+        // Use fetchWithTokenRefresh for automatic token refresh
+        const response = await fetchWithTokenRefresh(url);
+        
         if (response.ok) {
           const data = await response.json();
           const creds = data?.credentials || {};
@@ -117,19 +119,16 @@ const AdminPage: React.FC<AdminPageProps> = ({
   useEffect(() => {
     const loadAdminData = async () => {
       try {
-        // Get admin token from localStorage
-        let authHeaders: any = {};
-        const token = localStorage.getItem("adminToken");
-        if (token) {
-          authHeaders = { Authorization: `Bearer ${token}` };
-        }
         const base = await getSmsServerUrl();
         const statsUrl = `${base}/admin/global-stats`;
         const usersUrl = `${base}/admin/firebase-users`;
+        
+        // Use fetchWithTokenRefresh for both requests
         const [statsRes, usersRes] = await Promise.all([
-          fetch(statsUrl, { headers: { ...authHeaders } }),
-          fetch(usersUrl, { headers: { ...authHeaders } }),
+          fetchWithTokenRefresh(statsUrl),
+          fetchWithTokenRefresh(usersUrl),
         ]);
+        
         if (statsRes.ok) {
           let data: any = null;
           try {
@@ -195,16 +194,12 @@ const AdminPage: React.FC<AdminPageProps> = ({
     setShowSuccess(false);
 
     try {
-      // Get admin token from localStorage
-      let headers: any = { "Content-Type": "application/json" };
-      const token = localStorage.getItem("adminToken");
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
       const base = await getSmsServerUrl();
-      const response = await fetch(`${base}/admin/credentials`, {
+      
+      // Use fetchWithTokenRefresh with POST method
+      const response = await fetchWithTokenRefresh(`${base}/admin/credentials`, {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           accountSid: localTwilioSid,
           authToken: localTwilioToken,
@@ -241,15 +236,12 @@ const AdminPage: React.FC<AdminPageProps> = ({
     setShowSuccess(false);
 
     try {
-      let headers: any = { "Content-Type": "application/json" };
-      const token = localStorage.getItem("adminToken");
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
       const base = await getSmsServerUrl();
-      const response = await fetch(`${base}/admin/feedback-urls`, {
+      
+      // Use fetchWithTokenRefresh with POST method
+      const response = await fetchWithTokenRefresh(`${base}/admin/feedback-urls`, {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           feedbackPageUrl,
           smsServerPort,

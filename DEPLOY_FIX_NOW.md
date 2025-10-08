@@ -3,6 +3,7 @@
 ## ❌ Current Problem
 
 Your Render logs show:
+
 ```
 [sms:body] keys= undefined raw= undefined
 ```
@@ -22,6 +23,7 @@ Your `sms-server.js` has manual stream reading (lines 323-352), but **Render has
 ### Option 1: Manual Deploy (FASTEST - 2 minutes)
 
 1. **Open Render Dashboard:**
+
    ```
    https://dashboard.render.com
    ```
@@ -47,10 +49,12 @@ Your `sms-server.js` has manual stream reading (lines 323-352), but **Render has
 If you want auto-deployment from GitHub:
 
 1. **Allow the secret on GitHub:**
+
    - Open: https://github.com/kishoremk05/vercel/security/secret-scanning/unblock-secret/33mPef5UnOQLkMfPMUFCYvvm2Is
    - Click **"Allow this secret"**
 
 2. **Push to GitHub:**
+
    ```powershell
    git push origin main --force
    ```
@@ -75,6 +79,7 @@ If you want auto-deployment from GitHub:
 ## 🧪 After Deploy: Test SMS
 
 1. **Hard refresh dashboard:**
+
    ```
    Ctrl + Shift + R
    ```
@@ -84,6 +89,7 @@ If you want auto-deployment from GitHub:
 3. **Click "Send SMS"**
 
 4. **Check Render logs** - Should see:
+
    ```
    [sms:manual-parse] Read XXX bytes from stream
    [sms:manual-parse] ✅ Successfully parsed manual body
@@ -98,12 +104,14 @@ If you want auto-deployment from GitHub:
 ## 📊 Verify Deployment Worked
 
 ### Before (current - broken):
+
 ```
 [sms:body] keys= undefined raw= undefined
 POST /send-sms 400
 ```
 
 ### After (fixed):
+
 ```
 [sms:manual-parse] ✅ Successfully parsed manual body
 [sms:body] keys= to,body,companyId,accountSid,authToken,from
@@ -118,6 +126,7 @@ POST /send-sms 200
 The GitHub error is about **old commits** (11c67da, baeebce, 2667b63) containing Twilio credentials.
 
 **This doesn't block deployment!** You can:
+
 - Deploy manually to Render (Option 1) ✅
 - Allow the secret on GitHub (Option 2)
 - Ignore GitHub for now

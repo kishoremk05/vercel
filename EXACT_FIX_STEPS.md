@@ -3,6 +3,7 @@
 ## 🔍 What's Wrong?
 
 **Render server logs show:**
+
 ```
 [sms:body] keys= undefined raw= undefined
 ```
@@ -55,6 +56,7 @@ If you see these, deployment worked! ✅
 1. **Open dashboard:** https://vercel-swart-chi-29.vercel.app/dashboard
 
 2. **Hard refresh:**
+
    - Windows: `Ctrl + Shift + R`
    - Mac: `Cmd + Shift + R`
 
@@ -71,6 +73,7 @@ If you see these, deployment worked! ✅
 **Go back to Render → Logs tab**
 
 **You should NOW see:**
+
 ```
 [sms:headers] origin= https://vercel-swart-chi-29.vercel.app
 [sms:content-type] application/json
@@ -82,6 +85,7 @@ If you see these, deployment worked! ✅
 ```
 
 **NOT this (old broken version):**
+
 ```
 [sms:body] keys= undefined raw= undefined
 ```
@@ -94,7 +98,7 @@ If you see these, deployment worked! ✅
 ✅ Render logs show `[sms:body] keys= to,body,companyId,...` (not undefined)  
 ✅ Render logs show `[sms:success] Message sent: SM...`  
 ✅ Dashboard shows success alert  
-✅ No 400 errors in browser console  
+✅ No 400 errors in browser console
 
 ---
 
@@ -103,6 +107,7 @@ If you see these, deployment worked! ✅
 ### Problem: Render didn't deploy latest code
 
 **Solution:**
+
 1. Render Dashboard → Your Service
 2. Settings → Build & Deploy
 3. Click "Trigger deploy" again
@@ -111,6 +116,7 @@ If you see these, deployment worked! ✅
 ### Problem: Render deployed but still shows old logs
 
 **Solution:**
+
 1. Wait 30 seconds (Render cache)
 2. Hard refresh dashboard (Ctrl+Shift+R)
 3. Try SMS again
@@ -122,6 +128,7 @@ If you see these, deployment worked! ✅
 You don't need GitHub! Just deploy manually to Render (Step 2 above).
 
 Or allow the secret:
+
 - Open: https://github.com/kishoremk05/vercel/security/secret-scanning/unblock-secret/33mPef5UnOQLkMfPMUFCYvvm2Is
 - Click "Allow this secret"
 - Then: `git push origin main --force`
@@ -146,6 +153,7 @@ Or allow the secret:
 ## 🆘 Still Need Help?
 
 **Show me:**
+
 1. Screenshot of Render deployment status
 2. Latest 50 lines from Render logs (after clicking "Send SMS")
 3. Browser console errors (F12 → Console)
