@@ -1,0 +1,3740 @@
+// SMS + WhatsApp Cloud API Server
+// Usage: node sms-server.js
+// NOTE: Move TWILIO_* secrets into environment variables in production.
+
+import "dotenv/config";
+import fetch from "node-fetch";
+import express from "express";
+import cors from "cors";
+import twilio from "twilio";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
+
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ------------------------------------------------------------
+// Twilio Global Client (optional env-based)
+// ------------------------------------------------------------
+// Some routes referenced an undeclared variable `twilioClient`, causing a
+// ReferenceError. We define it here and lazily initialize from env if possible.
+// Per-request overrides (accountSid/authToken/company credentials) will still
+// create their own client instances when needed.
+let twilioClient = null;
+try {
+  const envSid = process.env.TWILIO_ACCOUNT_SID;
+  const envToken = process.env.TWILIO_AUTH_TOKEN;
+  if (envSid && envToken) {
+    twilioClient = twilio(envSid, envToken);
+    console.log(
+      "[twilio:init] ✅ Global Twilio client initialized from environment variables"
+    );
+  } else {
+    console.log(
+      "[twilio:init] ℹ️ No env credentials found (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN); will rely on per-request credentials"
+    );
+  }
+} catch (e) {
+  console.warn(
+    "[twilio:init] ⚠️ Failed to initialize global client:",
+    e.message || e
+  );
+}
+
+// ------------------------------------------------------------
+// Helper: Direct Twilio REST API send (HTTP basic auth) when SDK fails
+// ------------------------------------------------------------
+async function sendSmsViaTwilioHttp({
+  accountSid,
+  authToken,
+  from,
+  to,
+  body,
+  statusCallback,
+}) {
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(
+    String(accountSid)
+  )}/Messages.json`;
+  const params = new URLSearchParams();
+  if (from) params.set("From", String(from));
+  params.set("To", String(to));
+  params.set("Body", String(body));
+  if (statusCallback) params.set("StatusCallback", String(statusCallback));
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization:
+        "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64"),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const message = data?.message || JSON.stringify(data);
+    const code = data?.code;
+    throw Object.assign(new Error(message || "Twilio HTTP error"), { code });
+  }
+  return data; // includes sid, status, etc.
+}
+
+// ------------------------------------------------------------
+// Firebase Admin SDK & Database Initialization
+// ------------------------------------------------------------
+let firebaseAdmin = null;
+let db = null;
+let dbV2 = null;
+let firestoreEnabled = false;
+let firebaseProjectId = null;
+let app; // express app reference
+
+try {
+  const adminModule = await import("firebase-admin");
+  firebaseAdmin = adminModule.default;
+
+  const candidateFiles = [
+    "firebase-service-account.json",
+    "firebase-service-account1.json",
+    "firebase-service-account2.json",
+  ].map((f) => path.join(__dirname, f));
+
+  // Allow providing Firebase service account JSON via env var for platforms
+  // that do not support files in the repo (e.g., Render). If FIREBASE_ADMIN_JSON
+  // is set, parse it and initialize admin SDK from it.
+  const envCreds = process.env.FIREBASE_ADMIN_JSON || null;
+  let serviceAccountPath = null;
+  try {
+    if (envCreds) {
+      const parsed = JSON.parse(envCreds);
+      if (!firebaseAdmin.apps.length) {
+        firebaseAdmin.initializeApp({
+          credential: firebaseAdmin.credential.cert(parsed),
+        });
+      }
+      firestoreEnabled = true;
+      firebaseProjectId = parsed.project_id;
+      console.log(
+        `[firebase] Initialized admin SDK from FIREBASE_ADMIN_JSON env for project: ${firebaseProjectId}`
+      );
+      // try to load DB helpers
+      try {
+        db = await import("./server/db/data.js");
+      } catch {}
+      try {
+        const mod = await import("./server/db/dataV2.js");
+        dbV2 = mod.default || mod;
+      } catch (e) {
+        console.warn("[firebase] dbV2 load failed", e.message);
+      }
+    } else {
+      serviceAccountPath = candidateFiles.find((p) => fs.existsSync(p));
+      console.log(
+        "[firebase:init] Candidate service account files:",
+        candidateFiles
+      );
+      console.log(
+        "[firebase:init] Existence map:",
+        candidateFiles.map((p) => ({ path: p, exists: fs.existsSync(p) }))
+      );
+      if (serviceAccountPath) {
+        try {
+          const serviceAccount = JSON.parse(
+            fs.readFileSync(serviceAccountPath, "utf8")
+          );
+          if (!firebaseAdmin.apps.length) {
+            firebaseAdmin.initializeApp({
+              credential: firebaseAdmin.credential.cert(serviceAccount),
+            });
+          }
+          firestoreEnabled = true;
+          firebaseProjectId = serviceAccount.project_id;
+          console.log(
+            `[firebase] Initialized with project: ${firebaseProjectId}`
+          );
+          // Lazy import DB helpers
+          try {
+            db = await import("./server/db/data.js");
+          } catch {}
+          try {
+            const mod = await import("./server/db/dataV2.js");
+            dbV2 = mod.default || mod;
+          } catch (e) {
+            console.warn("[firebase] dbV2 load failed", e.message);
+          }
+        } catch (e) {
+          console.error(
+            "[firebase] Failed to initialize admin SDK from file",
+            e.message || e
+          );
+        }
+      } else {
+        console.warn(
+          "[firebase] Service account file not found and FIREBASE_ADMIN_JSON not set; running with firestore disabled"
+        );
+      }
+    }
+  } catch (e) {
+    console.error("[firebase] Initialization error:", e.message || e);
+  }
+
+  // Create Express app (lost during merge corruption)
+  app = global.__APP_INSTANCE__ || express();
+  global.__APP_INSTANCE__ = app; // safeguard against double import in dev with ESM
+
+  // CORS configuration: allow a comma-separated list via CORS_ORIGINS env var
+  // Example: CORS_ORIGINS=https://app.vercel.app,https://admin.example.com
+  const corsOrigins = (process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (corsOrigins.length > 0) {
+    console.log("[cors] Restricting origins to:", corsOrigins);
+    const patterns = corsOrigins.map((o) => o.trim()).filter(Boolean);
+    const hasStar = patterns.includes("*");
+    function matches(origin) {
+      if (hasStar) return true;
+      if (patterns.includes(origin)) return true; // exact
+      for (const p of patterns) {
+        if (p.startsWith("*.")) {
+          const suffix = p.slice(1); // includes leading '.'
+          if (origin.endsWith(suffix)) return true;
+        }
+      }
+      return false;
+    }
+    app.use(
+      cors({
+        origin: (origin, cb) => {
+          try {
+            if (!origin) {
+              console.log("[cors] No origin header (server/CURL) - allowing");
+              return cb(null, true);
+            }
+            const allowed = matches(origin);
+            console.log("[cors] Origin check:", { origin, allowed, patterns });
+            if (allowed) return cb(null, true);
+            return cb(new Error("CORS policy: origin not allowed"), false);
+          } catch (err) {
+            console.warn("[cors] Origin check failed", err?.message || err);
+            return cb(new Error("CORS policy: origin check error"), false);
+          }
+        },
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allowedHeaders: [
+          "Authorization",
+          "Content-Type",
+          "Accept",
+          "X-Requested-With",
+        ],
+        credentials: false,
+        optionsSuccessStatus: 200,
+        maxAge: 86400,
+      })
+    );
+    app.options("/*", cors());
+  } else {
+    console.log(
+      "[cors] No CORS_ORIGINS configured - allowing all origins (dev mode)"
+    );
+    app.use(cors());
+    app.options("/*", cors());
+  }
+
+  // Defensive CORS header middleware: ensure Access-Control-Allow-Origin is present
+  // for allowed origins (some platforms/proxies may strip CORS headers unexpectedly).
+  try {
+    const patterns = (process.env.CORS_ORIGINS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const hasStar = patterns.includes("*");
+    const matchesOrigin = (origin) => {
+      if (!origin) return false;
+      if (hasStar) return true;
+      if (patterns.includes(origin)) return true;
+      for (const p of patterns) {
+        if (p.startsWith("*.")) {
+          const suffix = p.slice(1);
+          if (origin.endsWith(suffix)) return true;
+        }
+      }
+      return false;
+    };
+    app.use((req, res, next) => {
+      try {
+        const origin = req.headers.origin;
+        if (origin && matchesOrigin(origin)) {
+          res.setHeader("Access-Control-Allow-Origin", origin);
+          res.setHeader("Vary", "Origin");
+        }
+      } catch (e) {
+        // ignore
+      }
+      next();
+    });
+  } catch (e) {
+    console.warn("[cors] defensive middleware setup failed", e?.message || e);
+  }
+
+  // CRITICAL: Use express.json with verify to capture raw body
+  app.use(
+    express.json({
+      limit: "1mb",
+      verify: (req, res, buf, encoding) => {
+        req.rawBody = buf.toString(encoding || "utf8");
+      },
+    })
+  );
+  // Also accept urlencoded/form submissions (some clients may send form data)
+  app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+  // Lightweight health/readiness endpoints for hosting platforms
+  app.get("/health", (req, res) => res.status(200).json({ status: "ok" }));
+  app.get("/ready", (req, res) =>
+    res
+      .status(200)
+      .json({ ready: firestoreEnabled ? "firestore" : "no-firestore" })
+  );
+} catch (e) {
+  console.error("[firebase] Root init failed:", e.message || e);
+  // Fallback minimal express app so server can still start
+  if (!app) {
+    app = express();
+    app.use(cors());
+    app.use(express.json({ limit: "1mb" }));
+  }
+}
+
+function toWhatsAppAddress(raw) {
+  if (!raw) throw new Error("Missing number");
+  const s = String(raw).trim();
+  if (s.toLowerCase().startsWith("whatsapp:")) return s;
+  const norm = normalizePhone(s);
+  if (!norm.ok) throw new Error(norm.reason || "Invalid phone");
+  return "whatsapp:" + norm.value;
+}
+
+// ---------------- SMS (Twilio) ENDPOINTS (restored) ----------------
+async function handleSendSms(req, res) {
+  // CRITICAL FIX: Manually collect body chunks if Express didn't parse it
+  // This handles Render.com proxy issues where body arrives but isn't parsed
+  let bodyData = req.body;
+
+  // If body is empty but we have a content-type header, manually read the stream
+  if (
+    (!bodyData || Object.keys(bodyData).length === 0) &&
+    req.headers["content-type"]?.includes("application/json")
+  ) {
+    console.log(
+      "[sms:manual-parse] Body is empty, attempting manual stream read..."
+    );
+    try {
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      const rawBody = Buffer.concat(chunks).toString("utf8");
+      console.log(
+        `[sms:manual-parse] Read ${rawBody.length} bytes from stream`
+      );
+      console.log(`[sms:manual-parse] Raw: ${rawBody.substring(0, 200)}`);
+      if (rawBody.trim()) {
+        bodyData = JSON.parse(rawBody);
+        console.log("[sms:manual-parse] ✅ Successfully parsed manual body");
+      }
+    } catch (parseErr) {
+      console.error("[sms:manual-parse] ❌ Failed:", parseErr.message);
+    }
+  }
+
+  const {
+    from: fromBody,
+    to,
+    body,
+    statusCallback,
+    accountSid: accountSidBody,
+    authToken: authTokenBody,
+    companyId: companyIdBody,
+    messagingServiceSid: mssFromBody,
+  } = bodyData || {};
+
+  try {
+    // Lightweight ingress log without exposing secrets
+    try {
+      console.log("[sms:headers] origin=", req.headers.origin || null);
+    } catch {}
+    try {
+      // Log the parsed body keys to help debug missing payloads
+      console.log("[sms:content-type]", req.headers["content-type"] || null);
+      console.log(
+        "[sms:query]",
+        req.query && Object.keys(req.query).length ? req.query : null
+      );
+      console.log(
+        "[sms:body] keys=",
+        bodyData && typeof bodyData === "object"
+          ? Object.keys(bodyData)
+          : typeof bodyData,
+        "raw=",
+        typeof bodyData === "string" ? bodyData.slice(0, 200) : undefined
+      );
+    } catch (e) {}
+    console.log("[sms:recv]", {
+      to,
+      hasFrom: !!fromBody,
+      hasSid: !!accountSidBody,
+      hasToken: !!authTokenBody,
+      hasCompanyId: !!companyIdBody,
+    });
+  } catch {}
+
+  // Fallback parsing: if to/body missing try query params or raw string body
+  let finalTo = to;
+  let finalBody = body;
+  if (!finalTo) finalTo = req.query.to;
+  if (!finalBody) finalBody = req.query.body;
+  if ((!finalTo || !finalBody) && bodyData && typeof bodyData === "string") {
+    try {
+      const parsed = JSON.parse(bodyData);
+      finalTo = finalTo || parsed.to;
+      finalBody = finalBody || parsed.body;
+    } catch {}
+  }
+  // Provide extremely detailed 400 response if still missing
+  if (!finalTo || !finalBody) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing required fields (to, body)",
+      receivedKeys:
+        bodyData && typeof bodyData === "object"
+          ? Object.keys(bodyData)
+          : typeof bodyData,
+      query: req.query,
+      hint: "Ensure fetch includes JSON body: { to: '+15551234567', body: 'Message' } with Content-Type: application/json",
+    });
+  }
+
+  // Resolve credentials priority: env -> explicit body -> companyId lookup -> admin global
+  let resolvedFrom = fromBody;
+  const explicitSid = accountSidBody || null;
+  const explicitToken = authTokenBody || null;
+  const explicitMss = mssFromBody || null;
+
+  // Env credentials
+  const envSid = process.env.TWILIO_ACCOUNT_SID || null;
+  const envToken = process.env.TWILIO_AUTH_TOKEN || null;
+  const envMss = process.env.TWILIO_MESSAGING_SERVICE_SID || null;
+
+  // Load company and admin-global (if Firestore is enabled)
+  let companyCreds = {};
+  let adminCreds = {};
+  if (firestoreEnabled) {
+    try {
+      if (companyIdBody) {
+        const company = await dbV2.getCompanyById(String(companyIdBody));
+        if (company) {
+          companyCreds = {
+            accountSid: company.twilioAccountSid || null,
+            authToken: company.twilioAuthToken || null,
+            phoneNumber: company.twilioPhoneNumber || null,
+            messagingServiceSid: company.twilioMessagingServiceSid || null,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[sms:send] company lookup failed", e);
+    }
+
+    try {
+      const settings = await dbV2.getGlobalAdminSettings();
+      const tw = settings?.twilio || {};
+      adminCreds = {
+        accountSid: tw.accountSid || null,
+        authToken: tw.authToken || null,
+        phoneNumber: tw.phoneNumber || null,
+        messagingServiceSid: tw.messagingServiceSid || null,
+      };
+    } catch (e) {
+      console.warn("[sms:send] global admin settings lookup failed", e);
+    }
+  }
+
+  // Determine final credentials with the following precedence:
+  // 1) explicit body (accountSid/authToken/messagingService)
+  // 2) environment variables
+  // 3) admin-global credentials (override company)
+  // 4) company credentials
+  const finalSid =
+    explicitSid ||
+    envSid ||
+    adminCreds.accountSid ||
+    companyCreds.accountSid ||
+    null;
+  const finalToken =
+    explicitToken ||
+    envToken ||
+    adminCreds.authToken ||
+    companyCreds.authToken ||
+    null;
+  const finalMss =
+    explicitMss ||
+    envMss ||
+    adminCreds.messagingServiceSid ||
+    companyCreds.messagingServiceSid ||
+    null;
+  // For 'from' prefer explicit body, then admin-global phone, then company phone
+  resolvedFrom =
+    fromBody || adminCreds.phoneNumber || companyCreds.phoneNumber || null;
+
+  // Debug: log resolved credentials so we can see what will be used
+  try {
+    console.log("[sms:creds] resolvedFrom=", resolvedFrom);
+    console.log(
+      "[sms:creds] finalSid=",
+      finalSid ? String(finalSid).slice(0, 8) + "..." : null
+    );
+    console.log("[sms:creds] finalMss=", finalMss || null);
+    console.log("[sms:creds] adminCreds=", {
+      accountSid: adminCreds.accountSid
+        ? String(adminCreds.accountSid).slice(0, 8) + "..."
+        : null,
+      phoneNumber: adminCreds.phoneNumber || null,
+      messagingServiceSid: adminCreds.messagingServiceSid || null,
+    });
+    console.log("[sms:creds] companyCreds=", {
+      accountSid: companyCreds.accountSid
+        ? String(companyCreds.accountSid).slice(0, 8) + "..."
+        : null,
+      phoneNumber: companyCreds.phoneNumber || null,
+      messagingServiceSid: companyCreds.messagingServiceSid || null,
+    });
+  } catch (e) {}
+
+  let resolvedSid = finalSid;
+  let resolvedToken = finalToken;
+  let resolvedMessagingServiceSid = finalMss;
+
+  // Create client if no global twilioClient (env) is present
+  // Attach a lightweight per-request id for tracing duplicated increments
+  const reqId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  let client = twilioClient;
+  if (!client) {
+    if (!resolvedSid || !resolvedToken) {
+      return res.status(500).json({
+        success: false,
+        error:
+          "Twilio not configured. Provide accountSid/authToken or a valid companyId with saved credentials.",
+      });
+    }
+    try {
+      client = twilio(resolvedSid, resolvedToken);
+    } catch (e) {
+      return res.status(500).json({
+        success: false,
+        error:
+          "Failed to initialize Twilio client: " + (e.message || String(e)),
+      });
+    }
+  }
+
+  if (!resolvedFrom && !resolvedMessagingServiceSid) {
+    return res.status(400).json({
+      success: false,
+      error:
+        "Missing sender. Provide 'from' (Twilio number) or 'messagingServiceSid', or save them in company credentials.",
+    });
+  }
+
+  // Optional: force using direct HTTP API (avoid SDK issues/logs)
+  const FORCE_HTTP = String(process.env.TWILIO_FORCE_HTTP || "0") === "1";
+
+  // Subscription checks removed — billing handled separately by admin scripts
+  let subscriptionDecrementNeeded = false;
+  let subscriptionDocRef = null;
+
+  // Update Firebase dashboard stats when SMS is sent successfully
+  async function recordMessage({ status, sid }) {
+    // Only increment count if companyId is provided and Firestore is enabled
+    if (!companyIdBody || !firestoreEnabled) {
+      return;
+    }
+
+    try {
+      const firestore = firebaseAdmin.firestore();
+      const dashboardRef = firestore
+        .collection("clients")
+        .doc(companyIdBody)
+        .collection("dashboard")
+        .doc("current");
+
+      const dashboardDoc = await dashboardRef.get();
+      const beforeCount = dashboardDoc.exists
+        ? Number(dashboardDoc.data()?.message_count || 0)
+        : 0;
+      if (!dashboardDoc.exists) {
+        // Initialize dashboard if it doesn't exist
+        await dashboardRef.set({
+          feedback_count: 0,
+          message_count: 1, // First message
+          negative_feedback_count: 0,
+          negative_comments: [],
+          graph_data: { labels: [], values: [] },
+          last_updated: firebaseAdmin.firestore.Timestamp.now(),
+        });
+        console.log(
+          `[sms:sent][recordMessage] ✅ init req=${reqId} company=${companyIdBody} sid=${sid} status=${status} before=${beforeCount} after=1`
+        );
+      } else {
+        // Increment message count
+        await dashboardRef.update({
+          message_count: firebaseAdmin.firestore.FieldValue.increment(1),
+          last_updated: firebaseAdmin.firestore.Timestamp.now(),
+        });
+        // Read back the updated count for precise debugging (minor extra read; acceptable for diagnostics)
+        try {
+          const updated = await dashboardRef.get();
+          const afterCount = Number(
+            updated.data()?.message_count || beforeCount + 1
+          );
+          console.log(
+            `[sms:sent][recordMessage] ✅ incr req=${reqId} company=${companyIdBody} sid=${sid} status=${status} before=${beforeCount} after=${afterCount}`
+          );
+        } catch (readBackErr) {
+          console.log(
+            `[sms:sent][recordMessage] ⚠️ incr req=${reqId} company=${companyIdBody} sid=${sid} (post-read failed: ${readBackErr.message})`
+          );
+        }
+      }
+
+      // ANALYTICS FIX: Only store ACTUAL SMS, not feedback request messages
+      // Feedback requests are just prompts, not real communication data
+      // We only want to track actual feedback responses in Firebase
+      const isFeedbackRequest =
+        (body || "").includes("localhost:5173/feedback") ||
+        (body || "").includes("/feedback?");
+
+      if (!isFeedbackRequest) {
+        try {
+          await firestore.collection("messages").add({
+            companyId: companyIdBody,
+            sms_id: sid || `msg_${Date.now()}`,
+            phone_number: to || "",
+            message_body: body || "",
+            status: status || "sent",
+            twilio_status: status || "sent",
+            sent_at: firebaseAdmin.firestore.Timestamp.now(),
+            timestamp: firebaseAdmin.firestore.Timestamp.now(),
+            messageType: "sms",
+            customerPhone: to || "",
+            customerName: "",
+            error_code: null,
+            error_message: null,
+          });
+          // Subscription decrement removed — billing managed externally
+          console.log(
+            `[sms:sent][recordMessage] 📊 Stored non-feedback message in analytics collection for company=${companyIdBody}`
+          );
+        } catch (msgErr) {
+          console.error(
+            `[sms:sent:error] Failed to store message in analytics:`,
+            msgErr.message
+          );
+        }
+      } else {
+        console.log(
+          `[sms:sent][recordMessage] ⏭️ Skipped storing feedback request SMS (only store actual feedback responses)`
+        );
+      }
+    } catch (e) {
+      console.error(
+        `[sms:sent:error] Failed to update dashboard stats for ${companyIdBody}:`,
+        e.message
+      );
+    }
+  }
+  if (FORCE_HTTP) {
+    try {
+      const sidToUse = resolvedSid || process.env.TWILIO_ACCOUNT_SID;
+      const tokenToUse = resolvedToken || process.env.TWILIO_AUTH_TOKEN;
+      if (!sidToUse || !tokenToUse) {
+        throw new Error(
+          "Twilio credentials missing for HTTP send (accountSid/authToken)."
+        );
+      }
+      // Send via Messaging Service SID if provided; else use From number
+      if (resolvedMessagingServiceSid) {
+        const url = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(
+          String(sidToUse)
+        )}/Messages.json`;
+        const params = new URLSearchParams();
+        params.set("MessagingServiceSid", String(resolvedMessagingServiceSid));
+        params.set("To", String(to));
+        params.set("Body", String(body));
+        if (statusCallback)
+          params.set("StatusCallback", String(statusCallback));
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization:
+              "Basic " +
+              Buffer.from(`${sidToUse}:${tokenToUse}`).toString("base64"),
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params.toString(),
+        });
+        const httpData = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          const message = httpData?.message || JSON.stringify(httpData);
+          const code = httpData?.code;
+          throw Object.assign(new Error(message || "Twilio HTTP error (MSS)"), {
+            code,
+          });
+        }
+        console.log("[sms:send:success:http]", {
+          sid: httpData?.sid,
+          status: httpData?.status,
+        });
+        await recordMessage({
+          status: httpData?.status || httpData?.message_status || "queued",
+          sid: httpData?.sid,
+        });
+        return res.json({
+          success: true,
+          sid: httpData?.sid,
+          status: httpData?.status || httpData?.message_status || "queued",
+        });
+      } else {
+        const data = await sendSmsViaTwilioHttp({
+          accountSid: sidToUse,
+          authToken: tokenToUse,
+          from: resolvedFrom,
+          to,
+          body,
+          statusCallback,
+        });
+        console.log("[sms:send:success:http]", {
+          sid: data?.sid,
+          status: data?.status || data?.message_status,
+        });
+        await recordMessage({
+          status: data?.status || data?.message_status || "queued",
+          sid: data?.sid,
+        });
+        return res.json({
+          success: true,
+          sid: data?.sid,
+          status: data?.status || data?.message_status || "queued",
+        });
+      }
+    } catch (httpErr) {
+      const fMsg = httpErr?.message || String(httpErr);
+      const fCode = httpErr?.code;
+      console.error("[sms:send:http:error]", { code: fCode, errMsg: fMsg });
+      return res.status(500).json({ success: false, error: fMsg, code: fCode });
+    }
+  }
+
+  try {
+    console.log("[sms:send:attempt]", {
+      from: resolvedFrom,
+      to: finalTo,
+      len: finalBody?.length,
+      mss: resolvedMessagingServiceSid ? "yes" : "no",
+    });
+    const createArgs = {
+      to: finalTo,
+      body: String(finalBody),
+      ...(statusCallback ? { statusCallback } : {}),
+    };
+    if (resolvedMessagingServiceSid) {
+      createArgs["messagingServiceSid"] = resolvedMessagingServiceSid;
+    } else {
+      createArgs["from"] = resolvedFrom;
+    }
+    const msg = await client.messages.create(createArgs);
+    await recordMessage({ status: msg.status || "queued", sid: msg.sid });
+    return res.json({ success: true, sid: msg.sid, status: msg.status });
+  } catch (e) {
+    const errMsg = e?.message || String(e);
+    const code = e?.code;
+    // Only fallback for recognizable module/SDK internal errors, not for normal Twilio API errors
+    const looksLikeSdkModuleBug =
+      e?.code === "MODULE_NOT_FOUND" ||
+      /assignedaddon/i.test(errMsg) ||
+      /Cannot find module/i.test(errMsg) ||
+      /import\s+.*twilio/i.test(errMsg);
+    if (looksLikeSdkModuleBug) {
+      try {
+        const sidToUse = resolvedSid || process.env.TWILIO_ACCOUNT_SID;
+        const tokenToUse = resolvedToken || process.env.TWILIO_AUTH_TOKEN;
+        if (!sidToUse || !tokenToUse) {
+          throw new Error(
+            "Twilio credentials missing for HTTP fallback (accountSid/authToken)."
+          );
+        }
+        if (!resolvedFrom && !resolvedMessagingServiceSid) {
+          throw new Error(
+            "Missing sender for HTTP fallback. Provide 'from' or 'messagingServiceSid'."
+          );
+        }
+        console.warn(
+          "[sms:send:fallback:http] Twilio SDK failed, attempting direct REST API"
+        );
+        const data = await sendSmsViaTwilioHttp({
+          accountSid: sidToUse,
+          authToken: tokenToUse,
+          from: resolvedFrom,
+          to,
+          body,
+          statusCallback,
+          // Note: sendSmsViaTwilioHttp will read 'from'; for Messaging Service SID we pass via params below
+        });
+        // If using Messaging Service SID, we need to call HTTP with MessagingServiceSid param instead of From
+        if (resolvedMessagingServiceSid && (!data || !data.sid)) {
+          const url = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(
+            String(sidToUse)
+          )}/Messages.json`;
+          const params = new URLSearchParams();
+          params.set(
+            "MessagingServiceSid",
+            String(resolvedMessagingServiceSid)
+          );
+          params.set("To", String(to));
+          params.set("Body", String(body));
+          if (statusCallback)
+            params.set("StatusCallback", String(statusCallback));
+          const resp = await fetch(url, {
+            method: "POST",
+            headers: {
+              Authorization:
+                "Basic " +
+                Buffer.from(`${sidToUse}:${tokenToUse}`).toString("base64"),
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: params.toString(),
+          });
+          const httpData = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            const message = httpData?.message || JSON.stringify(httpData);
+            const code = httpData?.code;
+            throw Object.assign(
+              new Error(message || "Twilio HTTP error (MSS)"),
+              { code }
+            );
+          }
+          console.log("[sms:send:success:http]", {
+            sid: httpData?.sid,
+            status: httpData?.status,
+          });
+          await recordMessage({
+            status: httpData?.status || httpData?.message_status || "queued",
+            sid: httpData?.sid,
+          });
+          return res.json({
+            success: true,
+            sid: httpData?.sid,
+            status: httpData?.status || httpData?.message_status || "queued",
+          });
+        }
+        console.log("[sms:send:success:http]", {
+          sid: data?.sid,
+          status: data?.status || data?.message_status,
+        });
+        await recordMessage({
+          status: data?.status || data?.message_status || "queued",
+          sid: data?.sid,
+        });
+        return res.json({
+          success: true,
+          sid: data?.sid,
+          status: data?.status || data?.message_status || "queued",
+        });
+      } catch (fallbackErr) {
+        const fMsg = fallbackErr?.message || String(fallbackErr);
+        const fCode = fallbackErr?.code;
+        console.error("[sms:send:fallback:http:error]", {
+          code: fCode,
+          errMsg: fMsg,
+        });
+        return res
+          .status(500)
+          .json({ success: false, error: fMsg, code: fCode });
+      }
+    }
+    // Provide helpful hints for common Twilio errors
+    let hint;
+    if (code === 21608)
+      hint =
+        "Trial account cannot send SMS to unverified numbers. Verify the number in Twilio or upgrade the account.";
+    if (code === 21211)
+      hint =
+        "The 'To' number is not a valid phone number. Use E.164 format like +14155550123.";
+    console.error("[sms:send:error]", { code, errMsg });
+    return res
+      .status(500)
+      .json({ success: false, error: errMsg, code, ...(hint ? { hint } : {}) });
+  }
+}
+
+// Original route
+app.post("/send-sms", handleSendSms);
+// Alias route (some clients may prefix with /api)
+app.post("/api/send-sms", handleSendSms);
+
+// --- Billing / Subscription endpoints (unified) ---
+// Fetch current subscription (always 200, normalize empty)
+app.get("/api/subscription", async (req, res) => {
+  try {
+    if (!firestoreEnabled) {
+      return res.json({
+        success: false,
+        subscription: null,
+        reason: "firestore-disabled",
+      });
+    }
+    const companyId = req.query.companyId || req.query.company_id;
+    if (!companyId) {
+      return res.json({
+        success: false,
+        subscription: null,
+        reason: "missing-companyId",
+      });
+    }
+    const firestore = firebaseAdmin.firestore();
+    // Prefer billing path, fallback to profile path if legacy
+    const billingRef = firestore
+      .collection("clients")
+      .doc(String(companyId))
+      .collection("billing")
+      .doc("subscription");
+    let snap = await billingRef.get();
+    if (!snap.exists) {
+      const legacyRef = firestore
+        .collection("clients")
+        .doc(String(companyId))
+        .collection("profile")
+        .doc("subscription");
+      snap = await legacyRef.get();
+      if (!snap.exists) {
+        return res.json({ success: true, subscription: null, empty: true });
+      }
+    }
+    return res.json({ success: true, subscription: snap.data() });
+  } catch (e) {
+    console.error("[api:subscription:get] error", e);
+    return res.json({
+      success: false,
+      subscription: null,
+      error: e.message || "fetch-failed",
+    });
+  }
+});
+
+// Create/update subscription manually (admin/test) – expects { companyId, planId, smsCredits, durationMonths, status }
+app.post("/api/subscription", async (req, res) => {
+  try {
+    if (!firestoreEnabled) {
+      return res.status(503).json({ error: "Database not configured" });
+    }
+    const { companyId, planId, smsCredits, durationMonths, status } =
+      req.body || {};
+    if (!companyId || !planId) {
+      return res.status(400).json({ error: "companyId & planId required" });
+    }
+    const firestore = firebaseAdmin.firestore();
+    const ref = firestore
+      .collection("clients")
+      .doc(String(companyId))
+      .collection("billing")
+      .doc("subscription");
+    const months = Number(durationMonths) || 1;
+    const totalMs = months * 30 * 24 * 60 * 60 * 1000;
+    const payload = {
+      planId,
+      planName: planId,
+      smsCredits: Number(smsCredits) || 0,
+      remainingCredits: Number(smsCredits) || 0,
+      startDate: new Date().toISOString(),
+      endDate: new Date(Date.now() + totalMs).toISOString(),
+      status: status || "active",
+      updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
+    };
+    await ref.set(payload, { merge: true });
+    return res.json({ success: true, subscription: payload });
+  } catch (e) {
+    return res
+      .status(500)
+      .json({ error: e.message || "Failed to save subscription" });
+  }
+});
+
+// Stub for payment session creation (Dodo gateway integration placeholder)
+app.post("/api/payments/create-session", async (_req, res) => {
+  // Payment feature disabled: return 410 Gone
+  return res
+    .status(410)
+    .json({ success: false, error: "Payments disabled in this build" });
+});
+
+// Webhook receiver (placeholder - ensure to configure raw body & signature verification in real impl)
+// Webhook receiver (Dodo) - parse raw body to verify signature
+app.post("/api/payments/webhook", async (_req, res) => {
+  // Payment webhooks disabled (payment system removed)
+  return res.status(410).json({ success: false, error: "Payments disabled" });
+});
+
+// Twilio status webhook (optional)
+app.post(
+  "/twilio-status",
+  express.urlencoded({ extended: false }),
+  (req, res) => {
+    try {
+      console.log("[twilio:status]", req.body); // body contains MessageStatus, MessageSid, etc.
+    } catch {}
+    res.sendStatus(200);
+  }
+);
+
+// Fetch a message by SID
+app.get("/twilio-message/:sid", async (req, res) => {
+  if (!twilioClient)
+    return res
+      .status(500)
+      .json({ success: false, error: "Twilio not configured" });
+  try {
+    const msg = await twilioClient.messages(req.params.sid).fetch();
+    return res.json({ success: true, message: msg });
+  } catch (e) {
+    return res
+      .status(500)
+      .json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Phone normalization logic (E.164). Previous version auto-assumed +91 which caused
+// false negatives for non-Indian numbers. New behavior:
+//  - Accept full international numbers starting with '+'
+//  - Optionally allow local numbers if DEFAULT_COUNTRY_CODE env is set (e.g. '+91')
+//  - Otherwise require user to supply '+' format
+function normalizePhone(raw) {
+  if (!raw) return { ok: false, reason: "Empty phone" };
+  const cleaned = String(raw)
+    .replace(/[^0-9+]/g, "")
+    .trim();
+  if (cleaned.startsWith("+")) {
+    const digits = cleaned.slice(1);
+    if (/^[0-9]{6,15}$/.test(digits)) return { ok: true, value: cleaned };
+    return {
+      ok: false,
+      reason: "Invalid E.164 format (expect +<country><number>)",
+    };
+  }
+  const digitsOnly = cleaned.replace(/^0+/, "");
+  const defaultCCRaw = process.env.DEFAULT_COUNTRY_CODE || "";
+  const defaultCC = defaultCCRaw
+    ? defaultCCRaw.startsWith("+")
+      ? defaultCCRaw
+      : "+" + defaultCCRaw.replace(/[^0-9]/g, "")
+    : null;
+  if (defaultCC && /^[0-9]{4,15}$/.test(digitsOnly)) {
+    return { ok: true, value: defaultCC + digitsOnly };
+  }
+  return {
+    ok: false,
+    reason:
+      "Provide full international number starting with + (e.g. +14155550123). Set DEFAULT_COUNTRY_CODE to allow local numbers.",
+  };
+}
+
+// WhatsApp Cloud API (Meta) simple text message endpoint
+// POST /send-whatsapp { accessToken, phoneNumberId, to, body }
+// (Legacy endpoint kept; internally updated for soft contact validation)
+app.post("/send-whatsapp", async (req, res) => {
+  const { to, body } = req.body || {};
+  const accessToken =
+    req.body?.accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId =
+    req.body?.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const debug = req.query.debug === "1" || req.body?.debug === true;
+  const validate = req.query.validate === "1" || req.body?.validate === true;
+  const rawSkip =
+    req.query.skipInvalid === "1" || req.body?.skipInvalid === true;
+  // Auto-skip invalid contacts unless explicitly disabled via env or skipInvalid=0
+  const defaultAutoSkip = (process.env.WA_DEFAULT_SKIP_INVALID || "1") !== "0";
+  const skipInvalid = rawSkip || (validate && defaultAutoSkip);
+  console.log(
+    `[wa:send-text:incoming] to=${to} validate=${validate} skipInvalid=${skipInvalid} debug=${debug}`
+  );
+  if (!accessToken || !phoneNumberId || !to || !body) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing required fields.",
+      fields: {
+        accessToken: !!accessToken,
+        phoneNumberId: !!phoneNumberId,
+        to: !!to,
+        body: !!body,
+      },
+    });
+  }
+  const norm = normalizePhone(to);
+  if (!norm.ok) {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid 'to' number: ${norm.reason}`,
+      original: to,
+    });
+  }
+  const waTo = norm.value.replace(/^\+/, "");
+  let contactCheck = null;
+  let contactStatus = "unknown";
+  let validationWarning = null;
+  if (validate) {
+    try {
+      console.log(`[wa:contact-check] to=${waTo}`);
+      const contactResp = await fetch(
+        `https://graph.facebook.com/v22.0/${encodeURIComponent(
+          String(phoneNumberId)
+        )}/contacts`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            blocking: "wait",
+            contacts: [waTo],
+            force_check: true,
+          }),
+        }
+      );
+      contactCheck = await contactResp.json().catch(() => ({}));
+      contactStatus = contactCheck?.contacts?.[0]?.status || "unknown"; // valid | invalid | unknown
+      addWaHistory({
+        type: "contact-check",
+        direction: "out",
+        to: waTo,
+        payload: contactCheck,
+        status: contactStatus,
+      });
+      console.log(
+        `[wa:contact-check:result] to=${waTo} status=${contactStatus}`
+      );
+      if (contactStatus !== "valid") {
+        if (!skipInvalid) {
+          validationWarning =
+            "Contact reported as invalid. Blocked because skipInvalid not enabled.";
+          return res.status(400).json({
+            success: false,
+            error: "Recipient appears not to be a WhatsApp user",
+            contact_status: contactStatus,
+            contact: contactCheck,
+          });
+        } else {
+          validationWarning =
+            "Contact reported as invalid by /contacts; proceeding anyway (auto-skip).";
+          console.warn(
+            `[wa:contact-check:warning] proceeding despite status=${contactStatus} (skipInvalid)`
+          );
+        }
+      }
+    } catch (e) {
+      validationWarning = `Contact validation failed: ${e.message || e}`;
+      console.warn("[wa:contact-check:error] soft-fail", e.message || e);
+    }
+  }
+  try {
+    const url = `https://graph.facebook.com/v22.0/${encodeURIComponent(
+      String(phoneNumberId)
+    )}/messages`;
+    const payload = {
+      messaging_product: "whatsapp",
+      to: waTo,
+      type: "text",
+      text: { body: String(body) },
+    };
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    console.log(
+      `[wa:send-text:response] httpStatus=${
+        resp.status
+      } hasError=${!resp.ok} messageId=${data?.messages?.[0]?.id || "n/a"}`
+    );
+    if (!resp.ok) {
+      const err = data?.error || {};
+      let hint;
+      if (err.code === 190) {
+        const sc = err.error_subcode;
+        if (sc === 463) hint = "Access token expired";
+        else if (sc === 467) hint = "Invalid access token";
+      } else if (resp.status === 404) {
+        hint = "Phone Number ID not found or token lacks permission";
+      }
+      addWaHistory({
+        type: "text",
+        direction: "out",
+        to: waTo,
+        status: "error",
+        errors: err,
+        hint,
+        payload: debug ? { request: payload, response: data } : undefined,
+      });
+      return res.status(resp.status).json({
+        success: false,
+        error: err.message || "WhatsApp API error",
+        code: err.code,
+        subcode: err.error_subcode,
+        hint,
+        contact_status: contactStatus,
+        ...(debug ? { raw: data, contact: contactCheck } : {}),
+      });
+    }
+    const messageId = data?.messages?.[0]?.id;
+    addWaHistory({
+      id: messageId,
+      type: "text",
+      direction: "out",
+      to: waTo,
+      status: "accepted",
+      payload: debug ? data : undefined,
+      hint: skipInvalid ? "skipInvalid" : validate ? "validated" : undefined,
+    });
+    return res.json({
+      success: true,
+      id: messageId,
+      to: waTo,
+      status: "accepted",
+      contact_status: contactStatus,
+      ...(validationWarning ? { validationWarning } : {}),
+      ...(debug
+        ? { raw: data, contact: contactCheck, normalized: norm.value }
+        : {}),
+    });
+  } catch (e) {
+    return res
+      .status(500)
+      .json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// ---------------- WHATSAPP REFACTORED SENDING (NEW ENDPOINTS) ----------------
+// New simplified endpoints: /wa/send-text and /wa/send-template (non-breaking original kept above)
+const WA_GRAPH_VERSION = "v22.0";
+
+function buildWaHint(err, httpStatus) {
+  if (!err) return undefined;
+  if (err.code === 190) {
+    if (err.error_subcode === 463) return "Access token expired";
+    if (err.error_subcode === 467) return "Invalid access token";
+    return "Authentication error";
+  }
+  if (httpStatus === 404) return "Phone Number ID not found or no permission";
+  if (err?.error_data?.details?.match?.(/24.?hour/i))
+    return "Outside 24h window – use a template to initiate";
+  return undefined;
+}
+
+async function waContactCheck({ phoneNumberId, accessToken, waTo }) {
+  try {
+    const resp = await fetch(
+      `https://graph.facebook.com/${WA_GRAPH_VERSION}/${encodeURIComponent(
+        String(phoneNumberId)
+      )}/contacts`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          blocking: "wait",
+          contacts: [waTo],
+          force_check: true,
+        }),
+      }
+    );
+    const data = await resp.json().catch(() => ({}));
+    addWaHistory({
+      type: "contact-check",
+      direction: "out",
+      to: waTo,
+      payload: data,
+      status:
+        data?.contacts?.[0]?.status || (data?.error ? "error" : "unknown"),
+    });
+    return data;
+  } catch (e) {
+    addWaHistory({
+      type: "contact-check",
+      direction: "out",
+      to: waTo,
+      status: "exception",
+      errors: { message: e.message || String(e) },
+    });
+    return null;
+  }
+}
+
+async function waSend({ phoneNumberId, accessToken, payload }) {
+  const url = `https://graph.facebook.com/${WA_GRAPH_VERSION}/${encodeURIComponent(
+    String(phoneNumberId)
+  )}/messages`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await resp.json().catch(() => ({}));
+  return { resp, data };
+}
+
+// Twilio WhatsApp: send a text message via Twilio (from/to must be WhatsApp-enabled)
+// POST /wa/send-text { from, to, body, accountSid?, authToken?, statusCallback? }
+app.post("/wa/send-text", async (req, res) => {
+  const b = req.body || {};
+  const q = req.query || {};
+  const from = b.from || q.from;
+  const to = b.to || q.to;
+  const body = b.body || q.body;
+  const statusCallback = b.statusCallback || q.statusCallback;
+  if (!from || !to || !body) {
+    const missing = [
+      !from ? "from" : null,
+      !to ? "to" : null,
+      !body ? "body" : null,
+    ].filter(Boolean);
+    return res.status(400).json({
+      success: false,
+      error: `Missing required fields: ${missing.join(", ")}`,
+      hint: missing.includes("from")
+        ? "Provide a WhatsApp-enabled Twilio number as 'from' (e.g., +14155238886 for sandbox)."
+        : undefined,
+    });
+  }
+  const client = getTwilioClientFromReq(req);
+  if (!client) {
+    return res.status(500).json({
+      success: false,
+      error:
+        "Twilio not configured. Provide accountSid/authToken in body or set TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN envs.",
+    });
+  }
+  try {
+    console.log("[wa:twilio:send]", {
+      from: String(from || "").slice(0, 6) + "…",
+      to: String(to || "").slice(0, 6) + "…",
+      len: (body ? String(body) : "").length,
+    });
+    const fromAddr = toWhatsAppAddress(from);
+    const toAddr = toWhatsAppAddress(to);
+    const msg = await client.messages.create({
+      from: fromAddr,
+      to: toAddr,
+      body: String(body),
+      ...(statusCallback ? { statusCallback } : {}),
+    });
+    addWaHistory({
+      id: msg.sid,
+      type: "text",
+      direction: "out",
+      to: toAddr.replace(/^whatsapp:/i, ""),
+      status: msg.status || "queued",
+    });
+    return res.json({
+      success: true,
+      id: msg.sid,
+      to: toAddr.replace(/^whatsapp:/i, ""),
+      status: msg.status || "queued",
+    });
+  } catch (e) {
+    const errMsg = e?.message || String(e);
+    const code = e?.code;
+    let hint;
+    if (code === 63018)
+      hint = "The 'from' number is not WhatsApp-enabled in Twilio.";
+    if (code === 63015)
+      hint =
+        "The 'to' number may not be a valid WhatsApp user or is not opted-in.";
+    return res
+      .status(500)
+      .json({ success: false, error: errMsg, code, ...(hint ? { hint } : {}) });
+  }
+});
+
+// Deprecated: Meta WhatsApp Cloud API template sending
+app.post("/wa/send-template", async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error:
+      "WhatsApp Cloud API disabled. Use Twilio WhatsApp via /wa/send-text with a pre-approved template body if required.",
+  });
+});
+
+// Convenience endpoint to send the standard hello_world template, matching your curl example
+// POST /wa/send-hello-world { accessToken?, phoneNumberId?, to }
+app.post("/wa/send-hello-world", async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error:
+      "WhatsApp Cloud API disabled. Use Twilio WhatsApp via /wa/send-text.",
+  });
+});
+
+app.post("/send-whatsapp-template", async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    error:
+      "WhatsApp Cloud API disabled. Use Twilio WhatsApp via /wa/send-text.",
+  });
+});
+/*
+  const accessToken =
+    req.body?.accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId =
+    req.body?.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const { to, template } = req.body || {};
+  const debug = req.query.debug === "1" || req.body?.debug === true;
+  const doContact =
+    req.query.contact === "1" ||
+    req.query.validate === "1" ||
+    req.body?.validate === true;
+  console.log(
+    `[wa:send-template:new] to=${to} template=${template?.name} contactCheck=${doContact} debug=${debug}`
+  );
+  if (
+    !accessToken ||
+    !phoneNumberId ||
+    !to ||
+    !template?.name ||
+    !template?.languageCode
+  ) {
+    return res
+      .status(400)
+      .json({ success: false, error: "Missing required fields" });
+  }
+  const norm = normalizePhone(to);
+  if (!norm.ok)
+    return res.status(400).json({ success: false, error: norm.reason });
+  const waTo = norm.value.replace(/^\+/, "");
+  let contactData = null;
+  if (doContact)
+    contactData = await whatsappContactCheck({
+      phoneNumberId,
+      accessToken,
+      waTo,
+    });
+
+  const tplPayload = {
+    messaging_product: "whatsapp",
+    to: waTo,
+    type: "template",
+    template: {
+      name: template.name,
+      language: { code: template.languageCode },
+      ...(template.components ? { components: template.components } : {}),
+    },
+  };
+  try {
+    const resp = await fetch(
+      `https://graph.facebook.com/${WA_GRAPH_VERSION}/${encodeURIComponent(
+        String(phoneNumberId)
+      )}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(tplPayload),
+      }
+    );
+    const data = await resp.json().catch(() => ({}));
+    console.log(
+      `[wa:send-template:resp] http=${resp.status} ok=${resp.ok} id=${
+        data?.messages?.[0]?.id || "n/a"
+      }`
+    );
+    if (!resp.ok) {
+      const err = data?.error || {};
+      const hint = buildWaHint(err, resp.status);
+      addWaHistory({
+        type: "template",
+        direction: "out",
+        to: waTo,
+        status: "error",
+        errors: err,
+        payload: debug ? { request: tplPayload, response: data } : undefined,
+        hint,
+      });
+      return res.status(resp.status).json({
+        success: false,
+        error: err.message || "WhatsApp API error",
+        code: err.code,
+        subcode: err.error_subcode,
+        hint,
+        ...(debug ? { raw: data, contact: contactData } : {}),
+      });
+    }
+    const messageId = data?.messages?.[0]?.id;
+    addWaHistory({
+      id: messageId,
+      type: "template",
+      direction: "out",
+      to: waTo,
+      status: "accepted",
+      payload: debug ? data : undefined,
+      hint: doContact ? "contact-checked" : undefined,
+    });
+    return res.json({
+      success: true,
+      id: messageId,
+      to: waTo,
+      status: "accepted",
+      ...(debug ? { raw: data, contact: contactData } : {}),
+    });
+  } catch (e) {
+    addWaHistory({
+      type: "template",
+      direction: "out",
+      to: waTo,
+      status: "exception",
+      errors: { message: e.message || String(e) },
+    });
+    return res
+      .status(500)
+      .json({ success: false, error: e.message || String(e) });
+  }
+*/
+
+// Verify WhatsApp phone number id
+app.get("/wa-verify", async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: "WhatsApp Cloud API disabled. Not applicable under Twilio.",
+  });
+});
+
+// Check if a phone number is a valid WhatsApp user
+app.post("/wa-check-contact", async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error:
+      "WhatsApp Cloud API contact-check disabled. Under Twilio, consider using opt-in lists or attempt send and observe status callbacks.",
+  });
+});
+
+// Token quick check
+app.get("/wa-token-check", async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: "WhatsApp Cloud API token checks disabled under Twilio.",
+  });
+});
+
+// Webhook endpoints for delivery & inbound
+// Meta webhooks disabled; use /twilio-status for Twilio callbacks
+app.get("/wa-webhook", (_req, res) => res.status(410).send("Gone"));
+app.post("/wa-webhook", (_req, res) => res.status(410).send("Gone"));
+
+// WhatsApp history endpoint
+app.get("/wa-history", (req, res) => {
+  try {
+    let history = [...waHistory].reverse(); // newest first
+    const { to, limit } = req.query;
+    if (to) {
+      const norm = normalizePhone(String(to));
+      const raw = norm.ok
+        ? norm.value.replace(/^\+/, "")
+        : String(to).replace(/[^0-9]/g, "");
+      history = history.filter((h) => h.to === raw);
+    }
+    const lim = Number(limit) || 0;
+    if (lim > 0) history = history.slice(0, lim);
+    res.json({ success: true, count: history.length, history });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Health endpoints
+const healthHandler = (req, res) => {
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    sms: "enabled",
+    whatsapp: twilioClient ? "twilio" : "twilio:configured:false",
+  });
+};
+app.get("/health", healthHandler);
+
+// -------------------- AUTH + CLIENT/ADMIN --------------------
+// Minimal email/password auth stored in Firestore clients collection.
+// For production, prefer Firebase Auth or a managed auth provider.
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-do-not-use";
+
+// Helper: verify Firebase ID token and ensure the user is an admin/superadmin
+async function verifyFirebaseAdmin(req) {
+  try {
+    if (!firebaseAdmin)
+      return { ok: false, error: "Firebase Admin SDK not available" };
+    const authz = req.headers.authorization || req.headers.Authorization || "";
+    if (!authz.startsWith("Bearer "))
+      return { ok: false, error: "Missing Bearer token" };
+    const idToken = authz.slice(7).trim();
+    if (!idToken) return { ok: false, error: "Empty Bearer token" };
+
+    // Development helper: accept demo token on localhost or when NODE_ENV !== 'production'
+    // CHECK THIS FIRST before attempting Firebase verification
+    if (idToken === "DEMO_ADMIN_TOKEN_LOCALHOST") {
+      const isDev = (process.env.NODE_ENV || "development") !== "production";
+      const host = req.headers.host || req.hostname || "";
+      const isLocalRequest =
+        host.includes("localhost") || host.includes("127.0.0.1");
+
+      if (isDev && isLocalRequest) {
+        // Create a synthetic admin user object (uid 'demo_admin')
+        const uid = "demo_admin";
+        const user = { id: uid, email: "admin@demo.com", role: "admin" };
+        console.log("[demo-admin] Demo token accepted for localhost");
+        return { ok: true, uid, decoded: { uid, demo: true }, user };
+      }
+    }
+
+    const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+    const uid = decoded.uid || decoded.sub;
+    if (!uid) return { ok: false, error: "Invalid token (no uid)" };
+    // If token contains a custom admin claim set via auth.setCustomUserClaims,
+    // accept it immediately (Admin SDK has verified the token signature).
+    // This allows fast provisioning via admin.createUser + setCustomUserClaims.
+    if (decoded && (decoded.admin === true || decoded.admin === "true")) {
+      const user = { id: uid, email: decoded.email || null, role: "admin" };
+      return { ok: true, uid, decoded, user };
+    }
+    if (!firestoreEnabled)
+      return { ok: false, error: "Firestore not configured" };
+    const user = await dbV2.getUserById(uid);
+    const role = String(user?.role || "").toLowerCase();
+    if (role === "admin" || role === "superadmin") {
+      return { ok: true, uid, decoded, user };
+    }
+    return { ok: false, error: "Insufficient privileges (need admin role)" };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+app.post("/auth/signup", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const { name, email, password, tenantKey } = req.body || {};
+    if (!name || !email || !password || !tenantKey) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing name, email, password, or tenantKey",
+      });
+    }
+    const existing = await db.getClientByEmail(email);
+    if (existing)
+      return res
+        .status(409)
+        .json({ success: false, error: "Email already registered" });
+    const hashed = await bcrypt.hash(String(password), 10);
+    const client = await db.upsertClient({
+      name,
+      email,
+      tenantKey,
+      activityStatus: "active",
+    });
+    await db.setClientPasswordHash(client.id, email, hashed);
+    // issue token
+    const token = jwt.sign(
+      { sub: client.id, role: "client", tenantKey },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+    res.json({ success: true, token, client });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+app.post("/auth/login", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    // Google sign-in path: Authorization: Bearer <Firebase ID token>
+    const authz = req.headers.authorization || "";
+    if (authz.startsWith("Bearer ") && firebaseAdmin) {
+      try {
+        const idToken = authz.slice(7);
+        console.log(
+          "[auth:google] Verifying token for project:",
+          firebaseProjectId || "loading..."
+        );
+        const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+        console.log(
+          "[auth:google] Token verified successfully for user:",
+          decoded.email
+        );
+        const email = decoded.email;
+        if (!email)
+          return res
+            .status(400)
+            .json({ success: false, error: "Google token missing email" });
+
+        // Check if user exists in new schema
+        let user = await dbV2.getUserById(decoded.uid);
+        let companyId;
+
+        if (!user) {
+          // First-time login: create company and user
+          console.log("[auth:google] First login - creating company and user");
+          const company = await dbV2.createCompany({
+            companyName: decoded.name || email.split("@")[0],
+            adminId: decoded.uid,
+            email: email,
+          });
+          companyId = company.companyId;
+
+          user = await dbV2.upsertUser({
+            uid: decoded.uid,
+            email: email,
+            name: decoded.name || email.split("@")[0],
+            role: "ADMIN", // First user in company is admin
+            companyId: companyId,
+          });
+        } else {
+          // Existing user: update lastLogin
+          companyId = user.companyId;
+          await dbV2.upsertUser({
+            uid: decoded.uid,
+            email: email,
+            name: user.name,
+            role: user.role,
+            companyId: companyId,
+          });
+        }
+
+        const token = jwt.sign(
+          { sub: decoded.uid, role: user.role, companyId },
+          JWT_SECRET,
+          { expiresIn: "7d" }
+        );
+        return res.json({ success: true, token, user, companyId });
+      } catch (e) {
+        console.error("[auth:google:error]", e.code, e.message || e);
+        return res.status(401).json({
+          success: false,
+          error: "Invalid Google token",
+          details: e.message,
+        });
+      }
+    }
+    const { email, password } = req.body || {};
+    if (!email || !password)
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing email or password" });
+    const found = await db.getClientAuthByEmail(email);
+    if (!found?.client || !found?.auth)
+      return res
+        .status(401)
+        .json({ success: false, error: "Invalid credentials" });
+    const ok = await bcrypt.compare(
+      String(password),
+      String(found.auth.passwordHash || "")
+    );
+    if (!ok)
+      return res
+        .status(401)
+        .json({ success: false, error: "Invalid credentials" });
+    const token = jwt.sign(
+      {
+        sub: found.client.id,
+        role: "client",
+        tenantKey: found.client.tenantKey,
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+    res.json({ success: true, token, client: found.client });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Return current user/company info using Firebase ID token or app token
+app.get("/auth/me", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const authz = req.headers.authorization || "";
+    // Prefer Firebase ID token
+    if (authz.startsWith("Bearer ") && firebaseAdmin) {
+      try {
+        const idToken = authz.slice(7);
+        const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+        const user = await dbV2.getUserById(decoded.uid);
+        if (!user)
+          return res
+            .status(404)
+            .json({ success: false, error: "User not found" });
+        return res.json({
+          success: true,
+          user,
+          companyId: user.companyId || null,
+        });
+      } catch (e) {
+        return res.status(401).json({ success: false, error: "Invalid token" });
+      }
+    }
+    // Fallback to app JWT
+    if (authz.startsWith("App ")) {
+      try {
+        const token = authz.slice(4);
+        const decoded = jwt.verify(token, JWT_SECRET);
+        // On legacy path we don't have uid, just return minimal info
+        return res.json({
+          success: true,
+          user: { role: decoded.role },
+          companyId: decoded.companyId || decoded.tenantKey || null,
+        });
+      } catch (e) {
+        return res
+          .status(401)
+          .json({ success: false, error: "Invalid app token" });
+      }
+    }
+    return res
+      .status(401)
+      .json({ success: false, error: "Missing Authorization" });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Admin global stats
+app.get("/admin/global-stats", async (req, res) => {
+  try {
+    const v = await verifyFirebaseAdmin(req);
+    if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const stats = await dbV2.getGlobalStats();
+    res.json({ success: true, stats });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Admin: read global Twilio credentials
+app.get("/admin/credentials", async (req, res) => {
+  try {
+    const v = await verifyFirebaseAdmin(req);
+    if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const settings = await dbV2.getGlobalAdminSettings();
+    // Return both Twilio credentials and feedback URLs
+    res.json({
+      success: true,
+      credentials: {
+        ...(settings?.twilio || {}),
+        ...(settings?.feedbackUrls || {}),
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Public: get admin global credentials (for clients to use as fallback)
+// No authentication required - this allows all clients to auto-use admin Twilio credentials
+app.get("/api/admin/global-credentials", async (req, res) => {
+  try {
+    console.log("[api:admin:global-credentials] 🔍 Request received");
+
+    if (!firestoreEnabled) {
+      console.log("[api:admin:global-credentials] ❌ Firestore not enabled");
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    }
+
+    console.log(
+      "[api:admin:global-credentials] ✅ Firestore enabled, fetching settings..."
+    );
+    const settings = await dbV2.getGlobalAdminSettings();
+
+    console.log(
+      "[api:admin:global-credentials] 📦 Raw settings from DB:",
+      JSON.stringify(settings, null, 2)
+    );
+    console.log(
+      "[api:admin:global-credentials] 🔐 Twilio object:",
+      settings?.twilio
+    );
+    console.log(
+      "[api:admin:global-credentials] 📞 AccountSid:",
+      settings?.twilio?.accountSid
+    );
+    console.log(
+      "[api:admin:global-credentials] 🔑 AuthToken:",
+      settings?.twilio?.authToken ? "EXISTS" : "MISSING"
+    );
+    console.log(
+      "[api:admin:global-credentials] 📱 PhoneNumber:",
+      settings?.twilio?.phoneNumber
+    );
+
+    // Return only Twilio credentials (not feedback URLs for security)
+    const response = {
+      success: true,
+      credentials: {
+        accountSid: settings?.twilio?.accountSid || "",
+        authToken: settings?.twilio?.authToken || "",
+        phoneNumber: settings?.twilio?.phoneNumber || "",
+        messagingServiceSid: settings?.twilio?.messagingServiceSid || "",
+      },
+    };
+
+    console.log(
+      "[api:admin:global-credentials] 📤 Sending response:",
+      JSON.stringify(response, null, 2)
+    );
+    res.json(response);
+  } catch (e) {
+    console.error("[api:admin:global-credentials] ❌ Error:", e);
+    console.error("[api:admin:global-credentials] ❌ Error stack:", e.stack);
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Admin: save global Twilio credentials
+app.post("/admin/credentials", async (req, res) => {
+  try {
+    const v = await verifyFirebaseAdmin(req);
+    if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const { accountSid, authToken, phoneNumber, messagingServiceSid } =
+      req.body || {};
+    const settings = await dbV2.updateGlobalAdminSettings({
+      twilio: { accountSid, authToken, phoneNumber, messagingServiceSid },
+    });
+    res.json({ success: true, settings });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Admin: save global feedback URL and SMS server port (Requirement 2)
+app.post("/admin/feedback-urls", async (req, res) => {
+  try {
+    const v = await verifyFirebaseAdmin(req);
+    if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const { feedbackPageUrl, smsServerPort } = req.body || {};
+    const settings = await dbV2.updateGlobalAdminSettings({
+      feedbackUrls: { feedbackPageUrl },
+      serverConfig: { smsServerPort: smsServerPort || "3002" },
+    });
+    res.json({ success: true, settings });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Admin: get server configuration (Requirement 2)
+app.get("/admin/server-config", async (req, res) => {
+  try {
+    // Allow read without strict admin auth for settings page display
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const settings = await dbV2.getGlobalAdminSettings();
+    const config = settings?.serverConfig || { smsServerPort: "3002" };
+    res.json({ success: true, config });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Admin: list all users with their companies (original client logins)
+app.get("/admin/users", async (req, res) => {
+  try {
+    const v = await verifyFirebaseAdmin(req);
+    if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const users = await dbV2.getAllUsersWithCompanies();
+
+    // If Firebase Admin SDK is available, enrich users with canonical Firebase email/login
+    if (firebaseAdmin && Array.isArray(users) && users.length > 0) {
+      try {
+        // Collect UIDs
+        const uids = users.map((u) => u.uid).filter(Boolean);
+        if (uids.length > 0) {
+          const fetched = await Promise.all(
+            uids.map(async (uid) => {
+              try {
+                const userRecord = await firebaseAdmin.auth().getUser(uid);
+                return {
+                  uid,
+                  email: userRecord.email,
+                  phone: userRecord.phoneNumber,
+                };
+              } catch (e) {
+                return { uid, email: null, phone: null };
+              }
+            })
+          );
+          const byUid = {};
+          for (const f of fetched) byUid[f.uid] = f;
+          // Merge
+          const merged = users.map((u) => ({
+            ...u,
+            loginEmail: u.email || (u.uid && byUid[u.uid]?.email) || null,
+            firebasePhone: u.phone || (u.uid && byUid[u.uid]?.phone) || null,
+          }));
+          return res.json({ success: true, users: merged });
+        }
+      } catch (e) {
+        console.warn(
+          "[admin:users] firebase enrichment failed",
+          e.message || e
+        );
+      }
+    }
+
+    res.json({ success: true, users });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// NEW: Get ALL Firebase Authentication users (actual login accounts)
+app.get("/admin/firebase-users", async (req, res) => {
+  try {
+    const v = await verifyFirebaseAdmin(req);
+    if (!v.ok) return res.status(401).json({ success: false, error: v.error });
+
+    if (!firebaseAdmin) {
+      return res.status(503).json({
+        success: false,
+        error: "Firebase Admin SDK not configured",
+      });
+    }
+
+    // List all Firebase Auth users
+    const allUsers = [];
+    let pageToken;
+
+    try {
+      do {
+        const listUsersResult = await firebaseAdmin
+          .auth()
+          .listUsers(1000, pageToken);
+        listUsersResult.users.forEach((userRecord) => {
+          allUsers.push({
+            uid: userRecord.uid,
+            email: userRecord.email || null,
+            phoneNumber: userRecord.phoneNumber || null,
+            displayName: userRecord.displayName || null,
+            photoURL: userRecord.photoURL || null,
+            disabled: userRecord.disabled || false,
+            emailVerified: userRecord.emailVerified || false,
+            createdAt: userRecord.metadata.creationTime,
+            lastSignInAt: userRecord.metadata.lastSignInTime,
+            providerData: userRecord.providerData || [],
+          });
+        });
+        pageToken = listUsersResult.pageToken;
+      } while (pageToken);
+
+      // Try to enrich with Firestore company data if available
+      if (firestoreEnabled && dbV2) {
+        try {
+          const firestoreUsers = await dbV2.getAllUsersWithCompanies();
+          const firestoreByUid = {};
+          for (const fsu of firestoreUsers) {
+            if (fsu.uid) firestoreByUid[fsu.uid] = fsu;
+          }
+
+          // Merge with profile data included
+          const enriched = allUsers.map((u) => ({
+            ...u,
+            company: firestoreByUid[u.uid]?.company || null,
+            firestoreEmail: firestoreByUid[u.uid]?.email || null,
+            role: firestoreByUid[u.uid]?.role || "user",
+            profile: firestoreByUid[u.uid]?.profile || null,
+          }));
+
+          return res.json({ success: true, users: enriched });
+        } catch (enrichErr) {
+          console.warn(
+            "[admin:firebase-users] Firestore enrichment failed:",
+            enrichErr.message
+          );
+        }
+      }
+
+      res.json({ success: true, users: allUsers });
+    } catch (authError) {
+      console.error("[admin:firebase-users] Auth listing failed:", authError);
+      res.status(500).json({
+        success: false,
+        error: `Failed to list users: ${authError.message}`,
+      });
+    }
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Dashboard stats for client (using old clients collection structure)
+app.get("/api/dashboard/stats", async (req, res) => {
+  try {
+    if (!firestoreEnabled) {
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    }
+
+    const companyId = String(req.query.companyId || "").trim();
+    if (!companyId) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing companyId" });
+    }
+
+    const firestore = firebaseAdmin.firestore();
+
+    // Load or create company (legacy helper)
+    let company = await dbV2.getCompanyById(companyId);
+    if (!company) {
+      console.log(
+        `[dashboard/stats] Company ${companyId} not found, creating...`
+      );
+      try {
+        const newCompany = await dbV2.createCompany({
+          companyName: "New Company",
+          adminId: "",
+          email: "",
+        });
+        company = newCompany || { companyId, companyName: "New Company" };
+      } catch (createErr) {
+        console.error("[dashboard/stats] Failed to create company:", createErr);
+        company = { companyId, companyName: "New Company", email: "" };
+      }
+    }
+
+    // PREFERRED: Read counts from consolidated dashboard/current document
+    const dashboardRef = firestore
+      .collection("clients")
+      .doc(companyId)
+      .collection("dashboard")
+      .doc("current");
+    const dashboardSnap = await dashboardRef.get();
+    let messageCount = 0;
+    let feedbackCount = 0;
+    let negative_feedback_count = 0; // Count of negative comments from Firebase
+    let avgRating = 0;
+    let sentimentCounts = { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0 };
+
+    if (dashboardSnap.exists) {
+      const data = dashboardSnap.data() || {};
+      messageCount = Number(data.message_count || 0);
+      feedbackCount = Number(data.feedback_count || 0);
+      negative_feedback_count = Number(data.negative_feedback_count || 0); // Read negative count from Firebase
+      // If we ever stored per-sentiment counts, compute derived sentiment counts from negative_comments or graph_data later.
+    } else {
+      // Fallback legacy computation (only runs once until dashboard is created by recordMessage / feedback submission)
+      console.log(
+        "[dashboard/stats] Dashboard doc missing; computing fallback counts."
+      );
+      // Count messages from messages collection (legacy) so existing data not lost.
+      const messagesSnap = await firestore
+        .collection("messages")
+        .where("companyId", "==", companyId)
+        .get();
+      messageCount = messagesSnap.size;
+
+      const feedbackSnap = await firestore
+        .collection("feedback")
+        .where("companyId", "==", companyId)
+        .get();
+      let totalRating = 0;
+      feedbackSnap.forEach((doc) => {
+        const fb = doc.data();
+        feedbackCount++;
+        if (typeof fb.rating === "number") totalRating += fb.rating;
+        const sentiment = (
+          fb.sentiment ||
+          fb.sentimentLabel ||
+          ""
+        ).toUpperCase();
+        if (sentiment === "POSITIVE") sentimentCounts.POSITIVE++;
+        else if (sentiment === "NEGATIVE") sentimentCounts.NEGATIVE++;
+        else sentimentCounts.NEUTRAL++;
+      });
+      avgRating = feedbackCount > 0 ? totalRating / feedbackCount : 0;
+    }
+
+    // Derive sentiment counts if dashboard has negative_comments array (treat others as neutral for now)
+    if (dashboardSnap.exists) {
+      const d = dashboardSnap.data() || {};
+      const negs = Array.isArray(d.negative_comments)
+        ? d.negative_comments
+        : [];
+      // We only explicitly track negative comments; other sentiments require querying feedback collection (optional optimization)
+      if (negs.length > 0) sentimentCounts.NEGATIVE = negs.length;
+      // Optionally attempt to reconstruct positive/neutral from graph_data if present
+      if (
+        d.graph_data &&
+        Array.isArray(d.graph_data.labels) &&
+        Array.isArray(d.graph_data.values)
+      ) {
+        try {
+          const labels = d.graph_data.labels;
+          const values = d.graph_data.values;
+          labels.forEach((lbl, idx) => {
+            const v = Number(values[idx] || 0);
+            if (String(lbl).toUpperCase() === "POSITIVE")
+              sentimentCounts.POSITIVE = v;
+            else if (String(lbl).toUpperCase() === "NEUTRAL")
+              sentimentCounts.NEUTRAL = v;
+            else if (String(lbl).toUpperCase() === "NEGATIVE")
+              sentimentCounts.NEGATIVE = v; // override if present
+          });
+        } catch {}
+      }
+    }
+
+    // Feedback URL from admin settings
+    let feedbackPageUrl = "";
+    try {
+      const adminSettings = await dbV2.getGlobalAdminSettings();
+      feedbackPageUrl = adminSettings?.feedbackUrls?.feedbackPageUrl || "";
+    } catch (adminErr) {
+      console.warn(
+        "[dashboard/stats] Failed to load admin feedback URL:",
+        adminErr
+      );
+    }
+
+    // Business name via profile override
+    let businessName = company.companyName || "";
+    try {
+      const profileDoc = await firestore
+        .collection("clients")
+        .doc(companyId)
+        .collection("profile")
+        .doc("main")
+        .get();
+      if (profileDoc.exists) {
+        const pd = profileDoc.data();
+        if (pd && pd.name) {
+          businessName = pd.name;
+          console.log(
+            `[dashboard/stats] ✅ Found client name from profile: ${businessName}`
+          );
+        }
+      }
+    } catch (profileErr) {
+      console.warn(
+        "[dashboard/stats] Could not fetch client profile, using company name:",
+        profileErr.message
+      );
+    }
+
+    console.log(
+      `[dashboard/stats] Stats for ${companyId}: messages=${messageCount}, feedback=${feedbackCount}`
+    );
+
+    res.json({
+      success: true,
+      stats: {
+        messageCount,
+        feedbackCount,
+        negative_feedback_count, // Include negative comment count in API response
+        avgRating: Math.round(avgRating * 10) / 10,
+        sentimentCounts,
+      },
+      profile: {
+        businessName,
+        feedbackPageLink: feedbackPageUrl,
+        googleReviewLink: company.googleReviewLink || "",
+        email: company.email || "",
+      },
+    });
+  } catch (e) {
+    console.error("[dashboard/stats] Error:", e);
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Get messages for Message Activity chart - NEW ENDPOINT
+app.get("/api/dashboard/messages", async (req, res) => {
+  try {
+    if (!firestoreEnabled) {
+      return res.status(503).json({
+        success: false,
+        error: "Database not configured",
+        messages: [],
+      });
+    }
+
+    const companyId = String(req.query.companyId || "").trim();
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing companyId",
+        messages: [],
+      });
+    }
+
+    console.log(
+      `[dashboard/messages] Fetching messages for company: ${companyId}`
+    );
+
+    // Initialize Firestore
+    const firestore = firebaseAdmin.firestore();
+
+    // Fetch all messages for this company from Firebase (without orderBy to avoid index requirement)
+    const messagesSnap = await firestore
+      .collection("messages")
+      .where("companyId", "==", companyId)
+      .get();
+
+    const messages = [];
+    messagesSnap.forEach((doc) => {
+      const data = doc.data();
+      messages.push({
+        id: doc.id,
+        timestamp: data.timestamp?.toDate?.() || new Date(data.timestamp),
+        messageType: data.messageType || "sms",
+        customerPhone: data.customerPhone || "",
+        customerName: data.customerName || "",
+        status: data.status || "sent",
+      });
+    });
+
+    console.log(`[dashboard/messages] Found ${messages.length} messages`);
+
+    res.json({
+      success: true,
+      messages: messages,
+      count: messages.length,
+    });
+  } catch (e) {
+    console.error("[dashboard/messages] Error:", e);
+    res.status(500).json({
+      success: false,
+      error: e.message || String(e),
+      messages: [],
+    });
+  }
+});
+
+// Get company credentials
+app.get("/api/company/credentials", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+
+    const companyId = String(req.query.companyId || "").trim();
+    if (!companyId)
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing companyId" });
+
+    const company = await dbV2.getCompanyById(companyId);
+    if (!company)
+      return res
+        .status(404)
+        .json({ success: false, error: "Company not found" });
+
+    // Return credentials (be careful with this in production - add auth!)
+    res.json({
+      success: true,
+      credentials: {
+        twilioAccountSid: company.twilioAccountSid || "",
+        twilioAuthToken: company.twilioAuthToken || "",
+        twilioPhoneNumber: company.twilioPhoneNumber || "",
+        twilioMessagingServiceSid: company.twilioMessagingServiceSid || "",
+        whatsappAccountSid: company.whatsappAccountSid || "",
+        whatsappAuthToken: company.whatsappAuthToken || "",
+        whatsappPhoneNumber: company.whatsappPhoneNumber || "",
+        feedbackUrl: company.feedbackUrl || "",
+        googleRedirectUrl: company.googleRedirectUrl || "",
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Update business name
+app.post("/api/company/update-name", express.json(), async (req, res) => {
+  try {
+    console.log("[api:update-name] Headers:", req.headers);
+    console.log("[api:update-name] Raw body:", req.body);
+
+    if (!firestoreEnabled) {
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    }
+
+    const companyId = String(req.body?.companyId || "").trim();
+    const businessName = String(req.body?.businessName || "").trim();
+
+    console.log("[api:update-name] Parsed:", {
+      companyId: companyId || "MISSING",
+      businessName: businessName || "MISSING",
+    });
+
+    if (!companyId) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing companyId" });
+    }
+    if (!businessName) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing businessName" });
+    }
+
+    const firestore = firebaseAdmin.firestore();
+
+    // Update client profile (merge, no read first)
+    await firestore
+      .collection("clients")
+      .doc(companyId)
+      .collection("profile")
+      .doc("main")
+      .set(
+        {
+          name: businessName,
+          updated_at: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+    // Also update companies collection
+    try {
+      await firestore.collection("companies").doc(companyId).set(
+        {
+          companyName: businessName,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (companiesErr) {
+      console.warn(
+        "[api:update-name] companies update skipped:",
+        companiesErr.message
+      );
+    }
+
+    console.log(`[api:update-name] ✅ Updated ${companyId} -> ${businessName}`);
+    return res.json({ success: true, businessName });
+  } catch (e) {
+    console.error("[api:update-name] Error:", e);
+    return res
+      .status(500)
+      .json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Save feedback and Google review links
+app.post("/api/company/links", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+
+    const companyId = String(req.body.companyId || "").trim();
+    const googleReviewLink = String(req.body.googleReviewLink || "").trim();
+
+    if (!companyId)
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing companyId" });
+
+    // Note: feedbackPageLink removed - managed in admin global settings
+    // Only save Google Review URL per client
+
+    // Get Firestore instance
+    const firestore = firebaseAdmin.firestore();
+
+    // Save to OLD structure (clients collection) for backward compatibility
+    await firestore.collection("clients").doc(companyId).set(
+      {
+        google_review_link: googleReviewLink,
+        updated_at: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+
+    // Save to NEW V2 structure (companies collection)
+    await firestore.collection("companies").doc(companyId).set(
+      {
+        googleReviewLink: googleReviewLink,
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    console.log(`[api:links] Saved Google Review link for ${companyId}`);
+
+    res.json({
+      success: true,
+      message: "Google Review link saved successfully",
+      googleReviewLink,
+    });
+  } catch (e) {
+    console.error("[api:links] Error:", e);
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// REMOVED: WhatsApp tracking endpoint
+// We no longer track SMS/WhatsApp sends in messages collection.
+// Only negative feedback from customers is stored in messages collection.
+// This keeps the messages collection clean and focused on negative feedback only.
+
+// Save company credentials
+app.post("/api/company/credentials", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+
+    const companyId = String(req.body.companyId || "").trim();
+    if (!companyId)
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing companyId" });
+
+    const credentials = {
+      twilioAccountSid: req.body.twilioAccountSid || "",
+      twilioAuthToken: req.body.twilioAuthToken || "",
+      twilioPhoneNumber: req.body.twilioPhoneNumber || "",
+      twilioMessagingServiceSid: req.body.twilioMessagingServiceSid || "",
+      whatsappAccountSid: req.body.whatsappAccountSid || "",
+      whatsappAuthToken: req.body.whatsappAuthToken || "",
+      whatsappPhoneNumber: req.body.whatsappPhoneNumber || "",
+      feedbackUrl: req.body.feedbackUrl || "",
+      googleRedirectUrl: req.body.googleRedirectUrl || "",
+    };
+
+    await dbV2.updateCompanyCredentials(companyId, credentials);
+    console.log(
+      `[api:credentials] Updated credentials for company: ${companyId}`
+    );
+
+    // Return updated credentials to the client for UI refresh
+    const updated = await dbV2.getCompanyById(companyId);
+    res.json({
+      success: true,
+      message: "Credentials saved successfully",
+      credentials: {
+        twilioAccountSid: updated.twilioAccountSid || "",
+        twilioAuthToken: updated.twilioAuthToken || "",
+        twilioPhoneNumber: updated.twilioPhoneNumber || "",
+        twilioMessagingServiceSid: updated.twilioMessagingServiceSid || "",
+        whatsappAccountSid: updated.whatsappAccountSid || "",
+        whatsappAuthToken: updated.whatsappAuthToken || "",
+        whatsappPhoneNumber: updated.whatsappPhoneNumber || "",
+        feedbackUrl: updated.feedbackUrl || "",
+        googleRedirectUrl: updated.googleRedirectUrl || "",
+      },
+    });
+  } catch (e) {
+    console.error("[api:credentials:error]", e);
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// Update company profile (business name)
+app.post("/api/company/profile", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+
+    const companyId = String(req.body.companyId || "").trim();
+    if (!companyId)
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing companyId" });
+
+    const { companyName } = req.body;
+    if (!companyName)
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing companyName" });
+
+    await dbV2.updateCompanyCredentials(companyId, { companyName });
+    console.log(`[api:profile] Updated company name for: ${companyId}`);
+
+    res.json({
+      success: true,
+      message: "Profile updated successfully",
+    });
+  } catch (e) {
+    console.error("[api:profile:error]", e);
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+app.get("/tenant/stats", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+    const tenantKey = String(req.query.tenantKey || "").trim();
+    if (!tenantKey)
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing tenantKey" });
+    const stats = await db.getTenantStats(tenantKey);
+    res.json({ success: true, stats });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// ------------------------------------------------------------------
+// Simple Feedback Store (JSON file). Suitable for demos/small projects.
+// For production, replace with a proper database.
+// ------------------------------------------------------------------
+const FEEDBACK_STORE = path.resolve(process.cwd(), "feedback-store.json");
+function readFeedbackStore() {
+  try {
+    if (!fs.existsSync(FEEDBACK_STORE)) return [];
+    const raw = fs.readFileSync(FEEDBACK_STORE, "utf8");
+    const data = JSON.parse(raw);
+    if (Array.isArray(data)) return data;
+    return [];
+  } catch (e) {
+    console.warn("[feedback:store:read:error]", e.message || e);
+    return [];
+  }
+}
+function writeFeedbackStore(list) {
+  try {
+    fs.writeFileSync(FEEDBACK_STORE, JSON.stringify(list, null, 2), "utf8");
+    return true;
+  } catch (e) {
+    console.warn("[feedback:store:write:error]", e.message || e);
+    return false;
+  }
+}
+
+// POST /feedback → persist a feedback entry
+// body: { tenantKey: string, sentiment: 'positive'|'negative', text: string, phone?: string, rating?: number, customerId?: string, id?: string }
+// New DB-backed feedback endpoint (keeps same path for drop-in move). Falls back to file store when DB not enabled.
+app.post("/feedback", async (req, res) => {
+  // CRITICAL FIX: Manually collect body chunks if Express didn't parse it
+  // This handles Render.com proxy issues where body arrives but isn't parsed
+  let bodyData = req.body;
+
+  // If body is empty but we have a content-type header, manually read the stream
+  if (
+    (!bodyData || Object.keys(bodyData).length === 0) &&
+    req.headers["content-type"]?.includes("application/json")
+  ) {
+    console.log(
+      "[feedback:manual-parse] Body is empty, attempting manual stream read..."
+    );
+    try {
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      const rawBody = Buffer.concat(chunks).toString("utf8");
+      console.log(
+        `[feedback:manual-parse] Read ${rawBody.length} bytes from stream`
+      );
+      console.log(`[feedback:manual-parse] Raw: ${rawBody.substring(0, 200)}`);
+      if (rawBody.trim()) {
+        bodyData = JSON.parse(rawBody);
+        console.log(
+          "[feedback:manual-parse] ✅ Successfully parsed manual body"
+        );
+      }
+    } catch (parseErr) {
+      console.error("[feedback:manual-parse] ❌ Failed:", parseErr.message);
+    }
+  }
+
+  // Log everything about the request
+  console.log(`[feedback:request] ==================`);
+  console.log(`[feedback:request] Method: ${req.method}`);
+  console.log(
+    `[feedback:request] Content-Type: ${req.headers["content-type"]}`
+  );
+  console.log(`[feedback:request] Origin: ${req.headers.origin}`);
+  console.log(`[feedback:request] Body type: ${typeof bodyData}`);
+  console.log(
+    `[feedback:request] Body keys: ${
+      bodyData ? Object.keys(bodyData).join(", ") : "null"
+    }`
+  );
+  console.log(
+    `[feedback:request] Transfer-Encoding: ${
+      req.headers["transfer-encoding"] || "none"
+    }`
+  );
+  console.log(
+    `[feedback:request] Content-Length: ${
+      req.headers["content-length"] || "none"
+    }`
+  );
+
+  // Try to parse body if it's a string
+  let parsedBody = bodyData;
+  if (typeof bodyData === "string" && bodyData.trim()) {
+    try {
+      parsedBody = JSON.parse(bodyData);
+      console.log("[feedback:parse] Successfully parsed string body");
+    } catch (e) {
+      console.warn("[feedback:parse] Failed to parse body as JSON:", e.message);
+    }
+  }
+
+  // Log parsed body for debugging
+  try {
+    console.log(
+      "[feedback:parsedBody]",
+      parsedBody ? JSON.stringify(parsedBody).substring(0, 200) : "none"
+    );
+  } catch (e) {}
+
+  const b = parsedBody || {};
+  const tenantKey = String(b.tenantKey || "").trim();
+  const sentiment =
+    b.sentiment === "positive"
+      ? "positive"
+      : b.sentiment === "negative"
+      ? "negative"
+      : null;
+  // Accept both 'text' and 'comment' from clients
+  const text = (b.text ?? b.comment ?? "").toString();
+  const phone = b.phone ? String(b.phone) : undefined;
+  const rating = typeof b.rating === "number" ? b.rating : undefined;
+  const customerId = b.customerId ? String(b.customerId) : undefined;
+  // New: allow passing companyId so we can persist into the new dashboard-friendly schema
+  const companyId = b.companyId ? String(b.companyId) : undefined;
+
+  // DEBUG: Log all received data
+  console.log(`[feedback:received] ==================`);
+  console.log(`[feedback:received] tenantKey: ${tenantKey}`);
+  console.log(`[feedback:received] sentiment: ${sentiment}`);
+  console.log(`[feedback:received] companyId: ${companyId}`);
+  console.log(`[feedback:received] text: ${text?.substring(0, 50)}...`);
+  console.log(`[feedback:received] phone: ${phone}`);
+  console.log(`[feedback:received] rating: ${rating}`);
+  console.log(`[feedback:received] ==================`);
+  // Accept either tenantKey (legacy) OR companyId (v2). For positive feedback we require text;
+  // for negative feedback we allow empty text (privacy-first) as long as tenantKey/companyId present.
+  if (!tenantKey && !companyId) {
+    console.warn("[feedback:validation] Missing tenantKey AND companyId", {
+      body: b,
+    });
+    return res.status(400).json({
+      success: false,
+      error: "Missing tenantKey or companyId",
+      received: b,
+    });
+  }
+  if (!sentiment) {
+    console.warn("[feedback:validation] Missing sentiment", { body: b });
+    return res.status(400).json({
+      success: false,
+      error: "Missing or invalid sentiment (must be 'positive' or 'negative')",
+      received: b,
+    });
+  }
+  if (sentiment === "positive" && !text) {
+    console.warn("[feedback:validation] Missing text for positive feedback", {
+      body: b,
+    });
+    return res.status(400).json({
+      success: false,
+      error: "Missing text/comment for positive feedback",
+      received: b,
+    });
+  }
+  // Privacy: if negative, avoid storing raw text; store phone only or a reference
+  const payload = {
+    tenantKey,
+    sentiment,
+    phone,
+    rating,
+    customerId,
+  };
+  // Only add text for positive feedback (privacy for negative)
+  if (sentiment === "positive" && text) {
+    payload.text = String(text).slice(0, 5000);
+  }
+  if (firestoreEnabled) {
+    try {
+      // Always write legacy (tenantKey-based) record for backward compatibility
+      console.log("[feedback:db] 📝 Inserting legacy feedback entry...");
+      const legacyEntry = await db.insertFeedback(payload);
+      console.log("[feedback:db] ✅ Legacy entry inserted:", legacyEntry?.id);
+
+      // Also write into V2 schema if companyId is provided so dashboard stats include it
+      let v2Entry = null;
+      if (companyId) {
+        try {
+          console.log("[feedback:db] 📝 Inserting V2 feedback entry...");
+          v2Entry = await dbV2.insertFeedback({
+            companyId,
+            userId: null,
+            customerName: undefined,
+            customerPhone: phone || "",
+            rating: rating || undefined,
+            // Only store comment for positive to respect privacy
+            comment: sentiment === "positive" ? text : "",
+            sentiment,
+            source: "web",
+            isAnonymous: sentiment === "negative",
+          });
+        } catch (e) {
+          console.warn("[feedback:v2:insert:error]", e.message || e);
+        }
+      }
+
+      // NEW REQUIREMENT: Store ONLY negative feedback in clients/{clientId}/dashboard/current
+      // This is what will show in the client's "Negative Comments" section
+      if (sentiment === "negative" && companyId) {
+        console.log(
+          `[feedback:negative] 🔵 Starting negative comment storage for client ${companyId}`
+        );
+        try {
+          const firestore = firebaseAdmin.firestore();
+
+          // Create negative comment object with ID
+          const commentId = `comment_${Date.now()}_${Math.random()
+            .toString(36)
+            .substr(2, 9)}`;
+          const negativeCommentData = {
+            id: commentId,
+            companyId: companyId, // Client ID from feedback URL
+            customerPhone: phone || "Unknown",
+            customerName: "Customer", // We don't have name from feedback form
+            commentText: text, // The negative comment text
+            rating: rating || null,
+            sentiment: "negative",
+            source: "feedback_link", // Came from feedback link
+            status: "active",
+            createdAt: firebaseAdmin.firestore.Timestamp.now(),
+          };
+
+          console.log(
+            `[feedback:negative] 📝 Saving to clients/${companyId}/dashboard/current...`
+          );
+
+          // Update client dashboard in Firebase
+          const dashboardRef = firestore
+            .collection("clients")
+            .doc(companyId)
+            .collection("dashboard")
+            .doc("current");
+
+          const dashboardDoc = await dashboardRef.get();
+          if (!dashboardDoc.exists) {
+            // Initialize dashboard if it doesn't exist
+            await dashboardRef.set({
+              feedback_count: 1,
+              message_count: 0,
+              negative_feedback_count: 1,
+              negative_comments: [negativeCommentData], // Array of negative comments
+              graph_data: { labels: [], values: [] },
+              last_updated: firebaseAdmin.firestore.Timestamp.now(),
+            });
+            console.log(
+              `[feedback:negative] ✅ Created dashboard and stored negative comment for client ${companyId}`
+            );
+          } else {
+            // Add comment to array and increment counters
+            await dashboardRef.update({
+              negative_feedback_count:
+                firebaseAdmin.firestore.FieldValue.increment(1),
+              feedback_count: firebaseAdmin.firestore.FieldValue.increment(1),
+              negative_comments:
+                firebaseAdmin.firestore.FieldValue.arrayUnion(
+                  negativeCommentData
+                ),
+              last_updated: firebaseAdmin.firestore.Timestamp.now(),
+            });
+            console.log(
+              `[feedback:negative] ✅ Added negative comment to dashboard for client ${companyId}`
+            );
+          }
+          console.log(
+            `[dashboard:stats] ✅ Updated stats for client ${companyId}: "${text.substring(
+              0,
+              50
+            )}..."`
+          );
+
+          // -----------------------------------------------------------------
+          // NEW STORE: Per-phone negative comments collection
+          // Path: clients/{companyId}/negative_comments/{phoneId}
+          // phoneId is the numeric-only phone (fallback 'unknown'). We append timestamped
+          // entries to a comments array so future UI can show history grouped by phone.
+          // This does NOT replace the existing dashboard aggregate array; it complements it.
+          // -----------------------------------------------------------------
+          try {
+            const rawPhone = (phone || "unknown").toString();
+            const phoneId = rawPhone.replace(/[^+0-9]/g, "") || "unknown";
+            const phoneDocRef = firestore
+              .collection("clients")
+              .doc(companyId)
+              .collection("negative_comments")
+              .doc(phoneId);
+
+            await phoneDocRef.set(
+              {
+                phone: rawPhone,
+                updated_at: firebaseAdmin.firestore.Timestamp.now(),
+                count: firebaseAdmin.firestore.FieldValue.increment(1),
+                comments: firebaseAdmin.firestore.FieldValue.arrayUnion({
+                  id: negativeCommentData.id,
+                  text: negativeCommentData.commentText,
+                  rating: negativeCommentData.rating,
+                  createdAt: negativeCommentData.createdAt,
+                  source: negativeCommentData.source,
+                  status: negativeCommentData.status,
+                }),
+              },
+              { merge: true }
+            );
+            console.log(
+              `[feedback:negative] 📦 Stored per-phone doc clients/${companyId}/negative_comments/${phoneId}`
+            );
+          } catch (perPhoneErr) {
+            console.warn(
+              "[feedback:negative:per-phone:error]",
+              perPhoneErr.message || perPhoneErr
+            );
+          }
+        } catch (e) {
+          console.error("[feedback:negative:store:error] ❌ FULL ERROR:", e);
+          console.error(
+            "[feedback:negative:store:error] Error message:",
+            e.message
+          );
+          console.error(
+            "[feedback:negative:store:error] Error stack:",
+            e.stack
+          );
+        }
+      } else if (sentiment === "negative" && !companyId) {
+        console.warn(
+          `[feedback:negative] ⚠️ Negative feedback received but NO companyId provided!`
+        );
+        console.warn(
+          `[feedback:negative] ⚠️ tenantKey: ${tenantKey}, phone: ${phone}`
+        );
+        console.warn(
+          `[feedback:negative] ⚠️ This negative comment will NOT be stored in negative_comments collection`
+        );
+      } else if (sentiment === "positive" && companyId) {
+        // For positive feedback, only update feedback_count (not negative_feedback_count)
+        try {
+          const firestore = firebaseAdmin.firestore();
+          const dashboardRef = firestore
+            .collection("clients")
+            .doc(companyId)
+            .collection("dashboard")
+            .doc("current");
+
+          const dashboardDoc = await dashboardRef.get();
+          if (!dashboardDoc.exists()) {
+            await dashboardRef.set({
+              feedback_count: 1,
+              message_count: 0,
+              negative_feedback_count: 0,
+              negative_comments: [], // Initialize empty array for negative comments
+              graph_data: { labels: [], values: [] },
+              last_updated: firebaseAdmin.firestore.Timestamp.now(),
+            });
+          } else {
+            await dashboardRef.update({
+              feedback_count: firebaseAdmin.firestore.FieldValue.increment(1),
+              last_updated: firebaseAdmin.firestore.Timestamp.now(),
+            });
+          }
+          console.log(
+            `[dashboard:stats] ✅ Updated feedback count for client ${companyId}`
+          );
+        } catch (e) {
+          console.warn("[feedback:positive:dashboard:error]", e.message || e);
+        }
+      }
+      return res.json({ success: true, entry: legacyEntry, v2Entry });
+    } catch (e) {
+      console.error("[feedback:endpoint:error] ❌ CRITICAL ERROR:");
+      console.error("[feedback:endpoint:error] Message:", e.message);
+      console.error("[feedback:endpoint:error] Stack:", e.stack);
+      console.error("[feedback:endpoint:error] Full error:", e);
+      return res
+        .status(500)
+        .json({ success: false, error: e.message || String(e) });
+    }
+  } else {
+    const store = readFeedbackStore();
+    const entry = {
+      id: b.id || `fb_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      ...payload,
+      date: new Date().toISOString(),
+    };
+    store.push(entry);
+    const ok = writeFeedbackStore(store);
+    if (!ok)
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to persist feedback" });
+    return res.json({ success: true, entry });
+  }
+});
+
+// GET /feedback?tenantKey=...&sentiment=negative|positive&since=isoString
+app.get("/feedback", async (req, res) => {
+  // Support both tenantKey (legacy) and companyId (v2)
+  const tenantKey = String(req.query.tenantKey || "").trim();
+  const companyId = String(req.query.companyId || "").trim();
+
+  if (!tenantKey && !companyId)
+    return res
+      .status(400)
+      .json({ success: false, error: "Missing tenantKey or companyId" });
+
+  const sentiment =
+    req.query.sentiment === "positive" || req.query.sentiment === "negative"
+      ? req.query.sentiment
+      : undefined;
+  const since = req.query.since ? new Date(String(req.query.since)) : null;
+
+  if (firestoreEnabled) {
+    try {
+      // Use v2 API if companyId provided, otherwise legacy
+      if (companyId) {
+        const entries = await dbV2.getFeedbackByCompany(companyId, {
+          sentiment: sentiment,
+          since:
+            since && !isNaN(since.getTime()) ? since.toISOString() : undefined,
+        });
+        return res.json({ success: true, count: entries.length, entries });
+      } else {
+        const entries = await db.listFeedback(tenantKey, {
+          sentiment: sentiment,
+          since:
+            since && !isNaN(since.getTime()) ? since.toISOString() : undefined,
+        });
+        return res.json({ success: true, count: entries.length, entries });
+      }
+    } catch (e) {
+      console.error("[feedback:get:error]", e);
+      return res
+        .status(500)
+        .json({ success: false, error: e.message || String(e) });
+    }
+  } else {
+    const list = readFeedbackStore().filter((e) => e.tenantKey === tenantKey);
+    const filtered = list.filter((e) => {
+      if (sentiment && e.sentiment !== sentiment) return false;
+      if (since && !isNaN(since.getTime())) {
+        const d = new Date(e.date);
+        if (d < since) return false;
+      }
+      return true;
+    });
+    // newest first
+    filtered.sort((a, b) => +new Date(b.date) - +new Date(a.date));
+    res.json({ success: true, count: filtered.length, entries: filtered });
+  }
+});
+
+// DELETE /feedback?tenantKey=...&sentiment=negative|positive
+// Purge feedback entries for a tenant (optionally filter by sentiment)
+app.delete("/feedback", async (req, res) => {
+  const tenantKey = String(req.query.tenantKey || "").trim();
+  if (!tenantKey)
+    return res.status(400).json({ success: false, error: "Missing tenantKey" });
+  const sentiment =
+    req.query.sentiment === "positive" || req.query.sentiment === "negative"
+      ? req.query.sentiment
+      : undefined;
+  if (firestoreEnabled) {
+    try {
+      const removed = await db.deleteFeedbackForTenant(tenantKey, sentiment);
+      return res.json({ success: true, removed });
+    } catch (e) {
+      return res
+        .status(500)
+        .json({ success: false, error: e.message || String(e) });
+    }
+  } else {
+    const store = readFeedbackStore();
+    const before = store.length;
+    const kept = store.filter(
+      (e) =>
+        !(
+          e.tenantKey === tenantKey &&
+          (!sentiment || e.sentiment === sentiment)
+        )
+    );
+    const removed = before - kept.length;
+    const ok = writeFeedbackStore(kept);
+    if (!ok)
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to update feedback store" });
+    return res.json({ success: true, removed });
+  }
+});
+
+// GET /admin/negative-comments - Get ALL negative comments from ALL clients
+app.get("/admin/negative-comments", async (req, res) => {
+  try {
+    if (!firestoreEnabled) {
+      return res.status(503).json({
+        success: false,
+        error: "Firestore not enabled",
+      });
+    }
+
+    console.log(
+      "[admin:negative-comments] 🔍 Fetching all negative comments from all clients..."
+    );
+
+    const firestore = firebaseAdmin.firestore();
+    const clientsSnapshot = await firestore.collection("clients").get();
+
+    const allNegativeComments = [];
+    let clientsWithComments = 0;
+    let totalComments = 0;
+
+    for (const clientDoc of clientsSnapshot.docs) {
+      const clientId = clientDoc.id;
+
+      try {
+        // Get dashboard for this client
+        const dashboardDoc = await firestore
+          .collection("clients")
+          .doc(clientId)
+          .collection("dashboard")
+          .doc("current")
+          .get();
+
+        if (dashboardDoc.exists) {
+          const data = dashboardDoc.data();
+          const comments = data.negative_comments || [];
+
+          if (comments.length > 0) {
+            clientsWithComments++;
+            totalComments += comments.length;
+
+            // Get client profile for business name
+            let businessName = "Unknown";
+            try {
+              const profileDoc = await firestore
+                .collection("clients")
+                .doc(clientId)
+                .collection("profile")
+                .doc("main")
+                .get();
+
+              if (profileDoc.exists) {
+                const profileData = profileDoc.data();
+                businessName =
+                  profileData.name || profileData.businessName || clientId;
+              }
+            } catch (profileErr) {
+              console.warn(
+                `[admin:negative-comments] Could not fetch profile for ${clientId}`
+              );
+            }
+
+            // Add each comment with client context
+            comments.forEach((comment) => {
+              allNegativeComments.push({
+                ...comment,
+                clientId,
+                businessName,
+                negativeFeedbackCount: data.negative_feedback_count || 0,
+                totalFeedbackCount: data.feedback_count || 0,
+              });
+            });
+          }
+        }
+      } catch (clientErr) {
+        console.warn(
+          `[admin:negative-comments] Error processing client ${clientId}:`,
+          clientErr.message
+        );
+      }
+    }
+
+    // Sort by createdAt (newest first)
+    allNegativeComments.sort((a, b) => {
+      const dateA = a.createdAt?._seconds
+        ? new Date(a.createdAt._seconds * 1000)
+        : new Date(a.createdAt || 0);
+      const dateB = b.createdAt?._seconds
+        ? new Date(b.createdAt._seconds * 1000)
+        : new Date(b.createdAt || 0);
+      return dateB - dateA;
+    });
+
+    console.log(
+      `[admin:negative-comments] ✅ Found ${totalComments} negative comments from ${clientsWithComments} clients`
+    );
+
+    return res.json({
+      success: true,
+      totalClients: clientsSnapshot.size,
+      clientsWithNegativeComments: clientsWithComments,
+      totalNegativeComments: totalComments,
+      comments: allNegativeComments,
+    });
+  } catch (e) {
+    console.error("[admin:negative-comments:error]", e);
+    return res.status(500).json({
+      success: false,
+      error: e.message || String(e),
+    });
+  }
+});
+
+// DEBUG: list registered routes (temporary)
+app.get("/__routes", (req, res) => {
+  try {
+    const routes = [];
+    const stack = app._router && app._router.stack ? app._router.stack : [];
+    for (const layer of stack) {
+      if (layer.route && layer.route.path) {
+        const methods = Object.keys(layer.route.methods || {})
+          .filter((m) => layer.route.methods[m])
+          .map((m) => m.toUpperCase());
+        routes.push({ path: layer.route.path, methods });
+      } else if (
+        layer.name === "router" &&
+        layer.handle &&
+        layer.handle.stack
+      ) {
+        for (const s of layer.handle.stack) {
+          if (s.route && s.route.path) {
+            const methods = Object.keys(s.route.methods || {})
+              .filter((m) => s.route.methods[m])
+              .map((m) => m.toUpperCase());
+            routes.push({ path: s.route.path, methods });
+          }
+        }
+      }
+    }
+    res.json({ ok: true, count: routes.length, routes });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  }
+});
+
+// Consolidated diagnostics: quick verify + token basic + env presence (no network duplication if not provided)
+app.get("/wa-diagnostics", async (req, res) => {
+  const accessToken =
+    req.query.accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId =
+    req.query.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const out = {
+    env: {
+      hasTokenEnv: !!process.env.WHATSAPP_ACCESS_TOKEN,
+      hasPhoneIdEnv: !!process.env.WHATSAPP_PHONE_NUMBER_ID,
+    },
+    provided: {
+      hasTokenParam: !!req.query.accessToken,
+      hasPhoneIdParam: !!req.query.phoneNumberId,
+    },
+  };
+  if (!accessToken || !phoneNumberId) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing accessToken or phoneNumberId",
+      ...out,
+    });
+  }
+  try {
+    const verifyUrl = `https://graph.facebook.com/v22.0/${encodeURIComponent(
+      String(phoneNumberId)
+    )}?fields=id,display_phone_number,verified_name`;
+    const verifyResp = await fetch(verifyUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const verifyData = await verifyResp.json().catch(() => ({}));
+    out["verify"] = {
+      ok: verifyResp.ok,
+      status: verifyResp.status,
+      data: verifyData,
+    };
+    if (!verifyResp.ok)
+      return res.status(verifyResp.status).json({
+        success: false,
+        error: verifyData?.error?.message || "Verify failed",
+        details: out,
+      });
+    return res.json({ success: true, diagnostics: out });
+  } catch (e) {
+    return res
+      .status(500)
+      .json({ success: false, error: e.message || String(e), details: out });
+  }
+});
+
+// ========== NEGATIVE COMMENTS API ENDPOINTS ==========
+
+/**
+ * GET /api/debug/negative-feedback-test?companyId=xxx
+ * Debug endpoint to verify negative feedback storage is working
+ */
+app.get("/api/debug/negative-feedback-test", async (req, res) => {
+  const companyId = String(req.query.companyId || "").trim();
+
+  if (!companyId) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing companyId parameter",
+    });
+  }
+
+  if (!firestoreEnabled || !firebaseAdmin?.apps?.length) {
+    return res.status(503).json({
+      success: false,
+      error: "Firestore not enabled",
+    });
+  }
+
+  try {
+    const firestore = firebaseAdmin.firestore();
+    const dashboardRef = firestore
+      .collection("clients")
+      .doc(companyId)
+      .collection("dashboard")
+      .doc("current");
+
+    const dashboardDoc = await dashboardRef.get();
+
+    if (!dashboardDoc.exists) {
+      return res.json({
+        success: true,
+        message: "Dashboard document does not exist yet",
+        exists: false,
+        companyId,
+      });
+    }
+
+    const data = dashboardDoc.data();
+    return res.json({
+      success: true,
+      exists: true,
+      companyId,
+      dashboard: {
+        message_count: data?.message_count || 0,
+        feedback_count: data?.feedback_count || 0,
+        negative_feedback_count: data?.negative_feedback_count || 0,
+        negative_comments_count: Array.isArray(data?.negative_comments)
+          ? data.negative_comments.length
+          : 0,
+        negative_comments_sample: Array.isArray(data?.negative_comments)
+          ? data.negative_comments.slice(0, 2).map((c) => ({
+              id: c.id,
+              text: c.commentText?.substring(0, 50) + "...",
+              phone: c.customerPhone,
+              createdAt: c.createdAt,
+            }))
+          : [],
+        last_updated: data?.last_updated,
+      },
+    });
+  } catch (e) {
+    console.error("[debug:negative-feedback-test:error]", e);
+    return res.status(500).json({
+      success: false,
+      error: e.message || String(e),
+    });
+  }
+});
+
+/**
+ * GET /api/negative-comments?companyId=xxx
+ * Fetch negative comments for a specific client from Firebase
+ * Returns both dashboard comments and per-phone grouped comments
+ */
+app.get("/api/negative-comments", async (req, res) => {
+  const companyId = String(req.query.companyId || "").trim();
+
+  if (!companyId) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing companyId parameter",
+    });
+  }
+
+  if (!firestoreEnabled || !firebaseAdmin?.apps?.length) {
+    return res.status(503).json({
+      success: false,
+      error: "Firestore not enabled",
+      comments: [],
+      count: 0,
+    });
+  }
+
+  try {
+    const firestore = firebaseAdmin.firestore();
+    const dashboardRef = firestore
+      .collection("clients")
+      .doc(companyId)
+      .collection("dashboard")
+      .doc("current");
+
+    const dashboardDoc = await dashboardRef.get();
+
+    if (!dashboardDoc.exists) {
+      console.log(
+        `[negative-comments:fetch] ℹ️ No dashboard found for client ${companyId}`
+      );
+      return res.json({
+        success: true,
+        count: 0,
+        comments: [],
+        perPhone: [],
+      });
+    }
+
+    const dashboardData = dashboardDoc.data();
+    const comments = dashboardData.negative_comments || [];
+
+    console.log(
+      `[negative-comments:fetch] 📊 Found ${comments.length} total comments in dashboard for client ${companyId}`
+    );
+
+    // CRITICAL SECURITY: Filter to ONLY show comments that belong to THIS client
+    // This prevents Client A from seeing Client B's comments
+    const activeComments = comments
+      .filter((c) => {
+        const belongsToThisClient = c.companyId === companyId;
+        const isActive = c.status === "active";
+
+        if (!belongsToThisClient) {
+          console.warn(
+            `[negative-comments:fetch] ⚠️ SECURITY: Filtering out comment ${c.id} - belongs to ${c.companyId}, requested by ${companyId}`
+          );
+        }
+
+        return belongsToThisClient && isActive;
+      })
+      .sort((a, b) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+        return timeB - timeA; // Descending order (newest first)
+      });
+
+    console.log(
+      `[negative-comments:fetch] ✅ Fetched ${activeComments.length} active comments belonging to client ${companyId}`
+    );
+
+    // Also fetch per-phone negative comments collection
+    const perPhoneComments = [];
+    try {
+      const negativeCommentsSnap = await firestore
+        .collection("clients")
+        .doc(companyId)
+        .collection("negative_comments")
+        .get();
+
+      negativeCommentsSnap.forEach((doc) => {
+        const data = doc.data();
+        perPhoneComments.push({
+          phoneId: doc.id,
+          phone: data.phone || "",
+          count: data.count || 0,
+          updated_at: data.updated_at,
+          comments: data.comments || [],
+        });
+      });
+
+      console.log(
+        `[negative-comments:fetch] ✅ Fetched ${activeComments.length} dashboard comments and ${perPhoneComments.length} per-phone groups for client ${companyId}`
+      );
+    } catch (perPhoneErr) {
+      console.warn(
+        `[negative-comments:fetch] ⚠️ Failed to fetch per-phone comments:`,
+        perPhoneErr.message
+      );
+    }
+
+    return res.json({
+      success: true,
+      count: activeComments.length,
+      comments: activeComments,
+      perPhone: perPhoneComments,
+    });
+  } catch (e) {
+    console.error("[negative-comments:get:error]", e);
+    return res.status(500).json({
+      success: false,
+      error: e.message || String(e),
+    });
+  }
+});
+
+/**
+ * DELETE /api/negative-comments?id=xxx&companyId=xxx
+ * Delete a negative comment from Firebase (with ownership verification)
+ */
+app.delete("/api/negative-comments", async (req, res) => {
+  const commentId = String(req.query.id || "").trim();
+  const companyId = String(req.query.companyId || "").trim();
+
+  if (!commentId || !companyId) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing id or companyId parameter",
+    });
+  }
+
+  if (!firestoreEnabled || !firebaseAdmin?.apps?.length) {
+    return res.status(503).json({
+      success: false,
+      error: "Firestore not enabled",
+    });
+  }
+
+  try {
+    const firestore = firebaseAdmin.firestore();
+    const dashboardRef = firestore
+      .collection("clients")
+      .doc(companyId)
+      .collection("dashboard")
+      .doc("current");
+
+    // Get current dashboard data
+    const dashboardDoc = await dashboardRef.get();
+    if (!dashboardDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Dashboard not found",
+      });
+    }
+
+    const dashboardData = dashboardDoc.data();
+    const comments = dashboardData.negative_comments || [];
+
+    // Find the comment to delete
+    const commentToDelete = comments.find((c) => c.id === commentId);
+    if (!commentToDelete) {
+      return res.status(404).json({
+        success: false,
+        error: "Comment not found",
+      });
+    }
+
+    // Verify ownership
+    if (commentToDelete.companyId !== companyId) {
+      return res.status(403).json({
+        success: false,
+        error: "Unauthorized: This comment belongs to another client",
+      });
+    }
+
+    // Remove the comment from array
+    await dashboardRef.update({
+      negative_comments:
+        firebaseAdmin.firestore.FieldValue.arrayRemove(commentToDelete),
+      negative_feedback_count: firebaseAdmin.firestore.FieldValue.increment(-1),
+      last_updated: firebaseAdmin.firestore.Timestamp.now(),
+    });
+
+    console.log(
+      `[negative-comments:delete] ✅ Deleted comment ${commentId} for client ${companyId}`
+    );
+    console.log(
+      `[dashboard:stats] ✅ Decremented negative_feedback_count for client ${companyId}`
+    );
+
+    return res.json({
+      success: true,
+      message: "Comment deleted successfully",
+    });
+  } catch (e) {
+    console.error("[negative-comments:delete:error]", e);
+    return res.status(500).json({
+      success: false,
+      error: e.message || String(e),
+    });
+  }
+});
+
+/**
+ * GET /api/dashboard/stats?companyId=xxx
+ * Fetch dashboard statistics from Firebase
+ */
+app.get("/api/dashboard/stats", async (req, res) => {
+  const companyId = String(req.query.companyId || "").trim();
+
+  if (!companyId) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing companyId parameter",
+    });
+  }
+
+  try {
+    const firestore = firebaseAdmin.firestore();
+    const dashboardRef = firestore
+      .collection("clients")
+      .doc(companyId)
+      .collection("dashboard")
+      .doc("current");
+
+    const dashboardDoc = await dashboardRef.get();
+
+    if (!dashboardDoc.exists()) {
+      // Initialize dashboard if it doesn't exist
+      await dashboardRef.set({
+        feedback_count: 0,
+        message_count: 0,
+        negative_feedback_count: 0,
+        graph_data: { labels: [], values: [] },
+        last_updated: new Date(),
+      });
+
+      console.log(
+        `[dashboard:stats] ⚠️ Initialized empty dashboard for client ${companyId}`
+      );
+
+      return res.json({
+        success: true,
+        stats: {
+          feedbackCount: 0,
+          messageCount: 0,
+          negativeFeedbackCount: 0,
+          avgRating: 0,
+          sentimentCounts: { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0 },
+        },
+      });
+    }
+
+    const data = dashboardDoc.data();
+
+    // Calculate avg rating and sentiment counts from feedback collection
+    const feedbackSnapshot = await firestore
+      .collection("feedback")
+      .where("companyId", "==", companyId)
+      .get();
+
+    let totalRating = 0;
+    let ratingCount = 0;
+    const sentimentCounts = { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0 };
+
+    feedbackSnapshot.docs.forEach((doc) => {
+      const fb = doc.data();
+      if (typeof fb.rating === "number") {
+        totalRating += fb.rating;
+        ratingCount++;
+      }
+      if (fb.sentiment === "positive") sentimentCounts.POSITIVE++;
+      else if (fb.sentiment === "negative") sentimentCounts.NEGATIVE++;
+      else if (fb.sentiment === "neutral") sentimentCounts.NEUTRAL++;
+    });
+
+    const avgRating = ratingCount > 0 ? totalRating / ratingCount : 0;
+
+    console.log(
+      `[dashboard:stats] ✅ Fetched stats for client ${companyId}: feedback=${data.feedback_count}, negative=${data.negative_feedback_count}`
+    );
+
+    return res.json({
+      success: true,
+      stats: {
+        feedbackCount: data.feedback_count || 0,
+        messageCount: data.message_count || 0,
+        negativeFeedbackCount: data.negative_feedback_count || 0,
+        avgRating: avgRating,
+        sentimentCounts: sentimentCounts,
+      },
+    });
+  } catch (e) {
+    console.error("[dashboard:stats:error]", e);
+    return res.status(500).json({
+      success: false,
+      error: e.message || String(e),
+    });
+  }
+});
+
+// ========== END NEGATIVE COMMENTS API ==========
+
+// Static file serving for SPA (must be AFTER all API routes)
+app.use(express.static(path.join(__dirname, "dist")));
+
+// Start server (previously removed accidentally)
+const PORT = process.env.PORT || 3002;
+app.listen(PORT, () => {
+  console.log(`SMS API listening on http://localhost:${PORT}`);
+  // Log route count after a tick so routes are registered
+  setTimeout(() => {
+    try {
+      const stack = app._router?.stack || [];
+      const routeCount = stack.filter((l) => l.route && l.route.path).length;
+      console.log(`[startup] registeredRoutes=${routeCount}`);
+    } catch {}
+  }, 50);
+});

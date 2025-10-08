@@ -1,0 +1,171 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/admin_users/$(request.auth.uid));
+    }
+    
+    function isSuperAdmin() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'superadmin';
+    }
+    
+    function isCompanyAdmin(companyId) {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/companies/$(companyId)).data.adminId == request.auth.uid;
+    }
+    
+    function isCompanyUser(companyId) {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId == companyId;
+    }
+    
+    // ==================== USERS COLLECTION (NEW STRUCTURE) ====================
+    
+    match /users/{userId} {
+      // Users can read their own data, admins can read all
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      
+      // Anyone can create a user (for signup)
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Users can update their own data, admins can update any
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      
+      // Only admins can delete users
+      allow delete: if isAdmin();
+    }
+    
+    // ==================== COMPANIES COLLECTION (NEW STRUCTURE) ====================
+    
+    match /companies/{companyId} {
+      // Company users and admins can read
+      allow read: if isCompanyUser(companyId) || isAdmin();
+      
+      // Anyone can create a company (for signup)
+      allow create: if isAuthenticated();
+      
+      // Company admin or system admins can update
+      allow update: if isCompanyAdmin(companyId) || isAdmin();
+      
+      // Only system admins can delete companies
+      allow delete: if isAdmin();
+    }
+    
+    // ==================== CLIENTS COLLECTION (OLD STRUCTURE - FOR BACKWARD COMPATIBILITY) ====================
+    
+    match /clients/{clientId} {
+      // Anyone authenticated can create their client document (for signup)
+      // Allow create when: clientId matches auth_uid (signup flow) OR user is admin
+      allow create: if isAuthenticated() && 
+                       (request.auth.uid == clientId || isAdmin());
+      
+      // Clients can read/update their own data (clientId should match auth_uid)
+      allow read, update: if isAuthenticated() && 
+                             (request.auth.uid == clientId || 
+                              request.auth.uid == resource.data.auth_uid || 
+                              isAdmin());
+      
+      // Only admins can delete clients
+      allow delete: if isAdmin();
+      
+      // Subcollections (profile, dashboard, messages, feedback, messenger)
+      // Allow read/write if auth_uid matches clientId (document ID)
+      match /dashboard/{document=**} {
+        allow read, write: if isAuthenticated() && 
+                             (request.auth.uid == clientId || isAdmin());
+      }
+      
+      match /feedback/{document=**} {
+        allow read, write: if isAuthenticated() && 
+                             (request.auth.uid == clientId || isAdmin());
+      }
+      
+      match /profile/{document=**} {
+        allow read, write: if isAuthenticated() && 
+                             (request.auth.uid == clientId || isAdmin());
+      }
+      
+      match /messages/{document=**} {
+        allow read, write: if isAuthenticated() && 
+                             (request.auth.uid == clientId || isAdmin());
+      }
+      
+      match /messenger/{document=**} {
+        allow read, write: if isAuthenticated() && 
+                             (request.auth.uid == clientId || isAdmin());
+      }
+    }
+    
+    // ==================== FEEDBACK COLLECTION (ROOT) ====================
+    
+    match /feedback/{feedbackId} {
+      // Anyone can create feedback (public submission)
+      allow create: if true;
+      
+      // Company users can read their company's feedback
+      allow read: if isAuthenticated() && 
+                     (isCompanyUser(resource.data.companyId) || isAdmin());
+      
+      // Only admins can update/delete feedback
+      allow update, delete: if isAdmin();
+    }
+    
+    // ==================== MESSAGES COLLECTION (ROOT) ====================
+    
+    match /messages/{messageId} {
+      // Company users can read their company's messages
+      allow read: if isAuthenticated() && 
+                     (isCompanyUser(resource.data.companyId) || isAdmin());
+      
+      // Company users can create messages
+      allow create: if isAuthenticated() && 
+                       isCompanyUser(request.resource.data.companyId);
+      
+      // Only admins can update/delete messages
+      allow update, delete: if isAdmin();
+    }
+    
+    // ==================== ADMIN USERS COLLECTION ====================
+    
+    match /admin_users/{adminId} {
+      // Only authenticated admins can read admin data
+      allow read: if isAdmin();
+      
+      // Only super-admins can create/update/delete admins
+      allow create, update, delete: if isSuperAdmin();
+    }
+    
+    // ==================== ADMIN SETTINGS COLLECTION ====================
+    
+    match /admin_settings/global {
+      // Allow authenticated users to read global config (needed for app initialization)
+      // This is safe because it only contains public configuration like API endpoints
+      allow read: if isAuthenticated();
+      // Only admins can write
+      allow write: if isAdmin();
+    }
+    
+    match /admin_settings/{settingId} {
+      // Other admin settings - only admins can read/write
+      allow read, write: if isAdmin();
+    }
+    
+    // ==================== LEGACY TENANTS STRUCTURE (for backward compatibility) ====================
+    
+    match /tenants/{tenantId} {
+      allow read, write: if isAuthenticated();
+      
+      match /{document=**} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+  }
+}
