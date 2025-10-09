@@ -210,7 +210,13 @@ const App: React.FC = () => {
       console.log("[Checkout] Creating session", { planId, price, companyId });
       const resp = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(companyId ? { "x-company-id": companyId } : {}),
+          ...(userEmail ? { "x-user-email": userEmail } : {}),
+          ...(planId ? { "x-plan-id": planId } : {}),
+          ...(price ? { "x-price": String(price) } : {}),
+        },
         body: JSON.stringify({ plan: planId, price, companyId, userEmail }),
       });
       const data = await resp.json().catch(() => ({} as any));

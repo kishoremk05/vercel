@@ -144,6 +144,9 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // Fallback headers so server can read identifiers even if body parsing is impaired by host
+          ...(companyId ? { "x-company-id": companyId } : {}),
+          ...(userEmail ? { "x-user-email": userEmail } : {}),
         },
         body: JSON.stringify({
           plan: selectedPlan.id,
@@ -164,7 +167,9 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       if (!response.ok) {
         const msg =
           (data && typeof data === "object" && (data.error || data.message)) ||
-          (typeof data === "string" ? data : "Failed to create payment session");
+          (typeof data === "string"
+            ? data
+            : "Failed to create payment session");
         throw new Error(msg);
       }
 

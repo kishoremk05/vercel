@@ -281,6 +281,32 @@ try {
     console.warn("[cors] defensive middleware setup failed", e?.message || e);
   }
 
+  // Universal preflight responder (fallback):
+  // Some frontends (e.g., static hosts) require permissive CORS even when upstream proxies intervene.
+  // This middleware mirrors Origin and responds to OPTIONS early to avoid CORS errors.
+  app.use((req, res, next) => {
+    try {
+      const origin = req.headers.origin;
+      if (origin) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Vary", "Origin");
+      }
+      res.setHeader(
+        "Access-Control-Allow-Methods",
+        "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+      );
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Authorization, Content-Type, Accept, X-Requested-With"
+      );
+      res.setHeader("Access-Control-Max-Age", "86400");
+      if (req.method === "OPTIONS") {
+        return res.status(204).end();
+      }
+    } catch {}
+    next();
+  });
+
   // CRITICAL: Use express.json with verify to capture raw body
   app.use(
     express.json({
@@ -1011,21 +1037,67 @@ app.post("/api/payments/create-session", async (req, res) => {
   }
 
   try {
-    const { plan, price, companyId, userEmail } = req.body || {};
+    // Robust body parsing for Render: if express.json missed it, use rawBody
+    let body = req.body && typeof req.body === "object" ? req.body : {};
+    if (!body || Object.keys(body).length === 0) {
+      try {
+        const raw = req.rawBody || "";
+        if (raw && raw.trim().startsWith("{")) {
+          body = JSON.parse(raw);
+          console.log("[Dodo Payment] Parsed body from rawBody ✅");
+        }
+      } catch (e) {
+        console.warn("[Dodo Payment] rawBody parse failed:", e.message);
+      }
+    }
 
-    console.log("[Dodo Payment] Creating session:", {
-      plan,
-      price,
-      companyId,
-      userEmail,
-      hasApiKey: !!DODO_API_KEY,
-    });
+    // Accept multiple field names from different clients
+    const plan =
+      body.plan ||
+      body.planId ||
+      body.id ||
+      body.selectedPlanId ||
+      body.selectedPlan?.id ||
+      req.headers["x-plan-id"] ||
+      req.headers["x-plan"] ||
+      req.query.plan ||
+      req.query.planId;
+    const priceRaw =
+      body.price ??
+      body.amount ??
+      body.total ??
+      body.selectedPlan?.price ??
+      req.headers["x-price"] ??
+      req.headers["x-amount"] ??
+      req.query.price ??
+      req.query.amount;
+    const price =
+      typeof priceRaw === "string" ? Number(priceRaw) : Number(priceRaw);
+    const companyId =
+      body.companyId ||
+      body.company_id ||
+      req.headers["x-company-id"] ||
+      req.headers["x-client-id"];
+    const userEmail =
+      body.userEmail || body.user_email || req.headers["x-user-email"];
 
-    // Validate inputs
-    if (!plan || !price) {
+    try {
+      console.log("[Dodo Payment] Creating session:", {
+        plan,
+        price,
+        companyId,
+        userEmail,
+        hasApiKey: !!DODO_API_KEY,
+        origin: req.headers.origin || null,
+        bodyKeys: Object.keys(body || {}),
+      });
+    } catch {}
+
+    // Validate inputs: only plan is strictly required to map to a Dodo product
+    if (!plan) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields: plan and price",
+        error: "Missing required field: plan",
       });
     }
 
@@ -1054,7 +1126,7 @@ app.post("/api/payments/create-session", async (req, res) => {
       quantity: 1,
       customer: {
         email: userEmail || "customer@example.com",
-        name: "Demo User",
+        name: "ReputationFlow User",
       },
       billing: {
         city: "New York",
@@ -1067,13 +1139,16 @@ app.post("/api/payments/create-session", async (req, res) => {
       metadata: {
         companyId: companyId || "unknown",
         plan: plan,
-        price: price,
+        // price is optional; include only if valid number
+        ...(Number.isFinite(price) ? { price } : {}),
         timestamp: new Date().toISOString(),
       },
     };
 
     console.log(
-      `[Dodo Payment] Creating SUBSCRIPTION for ${plan} plan ($${price})...`
+      `[Dodo Payment] Creating SUBSCRIPTION for ${plan}$${
+        Number.isFinite(price) ? ` (price ${price})` : ""
+      }...`
     );
     console.log(`[Dodo Payment] API URL: ${DODO_API_BASE}/subscriptions`);
     console.log(
