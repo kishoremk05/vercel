@@ -75,6 +75,19 @@ const stripBase = (p: string) => {
 const initialCustomers: Customer[] = [];
 
 const App: React.FC = () => {
+  // Helper: plan -> display price mapping (used only for logging/consistency)
+  const PLAN_PRICES: Record<string, number> = useMemo(
+    () => ({
+      starter_1m: 15,
+      growth_3m: 40,
+      pro_6m: 80,
+      monthly: 15,
+      quarterly: 40,
+      halfyearly: 80,
+    }),
+    []
+  );
+
   // Initialize Firebase config on app startup
   useEffect(() => {
     // Initialize global config and set API_BASE to the admin-provided server URL
@@ -164,6 +177,58 @@ const App: React.FC = () => {
     setCurrentPage(Page.Auth);
 
     console.log("[App] ✅ Logout complete - redirecting to auth page");
+  };
+
+  // Start Dodo checkout immediately for a selected plan
+  const startCheckout = async (planId: string) => {
+    try {
+      // Ensure we have a session
+      const companyId = localStorage.getItem("companyId");
+      const userEmail = localStorage.getItem("userEmail") || "";
+      if (!companyId) {
+        // Not logged in, send to auth and keep pendingPlan
+        try {
+          localStorage.setItem("pendingPlan", planId);
+        } catch {}
+        const target = joinBase("auth");
+        if (window.location.pathname !== target) {
+          window.history.pushState({ page: target }, "", target);
+        }
+        setCurrentPage(Page.Auth);
+        return;
+      }
+
+      // Build API URL
+      const base = (await getSmsServerUrl().catch(() => API_BASE)) || API_BASE;
+      const url = base
+        ? `${String(base)
+            .trim()
+            .replace(/\/+$/, "")}/api/payments/create-session`
+        : `/api/payments/create-session`;
+
+      const price = PLAN_PRICES[planId] || 0;
+      console.log("[Checkout] Creating session", { planId, price, companyId });
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: planId, price, companyId, userEmail }),
+      });
+      const data = await resp.json().catch(() => ({} as any));
+      if (!resp.ok || !data?.url) {
+        console.error("[Checkout] Failed: ", data);
+        alert(
+          data?.error ||
+            "Failed to start checkout. Please try again or contact support."
+        );
+        return;
+      }
+
+      // Redirect to Dodo hosted checkout
+      window.location.href = data.url;
+    } catch (e: any) {
+      console.error("[Checkout] Exception:", e);
+      alert(e?.message || "Payment initialization failed");
+    }
   };
 
   // Payment flow removed — no-op placeholder for any old callers.
@@ -614,21 +679,18 @@ const App: React.FC = () => {
     }
   };
 
+  // Build message text with correct feedback link and clientId tagging
   const formatTemplate = (
     template: string,
     name: string,
     phone: string,
     customerId?: string
   ) => {
-    // Support both legacy [Placeholders] and new {{placeholders}}
-    // Use phone number as id value
-    // Build a robust default Feedback page URL (never default to Google Review link)
     const defaultFeedbackPath = joinBase("feedback");
     const defaultFeedbackUrl = new URL(
       defaultFeedbackPath,
       window.location.origin
     ).toString();
-    // If user provided a custom link in Settings, use it; otherwise default to our Feedback page
     let reviewBase = (feedbackPageLink || "").trim() || defaultFeedbackUrl;
     // If someone mistakenly set the site root as link, auto-correct to /feedback
     try {
@@ -650,7 +712,7 @@ const App: React.FC = () => {
     // Add customer ID to the link
     let reviewWithId = appendIdToLink(reviewBase, phone || "");
 
-    // CRITICAL FIX: Add clientId parameter for proper Firebase storage
+    // Add clientId parameter for proper Firebase storage
     const clientCompanyId = localStorage.getItem("companyId") || "";
     if (clientCompanyId) {
       try {
@@ -1583,20 +1645,15 @@ const App: React.FC = () => {
             try {
               localStorage.setItem("pendingPlan", planId);
             } catch {}
-            // If not logged in, go to auth first; after auth we will navigate user to Payment page if pendingPlan exists
-            if (!auth) {
+            // If logged in, start checkout immediately; else go to auth
+            if (auth) {
+              startCheckout(planId);
+            } else {
               const target = joinBase("auth");
               if (window.location.pathname !== target) {
                 window.history.pushState({ page: target }, "", target);
               }
               setCurrentPage(Page.Auth);
-            } else {
-              // Navigate to Payment page
-              const target = joinBase("payment");
-              if (window.location.pathname !== target) {
-                window.history.pushState({ page: target }, "", target);
-              }
-              setCurrentPage(Page.Payment);
             }
           }}
         />
@@ -1723,7 +1780,6 @@ const App: React.FC = () => {
         {/* Payment Pages */}
         {currentPage === Page.Payment && (
           <PaymentPage
-            selectedPlan={localStorage.getItem("pendingPlan") || "growth_3m"}
             onPaymentSuccess={handlePaymentSuccess}
             onBack={() => navigate(Page.Home)}
           />

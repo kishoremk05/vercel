@@ -73,7 +73,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     return pricingPlans[1];
   }); // Default to Growth plan
   const [isProcessing, setIsProcessing] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"card" | "upi">("card");
 
   // Clear pendingPlan after mount so refresh won't overwrite selection later
   useEffect(() => {
@@ -82,97 +81,11 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     } catch {}
   }, []);
 
-  // Payment form state
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardName, setCardName] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
-  const [cvv, setCvv] = useState("");
-  const [upiId, setUpiId] = useState("");
-
   // Get user info
   const userEmail = localStorage.getItem("userEmail") || "";
   const businessName = localStorage.getItem("businessName") || "Your Business";
-
-  // Format card number with spaces
-  const formatCardNumber = (value: string) => {
-    const v = value.replace(/\s+/g, "").replace(/[^0-9]/gi, "");
-    const matches = v.match(/\d{4,16}/g);
-    const match = (matches && matches[0]) || "";
-    const parts = [];
-
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4));
-    }
-
-    if (parts.length) {
-      return parts.join(" ");
-    } else {
-      return value;
-    }
-  };
-
-  // Format expiry date
-  const formatExpiryDate = (value: string) => {
-    const v = value.replace(/\s+/g, "").replace(/[^0-9]/gi, "");
-    if (v.length >= 2) {
-      return v.slice(0, 2) + "/" + v.slice(2, 4);
-    }
-    return v;
-  };
-
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatCardNumber(e.target.value);
-    if (formatted.length <= 19) {
-      // 16 digits + 3 spaces
-      setCardNumber(formatted);
-    }
-  };
-
-  const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatExpiryDate(e.target.value);
-    if (formatted.length <= 5) {
-      setExpiryDate(formatted);
-    }
-  };
-
-  const handleCvvChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/[^0-9]/gi, "");
-    if (value.length <= 4) {
-      setCvv(value);
-    }
-  };
-
-  const validateForm = (): boolean => {
-    if (paymentMethod === "card") {
-      const cardDigits = cardNumber.replace(/\s+/g, "");
-      if (cardDigits.length !== 16) {
-        alert("Please enter a valid 16-digit card number");
-        return false;
-      }
-      if (!cardName.trim()) {
-        alert("Please enter the cardholder name");
-        return false;
-      }
-      if (expiryDate.length !== 5) {
-        alert("Please enter a valid expiry date (MM/YY)");
-        return false;
-      }
-      if (cvv.length < 3) {
-        alert("Please enter a valid CVV");
-        return false;
-      }
-    } else if (paymentMethod === "upi") {
-      if (!upiId.trim() || !upiId.includes("@")) {
-        alert("Please enter a valid UPI ID");
-        return false;
-      }
-    }
-    return true;
-  };
-
+  // Start hosted checkout immediately using backend create-session
   const handlePayment = async () => {
-    if (!validateForm()) return;
-
     setIsProcessing(true);
 
     try {
@@ -236,9 +149,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       }
 
       console.log("[Payment] ✅ Redirecting to Dodo payment:", data.url);
-
-      // Redirect to Dodo payment page
-      window.location.href = data.url;
+      window.location.href = data.url; // Redirect to Dodo hosted checkout
     } catch (error: any) {
       console.error("Payment error:", error);
       alert(`❌ Payment failed: ${error.message || "Please try again later."}`);
@@ -394,105 +305,28 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
 
             {/* Payment Method */}
             <div className="bg-white rounded-2xl shadow-lg p-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">
-                Payment Method
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                Checkout
               </h2>
-
-              <div className="flex gap-4 mb-6">
-                <button
-                  onClick={() => setPaymentMethod("card")}
-                  className={`flex-1 py-3 px-4 rounded-lg border-2 font-medium transition-all ${
-                    paymentMethod === "card"
-                      ? "border-gray-900 bg-gray-900 text-white"
-                      : "border-gray-200 text-gray-700 hover:border-gray-400"
-                  }`}
-                >
-                  💳 Credit/Debit Card
-                </button>
-                <button
-                  onClick={() => setPaymentMethod("upi")}
-                  className={`flex-1 py-3 px-4 rounded-lg border-2 font-medium transition-all ${
-                    paymentMethod === "upi"
-                      ? "border-gray-900 bg-gray-900 text-white"
-                      : "border-gray-200 text-gray-700 hover:border-gray-400"
-                  }`}
-                >
-                  📱 UPI
-                </button>
-              </div>
-
-              {paymentMethod === "card" ? (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Card Number
-                    </label>
-                    <input
-                      type="text"
-                      value={cardNumber}
-                      onChange={handleCardNumberChange}
-                      placeholder="1234 5678 9012 3456"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Cardholder Name
-                    </label>
-                    <input
-                      type="text"
-                      value={cardName}
-                      onChange={(e) => setCardName(e.target.value)}
-                      placeholder="John Doe"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Expiry Date
-                      </label>
-                      <input
-                        type="text"
-                        value={expiryDate}
-                        onChange={handleExpiryChange}
-                        placeholder="MM/YY"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        CVV
-                      </label>
-                      <input
-                        type="text"
-                        value={cvv}
-                        onChange={handleCvvChange}
-                        placeholder="123"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ) : (
+              <p className="text-gray-600 mb-4">
+                You'll be redirected to our secure payment provider to complete
+                your subscription for {selectedPlan.name}.
+              </p>
+              <ul className="list-disc ml-6 text-sm text-gray-700 mb-6">
+                <li>Hosted checkout (card/UPI handled by provider)</li>
+                <li>Return to app automatically after payment</li>
+              </ul>
+              <div className="rounded-lg bg-gray-50 p-4 text-sm text-gray-600">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    UPI ID
-                  </label>
-                  <input
-                    type="text"
-                    value={upiId}
-                    onChange={(e) => setUpiId(e.target.value)}
-                    placeholder="yourname@upi"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                  />
-                  <p className="mt-2 text-sm text-gray-500">
-                    Enter your UPI ID (e.g., yourname@paytm, yourname@gpay)
-                  </p>
+                  Business: <strong>{businessName}</strong>
                 </div>
-              )}
+                <div>
+                  Plan: <strong>{selectedPlan.name}</strong>
+                </div>
+                <div>
+                  Amount: <strong>${selectedPlan.price}</strong>
+                </div>
+              </div>
             </div>
           </div>
 
