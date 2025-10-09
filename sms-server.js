@@ -1046,7 +1046,7 @@ app.post("/api/payments/create-session", async (req, res) => {
   try {
     // ULTRA-ROBUST body parsing for Render proxy issues
     let body = req.body && typeof req.body === "object" ? req.body : {};
-    
+
     // Log what we received for debugging
     console.log("[Dodo Payment] RAW REQUEST DEBUG:", {
       hasBody: !!req.body,
@@ -1087,7 +1087,7 @@ app.post("/api/payments/create-session", async (req, res) => {
       req.headers["x-plan"] ||
       req.query.plan ||
       req.query.planId;
-    
+
     const priceRaw =
       body.price ??
       body.amount ??
@@ -1097,11 +1097,14 @@ app.post("/api/payments/create-session", async (req, res) => {
       req.headers["x-amount"] ??
       req.query.price ??
       req.query.amount;
-    
-    const price = priceRaw !== undefined && priceRaw !== null && priceRaw !== ""
-      ? (typeof priceRaw === "string" ? Number(priceRaw) : Number(priceRaw))
-      : NaN;
-    
+
+    const price =
+      priceRaw !== undefined && priceRaw !== null && priceRaw !== ""
+        ? typeof priceRaw === "string"
+          ? Number(priceRaw)
+          : Number(priceRaw)
+        : NaN;
+
     const companyId =
       body.companyId ||
       body.company_id ||
@@ -1109,7 +1112,7 @@ app.post("/api/payments/create-session", async (req, res) => {
       req.headers["x-client-id"] ||
       req.query.companyId ||
       req.query.company_id;
-    
+
     const userEmail =
       body.userEmail ||
       body.user_email ||
@@ -1173,8 +1176,8 @@ app.post("/api/payments/create-session", async (req, res) => {
       metadata: {
         companyId: companyId || "unknown",
         plan: plan,
-        // price is optional; include only if valid number
-        ...(Number.isFinite(price) ? { price } : {}),
+        // Dodo expects metadata values as strings, not numbers
+        ...(Number.isFinite(price) ? { price: String(price) } : {}),
         timestamp: new Date().toISOString(),
       },
     };
