@@ -230,6 +230,13 @@ try {
           "Content-Type",
           "Accept",
           "X-Requested-With",
+          "x-company-id",
+          "x-client-id",
+          "x-user-email",
+          "x-plan-id",
+          "x-plan",
+          "x-price",
+          "x-amount",
         ],
         credentials: false,
         optionsSuccessStatus: 200,
@@ -297,7 +304,7 @@ try {
       );
       res.setHeader(
         "Access-Control-Allow-Headers",
-        "Authorization, Content-Type, Accept, X-Requested-With"
+        "Authorization, Content-Type, Accept, X-Requested-With, x-company-id, x-client-id, x-user-email, x-plan-id, x-plan, x-price, x-amount"
       );
       res.setHeader("Access-Control-Max-Age", "86400");
       if (req.method === "OPTIONS") {
