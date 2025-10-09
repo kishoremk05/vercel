@@ -176,107 +176,74 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     setIsProcessing(true);
 
     try {
-      // TODO: Integrate with Dodo Payment Gateway
-      // This is a placeholder for the actual payment integration
-
-      // Simulate API call to Dodo Payment Gateway
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // For demo purposes, we'll simulate success
-      // In production, you would:
-      // 1. Send payment details to your backend
-      // 2. Backend calls Dodo Payment API
-      // 3. Backend saves subscription info to Firebase
-      // 4. Return success/failure
-
       const companyId = localStorage.getItem("companyId");
-      if (companyId) {
-        // Save subscription data to localStorage (temporary - should be in Firebase)
-        const subscriptionData = {
-          planId: selectedPlan.id,
-          planName: selectedPlan.name,
-          smsCredits: selectedPlan.smsCredits,
-          remainingCredits: selectedPlan.smsCredits,
-          startDate: new Date().toISOString(),
-          endDate: new Date(
-            Date.now() + getDurationInMs(selectedPlan.duration)
-          ).toISOString(),
-          status: "active",
-          paymentMethod: paymentMethod,
-          amount: selectedPlan.price,
-        };
+      const userEmail = localStorage.getItem("userEmail") || "";
 
-        try {
-          localStorage.setItem(
-            "subscription",
-            JSON.stringify(subscriptionData)
-          );
-        } catch {}
-
-        // Attempt to save subscription to backend so it shows up in Firestore (if server configured)
-        (async () => {
-          try {
-            // Resolve API base: try runtime globals, localStorage, or VITE env fallback
-            const resolveApiBase = () => {
-              try {
-                const fromLS = localStorage.getItem("apiBase");
-                if (fromLS) return fromLS.replace(/\/$/, "");
-              } catch {}
-              try {
-                // app may set a global SMS server url
-                const g =
-                  (window as any).SMS_SERVER_URL || (window as any).API_BASE;
-                if (g) return String(g).replace(/\/$/, "");
-              } catch {}
-              try {
-                const env = (import.meta as any)?.env?.VITE_API_BASE;
-                if (env) return String(env).replace(/\/$/, "");
-              } catch {}
-              return ""; // fall back to relative
-            };
-
-            const apiBase = resolveApiBase();
-            const url = apiBase
-              ? `${apiBase}/api/subscription`
-              : `/api/subscription`;
-            const payload = {
-              companyId,
-              planId: subscriptionData.planId,
-              smsCredits: subscriptionData.smsCredits,
-              durationMonths: subscriptionData.planId.includes("3m")
-                ? 3
-                : subscriptionData.planId.includes("6m")
-                ? 6
-                : 1,
-              status: subscriptionData.status,
-            };
-            const resp = await fetch(url, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
-            if (!resp.ok) {
-              const text = await resp.text().catch(() => "");
-              console.warn(
-                "Subscription saved locally but backend returned",
-                resp.status,
-                text
-              );
-            } else {
-              const json = await resp.json().catch(() => null);
-              console.log("Subscription saved to backend:", json);
-            }
-          } catch (err) {
-            console.warn("Failed to save subscription to backend:", err);
-          }
-        })();
+      if (!companyId) {
+        throw new Error("Please log in to continue with payment");
       }
 
-      alert("✅ Payment successful! Welcome to ReputationFlow.");
-      onPaymentSuccess();
-    } catch (error) {
+      console.log("[Payment] Creating Dodo payment session for:", {
+        plan: selectedPlan.id,
+        price: selectedPlan.price,
+        companyId,
+      });
+
+      // Resolve API base
+      const resolveApiBase = () => {
+        try {
+          const fromLS = localStorage.getItem("apiBase");
+          if (fromLS) return fromLS.replace(/\/$/, "");
+        } catch {}
+        try {
+          const g = (window as any).SMS_SERVER_URL || (window as any).API_BASE;
+          if (g) return String(g).replace(/\/$/, "");
+        } catch {}
+        try {
+          const env = (import.meta as any)?.env?.VITE_API_BASE;
+          if (env) return String(env).replace(/\/$/, "");
+        } catch {}
+        return ""; // fall back to relative
+      };
+
+      const apiBase = resolveApiBase();
+      const url = apiBase
+        ? `${apiBase}/api/payments/create-session`
+        : `/api/payments/create-session`;
+
+      // Create Dodo payment session
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          plan: selectedPlan.id,
+          price: selectedPlan.price,
+          companyId,
+          userEmail,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to create payment session");
+      }
+
+      if (!data.url) {
+        throw new Error("No payment URL received from server");
+      }
+
+      console.log("[Payment] ✅ Redirecting to Dodo payment:", data.url);
+
+      // Redirect to Dodo payment page
+      window.location.href = data.url;
+    } catch (error: any) {
       console.error("Payment error:", error);
-      alert("❌ Payment failed. Please try again.");
+      alert(
+        `❌ Payment failed: ${error.message || "Please try again later."}`
+      );
     } finally {
       setIsProcessing(false);
     }

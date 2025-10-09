@@ -13,6 +13,9 @@ import SignupPage from "./pages/SignupPage";
 import AdminPage from "./pages/AdminPage";
 import AdminAuthPage from "./pages/AdminAuthPage";
 import CredentialsPage from "./pages/CredentialsPage";
+import PaymentPage from "./pages/PaymentPage";
+import PaymentSuccessPage from "./pages/PaymentSuccessPage";
+import PaymentCancelPage from "./pages/PaymentCancelPage";
 import { initializeGlobalConfig, getSmsServerUrl } from "./lib/firebaseConfig";
 // import { EnvelopeIcon } from "./components/icons";
 
@@ -242,6 +245,12 @@ const App: React.FC = () => {
       ? Page.Auth
       : pathRaw === "/signup"
       ? Page.Signup
+      : pathRaw === "/payment"
+      ? Page.Payment
+      : pathRaw === "/payment-success"
+      ? Page.PaymentSuccess
+      : pathRaw === "/payment-cancel"
+      ? Page.PaymentCancel
       : pathRaw === "/messenger" || pathRaw === "/settings"
       ? Page.Settings
       : pathRaw === "/feedback" || pathRaw === "/feeback"
@@ -1314,6 +1323,9 @@ const App: React.FC = () => {
       return Page.QuickFeedback;
     if (p === "/profile") return Page.Profile;
     if (p === "/credentials") return Page.Credentials;
+    if (p === "/payment") return Page.Payment;
+    if (p === "/payment-success") return Page.PaymentSuccess;
+    if (p === "/payment-cancel") return Page.PaymentCancel;
     return Page.Dashboard;
   };
 
@@ -1341,6 +1353,12 @@ const App: React.FC = () => {
         return joinBase("profile");
       case Page.Credentials:
         return joinBase("credentials");
+      case Page.Payment:
+        return joinBase("payment");
+      case Page.PaymentSuccess:
+        return joinBase("payment-success");
+      case Page.PaymentCancel:
+        return joinBase("payment-cancel");
       default:
         return joinBase("dashboard");
     }
@@ -1573,8 +1591,12 @@ const App: React.FC = () => {
               }
               setCurrentPage(Page.Auth);
             } else {
-              // Payment page removed - go to Dashboard after selecting a plan
-              setCurrentPage(Page.Dashboard);
+              // Navigate to Payment page
+              const target = joinBase("payment");
+              if (window.location.pathname !== target) {
+                window.history.pushState({ page: target }, "", target);
+              }
+              setCurrentPage(Page.Payment);
             }
           }}
         />
@@ -1748,6 +1770,27 @@ const App: React.FC = () => {
         {currentPage === Page.Credentials && (
           <CredentialsPage onBack={() => navigate(Page.Dashboard)} />
         )}
+        {currentPage === Page.Payment && (
+          <PaymentPage
+            selectedPlan={localStorage.getItem("pendingPlan") || "starter_1m"}
+            onSuccess={() => {
+              const target = joinBase("payment-success");
+              if (window.location.pathname !== target) {
+                window.history.pushState({ page: target }, "", target);
+              }
+              setCurrentPage(Page.PaymentSuccess);
+            }}
+            onCancel={() => {
+              const target = joinBase("payment-cancel");
+              if (window.location.pathname !== target) {
+                window.history.pushState({ page: target }, "", target);
+              }
+              setCurrentPage(Page.PaymentCancel);
+            }}
+          />
+        )}
+        {currentPage === Page.PaymentSuccess && <PaymentSuccessPage />}
+        {currentPage === Page.PaymentCancel && <PaymentCancelPage />}
       </main>
     </div>
   );

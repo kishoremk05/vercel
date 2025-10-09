@@ -46,4 +46,7 @@ export enum Page {
   Auth = 'auth',
   Signup = 'signup',
   Credentials = 'credentials',
+  Payment = 'payment',
+  PaymentSuccess = 'payment-success',
+  PaymentCancel = 'payment-cancel',
 }
