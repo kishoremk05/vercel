@@ -1609,17 +1609,32 @@ const App: React.FC = () => {
                 );
               }
             } else {
+              // Buyer signup: show Payment page (pricing) so they can choose a plan
               setAuth({ role: "buyer" });
-              setCurrentPage(Page.Dashboard);
-              if (
-                stripBase(window.location.pathname).toLowerCase() !==
-                "/dashboard"
-              ) {
-                window.history.pushState(
-                  { page: "/dashboard" },
-                  "",
-                  joinBase("dashboard")
-                );
+              
+              // Check if they came from a plan selection
+              let pending: string | null = null;
+              try {
+                pending = localStorage.getItem("pendingPlan");
+              } catch {}
+
+              if (pending) {
+                // User selected a plan before signup -> continue to checkout immediately
+                localStorage.removeItem("pendingPlan");
+                startCheckout(pending);
+              } else {
+                // No pending plan -> show Payment page (pricing)
+                setCurrentPage(Page.Payment);
+                if (
+                  stripBase(window.location.pathname).toLowerCase() !==
+                  "/payment"
+                ) {
+                  window.history.pushState(
+                    { page: "/payment" },
+                    "",
+                    joinBase("payment")
+                  );
+                }
               }
             }
           }}
@@ -1690,7 +1705,7 @@ const App: React.FC = () => {
               );
             }
           } else {
-            // Buyer login: if user had selected a plan before auth, continue to payment
+            // Buyer login: check if user came from a plan selection or wants to see pricing
             setAuth({ role: "buyer" });
             let pending: string | null = null;
             try {
@@ -1698,26 +1713,18 @@ const App: React.FC = () => {
             } catch {}
 
             if (pending) {
-              // Continue to payment flow
+              // User selected a plan before login -> continue to checkout immediately
+              localStorage.removeItem("pendingPlan");
+              startCheckout(pending);
+            } else {
+              // No pending plan -> show Payment page (pricing) so they can choose a plan
+              // This enables the flow: Homepage → Login → Payment (pricing) → Dashboard
               setCurrentPage(Page.Payment);
               const target = joinBase("payment");
               if (
                 stripBase(window.location.pathname).toLowerCase() !== "/payment"
               ) {
                 window.history.pushState({ page: "/payment" }, "", target);
-              }
-            } else {
-              // No pending plan -> show dashboard
-              setCurrentPage(Page.Dashboard);
-              if (
-                stripBase(window.location.pathname).toLowerCase() !==
-                "/dashboard"
-              ) {
-                window.history.pushState(
-                  { page: "/dashboard" },
-                  "",
-                  joinBase("dashboard")
-                );
               }
             }
           }

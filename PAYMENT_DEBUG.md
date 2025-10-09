@@ -1,12 +1,15 @@
 # Payment Gateway Debugging Guide
 
 ## Current Issue
+
 Body parsing fails on Render, causing `plan: undefined, price: NaN` even though CORS passes.
 
 ## ✅ Fixes Applied (Just Deployed)
 
 ### Frontend Changes:
+
 1. **PaymentPage.tsx**: Now sends ALL required headers explicitly:
+
    ```javascript
    headers: {
      "Content-Type": "application/json",
@@ -22,6 +25,7 @@ Body parsing fails on Render, causing `plan: undefined, price: NaN` even though 
 3. **Added logging**: Frontend now logs what it's sending
 
 ### Backend Changes:
+
 1. **Ultra-robust parsing**: Now reads from body → rawBody → headers → query
 2. **Detailed debug logging**: Shows exactly what server receives
 3. **CORS headers**: All custom headers allowed
@@ -31,18 +35,22 @@ Body parsing fails on Render, causing `plan: undefined, price: NaN` even though 
 ## Testing Steps (After Render Redeploys)
 
 ### Step 1: Wait for Deployment
+
 - **Render**: Check https://dashboard.render.com/
 - Wait for "Live" status (usually 2-3 minutes)
 - **Vercel**: Should auto-deploy from GitHub push
 
 ### Step 2: Test Payment Flow
+
 1. Open: https://vercel-swart-chi-29.vercel.app
 2. Log in (or signup)
 3. Select a pricing plan
 4. Click "Pay $XX"
 
 ### Step 3: Check Browser Console
+
 Expected to see:
+
 ```
 [Payment] Sending request: {
   url: "https://server-cibp.onrender.com/api/payments/create-session",
@@ -54,6 +62,7 @@ Expected to see:
 ```
 
 ### Step 4: Check Network Tab
+
 1. Open DevTools → Network tab
 2. Find POST to `/api/payments/create-session`
 3. **Request Headers** should show:
@@ -66,7 +75,9 @@ Expected to see:
 4. **Request Payload** should show JSON body (even if server ignores it)
 
 ### Step 5: Check Render Logs
+
 Expected to see:
+
 ```
 [Dodo Payment] RAW REQUEST DEBUG: {
   hasBody: false,
@@ -91,17 +102,20 @@ Expected to see:
 
 ## Expected Results
 
-✅ **Success**: 
+✅ **Success**:
+
 ```
 [Dodo Payment] ✅ Subscription created successfully!
 [Dodo Payment] Payment URL: https://test.dodopayments.com/checkout/...
 ```
+
 Then browser redirects to Dodo payment page.
 
 ❌ **Still Failing**:
 If you still see `plan: undefined`, check:
 
 1. **Headers Not Arriving?**
+
    - Render might be stripping custom headers
    - **Solution**: Add as query params instead
 
@@ -116,12 +130,17 @@ If you still see `plan: undefined`, check:
 If headers don't work either, we can use query params:
 
 **Frontend change**:
+
 ```typescript
-const url = `${apiBase}/api/payments/create-session?plan=${selectedPlan.id}&price=${selectedPlan.price}&companyId=${companyId}&userEmail=${encodeURIComponent(userEmail)}`;
+const url = `${apiBase}/api/payments/create-session?plan=${
+  selectedPlan.id
+}&price=${
+  selectedPlan.price
+}&companyId=${companyId}&userEmail=${encodeURIComponent(userEmail)}`;
 
 const response = await fetch(url, {
   method: "POST",
-  headers: { "Content-Type": "application/json" }
+  headers: { "Content-Type": "application/json" },
 });
 ```
 
@@ -144,6 +163,7 @@ const response = await fetch(url, {
 ## Environment Variables to Check
 
 On Render dashboard:
+
 ```bash
 DODO_API_KEY = sk_test_... (present ✅)
 DODO_API_BASE = https://test.dodopayments.com (present ✅)
@@ -163,6 +183,7 @@ FRONTEND_UR = ... (WRONG - needs rename to FRONTEND_URL ⚠️)
 After Render redeploys (2-3 minutes), the new logs should show:
 
 **Before (broken)**:
+
 ```
 [Dodo Payment] Creating session: {
   plan: undefined,  ❌
@@ -173,6 +194,7 @@ After Render redeploys (2-3 minutes), the new logs should show:
 ```
 
 **After (fixed)**:
+
 ```
 [Dodo Payment] PARSED VALUES: {
   plan: 'pro_6m',   ✅
@@ -197,6 +219,7 @@ After Render redeploys (2-3 minutes), the new logs should show:
 ## Support
 
 If payment still fails after this:
+
 1. Copy the **entire** "[Dodo Payment] RAW REQUEST DEBUG" log block
 2. Copy the **entire** "[Dodo Payment] PARSED VALUES" log block
 3. Copy browser console logs
