@@ -1044,21 +1044,39 @@ app.post("/api/payments/create-session", async (req, res) => {
   }
 
   try {
-    // Robust body parsing for Render: if express.json missed it, use rawBody
+    // ULTRA-ROBUST body parsing for Render proxy issues
     let body = req.body && typeof req.body === "object" ? req.body : {};
+    
+    // Log what we received for debugging
+    console.log("[Dodo Payment] RAW REQUEST DEBUG:", {
+      hasBody: !!req.body,
+      bodyType: typeof req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : [],
+      hasRawBody: !!req.rawBody,
+      rawBodyLength: req.rawBody ? req.rawBody.length : 0,
+      contentType: req.headers["content-type"],
+      hasHeaders: {
+        xCompanyId: !!req.headers["x-company-id"],
+        xUserEmail: !!req.headers["x-user-email"],
+        xPlanId: !!req.headers["x-plan-id"],
+        xPrice: !!req.headers["x-price"],
+      },
+    });
+
+    // Try to parse rawBody if body is empty
     if (!body || Object.keys(body).length === 0) {
       try {
         const raw = req.rawBody || "";
         if (raw && raw.trim().startsWith("{")) {
           body = JSON.parse(raw);
-          console.log("[Dodo Payment] Parsed body from rawBody ✅");
+          console.log("[Dodo Payment] ✅ Parsed body from rawBody");
         }
       } catch (e) {
         console.warn("[Dodo Payment] rawBody parse failed:", e.message);
       }
     }
 
-    // Accept multiple field names from different clients
+    // Accept multiple field names from different sources (body, headers, query)
     const plan =
       body.plan ||
       body.planId ||
@@ -1069,6 +1087,7 @@ app.post("/api/payments/create-session", async (req, res) => {
       req.headers["x-plan"] ||
       req.query.plan ||
       req.query.planId;
+    
     const priceRaw =
       body.price ??
       body.amount ??
@@ -1078,27 +1097,35 @@ app.post("/api/payments/create-session", async (req, res) => {
       req.headers["x-amount"] ??
       req.query.price ??
       req.query.amount;
-    const price =
-      typeof priceRaw === "string" ? Number(priceRaw) : Number(priceRaw);
+    
+    const price = priceRaw !== undefined && priceRaw !== null && priceRaw !== ""
+      ? (typeof priceRaw === "string" ? Number(priceRaw) : Number(priceRaw))
+      : NaN;
+    
     const companyId =
       body.companyId ||
       body.company_id ||
       req.headers["x-company-id"] ||
-      req.headers["x-client-id"];
+      req.headers["x-client-id"] ||
+      req.query.companyId ||
+      req.query.company_id;
+    
     const userEmail =
-      body.userEmail || body.user_email || req.headers["x-user-email"];
+      body.userEmail ||
+      body.user_email ||
+      req.headers["x-user-email"] ||
+      req.query.userEmail ||
+      req.query.user_email;
 
-    try {
-      console.log("[Dodo Payment] Creating session:", {
-        plan,
-        price,
-        companyId,
-        userEmail,
-        hasApiKey: !!DODO_API_KEY,
-        origin: req.headers.origin || null,
-        bodyKeys: Object.keys(body || {}),
-      });
-    } catch {}
+    // Final debug log
+    console.log("[Dodo Payment] PARSED VALUES:", {
+      plan,
+      price,
+      companyId,
+      userEmail,
+      hasApiKey: !!DODO_API_KEY,
+      origin: req.headers.origin || null,
+    });
 
     // Validate inputs: only plan is strictly required to map to a Dodo product
     if (!plan) {

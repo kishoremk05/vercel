@@ -139,14 +139,24 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         ? `${apiBase}/api/payments/create-session`
         : `/api/payments/create-session`;
 
+      console.log("[Payment] Sending request:", {
+        url,
+        plan: selectedPlan.id,
+        price: selectedPlan.price,
+        companyId,
+        userEmail,
+      });
+
       // Create Dodo payment session
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           // Fallback headers so server can read identifiers even if body parsing is impaired by host
-          ...(companyId ? { "x-company-id": companyId } : {}),
-          ...(userEmail ? { "x-user-email": userEmail } : {}),
+          "x-company-id": companyId || "",
+          "x-user-email": userEmail || "",
+          "x-plan-id": selectedPlan.id || "",
+          "x-price": String(selectedPlan.price || ""),
         },
         body: JSON.stringify({
           plan: selectedPlan.id,

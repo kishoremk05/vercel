@@ -207,15 +207,20 @@ const App: React.FC = () => {
         : `/api/payments/create-session`;
 
       const price = PLAN_PRICES[planId] || 0;
-      console.log("[Checkout] Creating session", { planId, price, companyId });
+      console.log("[Checkout] Creating session", {
+        planId,
+        price,
+        companyId,
+        userEmail,
+      });
       const resp = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(companyId ? { "x-company-id": companyId } : {}),
-          ...(userEmail ? { "x-user-email": userEmail } : {}),
-          ...(planId ? { "x-plan-id": planId } : {}),
-          ...(price ? { "x-price": String(price) } : {}),
+          "x-company-id": companyId || "",
+          "x-user-email": userEmail || "",
+          "x-plan-id": planId || "",
+          "x-price": String(price || ""),
         },
         body: JSON.stringify({ plan: planId, price, companyId, userEmail }),
       });
