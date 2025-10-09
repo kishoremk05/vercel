@@ -974,247 +974,284 @@ app.post("/api/subscription", async (req, res) => {
 });
 
 // ============== DODO PAYMENT INTEGRATION ==============
-// Dodo Payment Gateway Configuration (SUBSCRIPTION API)
+// Dodo Payment Gateway Configuration
 const DODO_API_KEY = process.env.DODO_API_KEY || "";
-const DODO_API_BASE = process.env.DODO_API_BASE || "https://test.dodopayments.com";
+const DODO_API_BASE =
+  process.env.DODO_API_BASE || "https://test.dodopayments.com";
 
-// Product ID mapping - Replace with your actual subscription product IDs from Dodo Dashboard
+// Product ID mapping (configure these in your Dodo dashboard)
+// These match your other working project's product IDs
 const DODO_PRODUCTS = {
-  starter_1m: process.env.DODO_PRODUCT_STARTER || "pdt_0SaMzoGEsjSCi8t0xd5vN",
-  growth_3m: process.env.DODO_PRODUCT_GROWTH || "pdt_OsKdNhpmFjOxSkqpwBtXR",
-  pro_6m: process.env.DODO_PRODUCT_PRO || "pdt_Blsof767CZTPWreD75zFF",
+  starter_1m:
+    process.env.DODO_PRODUCT_STARTER_1M || "pdt_0SaMzoGEsjSCi8t0xd5vN",
+  growth_3m: process.env.DODO_PRODUCT_GROWTH_3M || "pdt_OsKdNhpmFjOxSkqpwBtXR",
+  pro_6m: process.env.DODO_PRODUCT_PRO_6M || "pdt_Blsof767CZTPWreD75zFF",
+  // Add aliases for consistency with frontend
+  monthly: process.env.DODO_PRODUCT_STARTER_1M || "pdt_0SaMzoGEsjSCi8t0xd5vN",
+  quarterly:
+    process.env.DODO_PRODUCT_GROWTH_3M || "pdt_OsKdNhpmFjOxSkqpwBtXR",
+  halfyearly: process.env.DODO_PRODUCT_PRO_6M || "pdt_Blsof767CZTPWreD75zFF",
 };
 
-if (!DODO_API_KEY) {
-  console.error("❌ WARNING: DODO_API_KEY not found in environment variables!");
-  console.error("   Set DODO_API_KEY in your .env file or Render environment");
-} else {
-  console.log("✅ Dodo Payment API Key loaded successfully");
-  console.log(`   Using API Base: ${DODO_API_BASE}`);
+// Import axios dynamically (already imported at top of file, but ensure it's available)
+let axiosModule;
+try {
+  axiosModule = await import("axios");
+} catch {
+  console.warn("[Dodo] axios not available, will use fetch fallback");
 }
 
-// Create payment session (SUBSCRIPTION API)
+// Create payment session (Dodo gateway integration)
 app.post("/api/payments/create-session", async (req, res) => {
+  if (!DODO_API_KEY) {
+    console.error("[Dodo Payment] ❌ DODO_API_KEY not found in .env file!");
+    return res.status(500).json({
+      success: false,
+      error: "Server configuration error: API key missing",
+    });
+  }
+
   try {
     const { plan, price, companyId, userEmail } = req.body || {};
-    
-    console.log("[Payment] Creating SUBSCRIPTION session:", { plan, price, companyId, userEmail });
-    
+
+    console.log("[Dodo Payment] Creating session:", {
+      plan,
+      price,
+      companyId,
+      userEmail,
+      hasApiKey: !!DODO_API_KEY,
+    });
+
     // Validate inputs
     if (!plan || !price) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields: plan and price"
+        error: "Missing required fields: plan and price",
       });
     }
 
-    // Map plan to product ID
+    // Map plan to product ID (support both naming conventions)
     const productId = DODO_PRODUCTS[plan];
     if (!productId) {
+      console.error(`[Dodo Payment] Invalid plan: ${plan}`);
       return res.status(400).json({
         success: false,
-        error: `Invalid plan: ${plan}. Valid plans: starter_1m, growth_3m, pro_6m`
+        error: `Invalid plan selected: ${plan}`,
+        availablePlans: Object.keys(DODO_PRODUCTS),
       });
     }
 
-    // Validate expected prices
-    const expectedPrices = {
-      starter_1m: 15,
-      growth_3m: 40,
-      pro_6m: 80,
-    };
+    // Determine return URLs with fallbacks
+    const baseUrl =
+      process.env.FRONTEND_URL ||
+      process.env.VITE_API_BASE ||
+      "https://vercel-swart-chi-29.vercel.app";
+    const successUrl = `${baseUrl.replace(/\/$/, "")}/payment-success`;
 
-    if (price !== expectedPrices[plan]) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid price for selected plan",
-      });
-    }
-
-    // Check if Dodo API key is configured
-    if (!DODO_API_KEY) {
-      console.error("[Payment] DODO_API_KEY not configured");
-      return res.status(500).json({
-        success: false,
-        error: "Payment gateway not configured. Please contact support."
-      });
-    }
-
-    // Determine return URLs
-    const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
-    const host = req.headers["x-forwarded-host"] || req.get("host") || "vercel-swart-chi-29.vercel.app";
-    const baseUrl = `${protocol}://${host}`;
-    
-    const successUrl = `${baseUrl}/payment-success`;
-    const cancelUrl = `${baseUrl}/payment-cancel`;
-
-    // Create SUBSCRIPTION payload for Dodo API
+    // Subscription payload matching your working server.js
     const payload = {
-      payment_link: true,  // Request payment link for subscription
+      payment_link: true,
       product_id: productId,
       quantity: 1,
       customer: {
         email: userEmail || "customer@example.com",
-        name: "Business Customer",
+        name: "Demo User",
       },
       billing: {
         city: "New York",
-        country: "US",  // Keep USD currency
+        country: "US", // Use US to keep USD pricing
         state: "NY",
-        street: "123 Business St",
+        street: "123 Main St",
         zipcode: "10001",
       },
       return_url: successUrl,
       metadata: {
-        companyId: companyId || "",
+        companyId: companyId || "unknown",
         plan: plan,
-        price: price.toString(),
+        price: price,
         timestamp: new Date().toISOString(),
       },
     };
 
-    console.log("[Payment] Calling Dodo SUBSCRIPTIONS API:", `${DODO_API_BASE}/subscriptions`);
+    console.log(
+      `[Dodo Payment] Creating SUBSCRIPTION for ${plan} plan ($${price})...`
+    );
+    console.log(`[Dodo Payment] API URL: ${DODO_API_BASE}/subscriptions`);
+    console.log(
+      `[Dodo Payment] Product ID: ${productId}, Return URL: ${successUrl}`
+    );
 
-    // Call Dodo Subscriptions API
-    const dodoResponse = await fetch(`${DODO_API_BASE}/subscriptions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${DODO_API_KEY}`
-      },
-      body: JSON.stringify(payload)
-    });
+    // Create Dodo subscription using axios
+    let dodoData;
+    try {
+      const axios = axiosModule?.default || (await import("axios")).default;
+      const dodoResponse = await axios.post(
+        `${DODO_API_BASE}/subscriptions`,
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${DODO_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 30000, // 30 second timeout
+        }
+      );
+      dodoData = dodoResponse.data;
+    } catch (axiosError) {
+      console.error("[Dodo Payment] ❌ Error creating subscription:");
+      console.error("Status:", axiosError.response?.status);
+      console.error(
+        "Data:",
+        JSON.stringify(axiosError.response?.data, null, 2)
+      );
+      console.error("Message:", axiosError.message);
 
-    const dodoData = await dodoResponse.json().catch(() => ({}));
-
-    if (!dodoResponse.ok) {
-      console.error("[Payment] Dodo API error:", {
-        status: dodoResponse.status,
-        data: dodoData
-      });
-      return res.status(dodoResponse.status).json({
+      return res.status(500).json({
         success: false,
-        error: dodoData.message || "Failed to create subscription payment",
-        details: dodoData
+        error: "Failed to create subscription payment",
+        details: axiosError.response?.data || axiosError.message,
       });
     }
 
     // Extract payment link from response
-    const paymentLink = dodoData.payment_link || dodoData.checkout_url || dodoData.url;
-    
-    if (!paymentLink) {
-      console.error("[Payment] No payment link in response:", dodoData);
+    const paymentUrl =
+      dodoData.payment_link || dodoData.checkout_url || dodoData.url;
+
+    if (!paymentUrl) {
+      console.error("[Dodo Payment] ❌ No payment link in response:", dodoData);
       return res.status(500).json({
         success: false,
-        error: "No payment link received from payment provider",
-        details: dodoData
+        error: "Payment gateway did not return checkout URL",
+        details: dodoData,
       });
     }
 
-    console.log("[Payment] ✅ SUBSCRIPTION payment link created successfully");
-    
+    console.log("[Dodo Payment] ✅ Subscription created successfully!");
+    console.log("[Dodo Payment] Payment URL:", paymentUrl);
+
     return res.json({
       success: true,
-      url: paymentLink,
-      sessionId: dodoData.subscription_id || dodoData.id
+      url: paymentUrl,
+      sessionId: dodoData.subscription_id || dodoData.id,
     });
-
   } catch (error) {
-    console.error("[Payment] Exception creating subscription:", error);
+    console.error("[Dodo Payment] ❌ Exception:", error);
+    console.error("[Dodo Payment] Stack:", error.stack);
     return res.status(500).json({
       success: false,
-      error: error.message || "Internal server error"
+      error: error.message || "Internal server error creating payment session",
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });
 
-// Webhook receiver (Dodo) - handle subscription events
+// Webhook receiver (Dodo) - verify payment completion
 app.post("/api/payments/webhook", async (req, res) => {
   try {
+    // Dodo sends webhook with payment status
+    const signature = req.headers["x-dodo-signature"];
     const event = req.body;
 
-    console.log("[Webhook] Received event:", event.type || event.event_type);
+    console.log(
+      "[Dodo Webhook] Received event:",
+      event.type || event.event_type
+    );
 
-    // TODO: Verify webhook signature for production security
-    // const signature = req.headers["x-dodo-signature"];
-    // if (!verifyDodoSignature(req.body, signature, process.env.DODO_WEBHOOK_SECRET)) {
-    //   console.error("[Webhook] Invalid signature");
+    // Verify signature (IMPORTANT for production!)
+    // const isValid = verifyDodoSignature(req.body, signature, process.env.DODO_WEBHOOK_SECRET);
+    // if (!isValid) {
+    //   console.error("[Dodo Webhook] Invalid signature");
     //   return res.status(401).json({ error: "Invalid signature" });
     // }
 
-    // Handle subscription activated/payment completed events
+    // Handle different event types
     const eventType = event.type || event.event_type;
-    
+
     if (
-      eventType === "subscription.activated" ||
       eventType === "subscription.created" ||
-      eventType === "payment.completed" ||
-      eventType === "checkout.session.completed"
+      eventType === "checkout.session.completed" ||
+      eventType === "payment.succeeded"
     ) {
-      const subscription = event.data || event.subscription;
-      const metadata = subscription.metadata || {};
-      const { companyId, plan, price } = metadata;
-      
-      console.log("[Webhook] Subscription activated:", {
-        sessionId: subscription.id,
-        companyId,
-        plan,
-        price
+      const session = event.data || event;
+      const metadata = session.metadata || {};
+
+      console.log("[Dodo Webhook] Payment completed:", {
+        sessionId: session.id || session.subscription_id,
+        companyId: metadata.companyId,
+        plan: metadata.plan,
+        amount: session.amount_total || session.amount,
       });
 
       // Update subscription in Firestore
-      if (firestoreEnabled && companyId) {
+      if (firestoreEnabled && metadata.companyId) {
         try {
           const firestore = firebaseAdmin.firestore();
-          const companyRef = firestore.collection("companies").doc(companyId);
-          
-          // Check if company exists
-          const companyDoc = await companyRef.get();
-          if (!companyDoc.exists) {
-            console.error("[Webhook] Company not found:", companyId);
-            return res.status(404).json({ error: "Company not found" });
+          const companyRef = firestore
+            .collection("companies")
+            .doc(metadata.companyId);
+
+          // Calculate expiry date based on plan
+          const now = new Date();
+          let expiryDate = new Date(now);
+          let smsCredits = 250; // Default for starter
+
+          if (metadata.plan === "starter_1m") {
+            expiryDate.setMonth(expiryDate.getMonth() + 1);
+            smsCredits = 250;
+          } else if (metadata.plan === "growth_3m") {
+            expiryDate.setMonth(expiryDate.getMonth() + 3);
+            smsCredits = 800;
+          } else if (metadata.plan === "pro_6m") {
+            expiryDate.setMonth(expiryDate.getMonth() + 6);
+            smsCredits = 1500;
           }
-          
-          // Calculate subscription dates based on plan duration
-          const startDate = new Date();
-          const endDate = new Date();
-          const durationMonths = plan.includes("3m") ? 3 : plan.includes("6m") ? 6 : 1;
-          endDate.setMonth(endDate.getMonth() + durationMonths);
 
-          // Determine SMS credits based on plan
-          const smsCredits = plan.includes("starter") ? 250 : plan.includes("growth") ? 800 : 1500;
-
-          // Update company subscription
-          await companyRef.update({
-            subscription: {
-              status: "active",
-              plan: plan,
-              startDate: firebaseAdmin.firestore.Timestamp.fromDate(startDate),
-              endDate: firebaseAdmin.firestore.Timestamp.fromDate(endDate),
-              amount: parseFloat(price) || 0,
-              subscriptionId: subscription.id,
-              smsCredits: smsCredits,
-              remainingCredits: smsCredits,
-              lastPaymentDate: firebaseAdmin.firestore.Timestamp.fromDate(startDate),
+          await companyRef.set(
+            {
+              subscription: {
+                status: "active",
+                plan: metadata.plan,
+                smsCredits: smsCredits,
+                remainingCredits: smsCredits,
+                startDate: firebaseAdmin.firestore.Timestamp.fromDate(now),
+                expiryDate:
+                  firebaseAdmin.firestore.Timestamp.fromDate(expiryDate),
+                paymentSessionId: session.id || session.subscription_id,
+                lastPaymentDate:
+                  firebaseAdmin.firestore.Timestamp.fromDate(now),
+              },
+              updatedAt: firebaseAdmin.firestore.Timestamp.now(),
             },
-            updatedAt: firebaseAdmin.firestore.Timestamp.now()
-          });
+            { merge: true }
+          );
 
-          console.log("[Webhook] ✅ Subscription activated in Firestore:", companyId);
+          console.log(
+            "[Dodo Webhook] ✅ Subscription activated for company:",
+            metadata.companyId
+          );
+          console.log(
+            "[Dodo Webhook] SMS Credits:",
+            smsCredits,
+            "| Expires:",
+            expiryDate.toISOString()
+          );
         } catch (dbError) {
-          console.error("[Webhook] Failed to update subscription:", dbError);
-          // Still return 200 to acknowledge webhook receipt
+          console.error(
+            "[Dodo Webhook] ❌ Failed to update subscription:",
+            dbError
+          );
         }
-      } else if (!companyId) {
-        console.warn("[Webhook] No companyId in metadata, skipping Firestore update");
+      } else {
+        console.log(
+          "[Dodo Webhook] ⚠️ Skipping database update - Firestore disabled or no companyId"
+        );
       }
     }
 
     // Always respond 200 to acknowledge receipt
     res.json({ received: true });
-
   } catch (error) {
-    console.error("[Webhook] Exception:", error);
+    console.error("[Dodo Webhook] ❌ Exception:", error);
     res.status(500).json({ error: error.message });
   }
 });

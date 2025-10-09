@@ -241,9 +241,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       window.location.href = data.url;
     } catch (error: any) {
       console.error("Payment error:", error);
-      alert(
-        `❌ Payment failed: ${error.message || "Please try again later."}`
-      );
+      alert(`❌ Payment failed: ${error.message || "Please try again later."}`);
     } finally {
       setIsProcessing(false);
     }

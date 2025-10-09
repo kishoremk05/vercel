@@ -1701,7 +1701,16 @@ const App: React.FC = () => {
             {/* Dashboard now stays visible; locking handled inside Customer List section */}
           </div>
         )}
-        {/* Payment page removed */}
+        {/* Payment Pages */}
+        {currentPage === Page.Payment && (
+          <PaymentPage
+            selectedPlan={localStorage.getItem("pendingPlan") || "growth_3m"}
+            onPaymentSuccess={handlePaymentSuccess}
+            onBack={() => navigate(Page.Home)}
+          />
+        )}
+        {currentPage === Page.PaymentSuccess && <PaymentSuccessPage />}
+        {currentPage === Page.PaymentCancel && <PaymentCancelPage />}
         {currentPage === Page.Profile && (
           <ProfilePage
             user={{

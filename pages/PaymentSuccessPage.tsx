@@ -96,8 +96,8 @@ const PaymentSuccessPage: React.FC = () => {
           {/* Countdown */}
           <div className="text-sm text-gray-500">
             Redirecting to dashboard in{" "}
-            <span className="font-bold text-green-600">{countdown}</span>{" "}
-            second{countdown !== 1 ? "s" : ""}...
+            <span className="font-bold text-green-600">{countdown}</span> second
+            {countdown !== 1 ? "s" : ""}...
           </div>
 
           {/* Action Button */}
