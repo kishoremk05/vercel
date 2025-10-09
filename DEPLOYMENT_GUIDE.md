@@ -3,6 +3,7 @@
 ## Overview
 
 This guide will help you deploy your updated Dodo payment integration to:
+
 1. **GitHub** - Your code repository
 2. **Vercel** - Your frontend hosting
 3. **Render** - Your backend server (if applicable)
@@ -12,11 +13,13 @@ This guide will help you deploy your updated Dodo payment integration to:
 ## 📦 What Was Changed
 
 ### Files Modified:
+
 - ✅ `sms-server.js` - Enhanced Dodo payment integration
 - ✅ `package.json` - Added axios dependency
 - ✅ `.env.example` - Updated with Dodo configuration
 
 ### Files Added:
+
 - ✅ `DODO_PAYMENT_SETUP.md` - Setup instructions
 - ✅ `DODO_CHECKLIST.md` - Verification checklist
 - ✅ `test-dodo-payment.js` - Integration test script
@@ -63,6 +66,7 @@ git push origin main
 ```
 
 **Alternative detailed commit message:**
+
 ```bash
 git commit -m "feat: Dodo payment integration improvements
 
@@ -128,11 +132,13 @@ VITE_API_BASE=https://server-cibp.onrender.com
 1. **Push to GitHub first** (Step 1)
 
 2. **Go to Render Dashboard**
+
    - Navigate to your service (e.g., `server-cibp`)
 
 3. **Update Environment Variables**
-   
+
    Add/Update these in Render Environment Variables:
+
    ```
    DODO_API_KEY=your_actual_dodo_api_key_here
    DODO_API_BASE=https://test.dodopayments.com
@@ -144,6 +150,7 @@ VITE_API_BASE=https://server-cibp.onrender.com
    ```
 
 4. **Trigger Manual Deploy**
+
    - Click "Manual Deploy" → "Deploy latest commit"
    - Or use "Clear build cache & deploy"
 
@@ -189,6 +196,7 @@ VITE_API_BASE=https://server-cibp.onrender.com
 ### 4. Check Server Logs
 
 Look for these messages in production logs:
+
 ```
 ✅ API Key loaded successfully
 [Dodo Payment] Creating SUBSCRIPTION for [plan] plan...
@@ -204,6 +212,7 @@ Look for these messages in production logs:
 
 **Issue**: Build fails
 **Solution**:
+
 ```bash
 # Check build logs in Vercel Dashboard
 # Ensure all dependencies are in package.json
@@ -213,6 +222,7 @@ npm run build  # Test locally first
 
 **Issue**: Environment variables not working
 **Solution**:
+
 - Ensure variables start with `VITE_` for frontend
 - Redeploy after adding variables
 - Check deployment logs
@@ -221,6 +231,7 @@ npm run build  # Test locally first
 
 **Issue**: Server won't start
 **Solution**:
+
 ```bash
 # Check logs in Render Dashboard
 # Verify all environment variables are set
@@ -229,6 +240,7 @@ npm run build  # Test locally first
 
 **Issue**: Dodo API calls failing
 **Solution**:
+
 - Verify `DODO_API_KEY` is set in Render
 - Check it's the correct key (not wrapped in quotes)
 - Ensure axios is installed (`npm install`)
@@ -237,12 +249,14 @@ npm run build  # Test locally first
 
 **Issue**: "DODO_API_KEY not configured"
 **Solution**:
+
 - Add `DODO_API_KEY` to Render environment variables
 - Restart the service
 - Check logs for confirmation
 
 **Issue**: "Invalid plan selected"
 **Solution**:
+
 - Verify frontend sends: `starter_1m`, `growth_3m`, or `pro_6m`
 - Check product IDs in environment variables
 - Ensure they match Dodo Dashboard
@@ -252,6 +266,7 @@ npm run build  # Test locally first
 ## 📋 Quick Command Reference
 
 ### GitHub Operations
+
 ```bash
 # Check status
 git status
@@ -273,6 +288,7 @@ git pull origin main
 ```
 
 ### Vercel Operations
+
 ```bash
 # Deploy to production
 vercel --prod
@@ -285,6 +301,7 @@ vercel logs
 ```
 
 ### NPM Operations
+
 ```bash
 # Install dependencies
 npm install
@@ -318,11 +335,13 @@ npm run dev
 ### What to Monitor:
 
 1. **Vercel Analytics**
+
    - Page load times
    - Error rates
    - Geographic distribution
 
 2. **Render Logs**
+
    - API response times
    - Error messages
    - Dodo API call success rate

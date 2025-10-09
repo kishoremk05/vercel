@@ -7,11 +7,13 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ## 📋 Pre-Setup Checklist
 
 - [ ] **Dodo Account Created**
+
   - Go to https://test.dodopayments.com
   - Sign up for a test account
   - Verify your email
 
 - [ ] **API Key Obtained**
+
   - Log in to Dodo Dashboard
   - Navigate to Settings → API Keys
   - Copy your Test API Key
@@ -28,12 +30,14 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### 1. Code Updates
 
 - [x] ✅ Server code updated (`sms-server.js`)
+
   - Product ID mapping enhanced
   - Error handling improved
   - Axios integration added
   - Better logging implemented
 
 - [x] ✅ Package.json updated
+
   - Axios dependency added
 
 - [ ] **Install Dependencies**
@@ -44,16 +48,19 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### 2. Environment Configuration
 
 - [ ] **Create .env file**
+
   ```bash
   copy .env.example .env
   ```
 
 - [ ] **Add Dodo API Key**
+
   ```env
   DODO_API_KEY=your_actual_api_key_here
   ```
 
 - [ ] **Verify Product IDs**
+
   ```env
   DODO_PRODUCT_STARTER_1M=pdt_0SaMzoGEsjSCi8t0xd5vN
   DODO_PRODUCT_GROWTH_3M=pdt_OsKdNhpmFjOxSkqpwBtXR
@@ -68,9 +75,11 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### 3. Test the Integration
 
 - [ ] **Run Test Script**
+
   ```bash
   node test-dodo-payment.js
   ```
+
   - Should show "✅ Test completed successfully!"
   - Should display a payment link
 
@@ -86,16 +95,19 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### Local Testing
 
 - [ ] **Payment Page Loads**
+
   - Navigate to `http://localhost:5173/payment`
   - All 3 plans should be visible
   - Plan details should be correct
 
 - [ ] **Plan Selection Works**
+
   - Click different plan cards
   - Selected plan should be highlighted
   - Price should update in summary
 
 - [ ] **Payment Creation Works**
+
   - Click "Pay $[amount]" button
   - Button should show "Processing..."
   - Should redirect to Dodo payment page
@@ -111,12 +123,14 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### Payment Flow Testing
 
 - [ ] **Test Payment on Dodo**
+
   - Use test card: `4242 4242 4242 4242`
   - Expiry: Any future date
   - CVV: Any 3 digits
   - Complete the payment
 
 - [ ] **Success Redirect Works**
+
   - After payment, should redirect to `/payment-success`
   - Success page should display correctly
   - Countdown should work
@@ -134,17 +148,21 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### Server-Side Verification
 
 - [ ] **Check Environment Variables**
+
   ```bash
   # On Windows PowerShell
   $env:DODO_API_KEY
   $env:DODO_API_BASE
   ```
+
   - Should display your actual values
 
 - [ ] **Verify Axios Installation**
+
   ```bash
   npm list axios
   ```
+
   - Should show `axios@1.7.2` or higher
 
 - [ ] **Check Server Logs**
@@ -155,6 +173,7 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### Frontend Verification
 
 - [ ] **Payment Page UI**
+
   - Plans display correctly
   - Prices are accurate
   - Features are listed
@@ -162,6 +181,7 @@ This document provides a complete checklist to ensure your Dodo payment integrat
   - Form validation works
 
 - [ ] **API Communication**
+
   - Open Browser DevTools → Network tab
   - Click Pay button
   - Look for POST to `/api/payments/create-session`
@@ -178,6 +198,7 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### ❌ "DODO_API_KEY not configured"
 
 **Solution**:
+
 1. Check `.env` file exists
 2. Verify `DODO_API_KEY` is set
 3. Restart server after editing `.env`
@@ -185,6 +206,7 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### ❌ "Invalid plan selected"
 
 **Solution**:
+
 - Frontend sends: `starter_1m`, `growth_3m`, or `pro_6m`
 - Server accepts both old and new naming
 - Check `PaymentPage.tsx` plan IDs match
@@ -192,6 +214,7 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### ❌ "Payment gateway did not return checkout URL"
 
 **Solution**:
+
 1. Verify product IDs in `.env` match Dodo Dashboard
 2. Check product is "Published" in Dodo
 3. Verify billing currency is set to USD
@@ -199,6 +222,7 @@ This document provides a complete checklist to ensure your Dodo payment integrat
 ### ❌ "axios is not defined"
 
 **Solution**:
+
 ```bash
 npm install axios
 ```
@@ -206,6 +230,7 @@ npm install axios
 ### ❌ Redirect fails after payment
 
 **Solution**:
+
 1. Check `FRONTEND_URL` in `.env`
 2. Verify URL doesn't have trailing slash
 3. Test both success and cancel URLs
@@ -228,15 +253,18 @@ Your integration is working correctly if:
 Once everything is working:
 
 1. **Configure Webhooks** (Optional)
+
    - In Dodo Dashboard → Webhooks
    - Add endpoint: `https://your-server.com/api/payments/webhook`
    - Select events: `subscription.created`, `payment.succeeded`
 
 2. **Update Firebase** (If using)
+
    - Webhook handler updates subscription in Firestore
    - Verify subscription data structure
 
 3. **Production Deployment**
+
    - Switch to production API keys
    - Update `DODO_API_BASE` to production URL
    - Test with real payment methods

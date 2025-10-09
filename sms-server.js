@@ -988,8 +988,7 @@ const DODO_PRODUCTS = {
   pro_6m: process.env.DODO_PRODUCT_PRO_6M || "pdt_Blsof767CZTPWreD75zFF",
   // Add aliases for consistency with frontend
   monthly: process.env.DODO_PRODUCT_STARTER_1M || "pdt_0SaMzoGEsjSCi8t0xd5vN",
-  quarterly:
-    process.env.DODO_PRODUCT_GROWTH_3M || "pdt_OsKdNhpmFjOxSkqpwBtXR",
+  quarterly: process.env.DODO_PRODUCT_GROWTH_3M || "pdt_OsKdNhpmFjOxSkqpwBtXR",
   halfyearly: process.env.DODO_PRODUCT_PRO_6M || "pdt_Blsof767CZTPWreD75zFF",
 };
 

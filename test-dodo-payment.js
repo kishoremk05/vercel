@@ -10,13 +10,12 @@ const DODO_API_BASE =
 
 const PRODUCT_IDS = {
   monthly: process.env.DODO_PRODUCT_STARTER_1M || "pdt_0SaMzoGEsjSCi8t0xd5vN",
-  quarterly:
-    process.env.DODO_PRODUCT_GROWTH_3M || "pdt_OsKdNhpmFjOxSkqpwBtXR",
+  quarterly: process.env.DODO_PRODUCT_GROWTH_3M || "pdt_OsKdNhpmFjOxSkqpwBtXR",
   halfyearly: process.env.DODO_PRODUCT_PRO_6M || "pdt_Blsof767CZTPWreD75zFF",
 };
 
 console.log("🧪 Dodo Payment Integration Test\n");
-console.log("=" .repeat(50));
+console.log("=".repeat(50));
 
 // Check API key
 if (!DODO_API_KEY) {
@@ -67,17 +66,13 @@ console.log(JSON.stringify(payload, null, 2));
 console.log("\n⏳ Sending request to Dodo API...\n");
 
 try {
-  const response = await axios.post(
-    `${DODO_API_BASE}/subscriptions`,
-    payload,
-    {
-      headers: {
-        Authorization: `Bearer ${DODO_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
-    }
-  );
+  const response = await axios.post(`${DODO_API_BASE}/subscriptions`, payload, {
+    headers: {
+      Authorization: `Bearer ${DODO_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    timeout: 30000,
+  });
 
   console.log("✅ SUCCESS! Payment session created.\n");
   console.log("📥 Response:");
@@ -91,7 +86,9 @@ try {
   if (paymentUrl) {
     console.log("\n🔗 Payment Link:");
     console.log("   " + paymentUrl);
-    console.log("\n💡 You can open this URL in your browser to test the payment flow.");
+    console.log(
+      "\n💡 You can open this URL in your browser to test the payment flow."
+    );
   } else {
     console.log("\n⚠️  Warning: No payment link found in response");
   }
@@ -119,9 +116,7 @@ try {
   console.log("   1. Verify your DODO_API_KEY is correct");
   console.log("   2. Check if the product IDs exist in your Dodo dashboard");
   console.log("   3. Ensure your Dodo account is active");
-  console.log(
-    "   4. Try using the test API: https://test.dodopayments.com"
-  );
+  console.log("   4. Try using the test API: https://test.dodopayments.com");
 
   process.exit(1);
 }

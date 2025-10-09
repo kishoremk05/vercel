@@ -31,6 +31,7 @@ npm install
 ### Step 2: Configure Environment Variables
 
 1. Copy `.env.example` to `.env`:
+
    ```bash
    copy .env.example .env
    ```
@@ -62,11 +63,13 @@ FRONTEND_URL=https://vercel-swart-chi-29.vercel.app
 ### Step 4: Verify Product IDs
 
 The default product IDs in `.env.example` match your working project:
+
 - **Starter (1 month)**: `pdt_0SaMzoGEsjSCi8t0xd5vN`
 - **Growth (3 months)**: `pdt_OsKdNhpmFjOxSkqpwBtXR`
 - **Professional (6 months)**: `pdt_Blsof767CZTPWreD75zFF`
 
 If you're using different products in Dodo:
+
 1. Go to **Products** section in Dodo Dashboard
 2. Copy the product IDs for your subscription plans
 3. Update the values in `.env`
@@ -76,6 +79,7 @@ If you're using different products in Dodo:
 #### Test Locally
 
 1. Start the server:
+
    ```bash
    npm run dev
    ```
@@ -91,6 +95,7 @@ If you're using different products in Dodo:
 #### Check Server Logs
 
 You should see logs like:
+
 ```
 [Dodo Payment] Creating SUBSCRIPTION for growth_3m plan ($40)...
 [Dodo Payment] API URL: https://test.dodopayments.com/subscriptions
@@ -106,6 +111,7 @@ You should see logs like:
 **Cause**: The `.env` file is missing or not loaded.
 
 **Solution**:
+
 1. Ensure `.env` file exists in the project root
 2. Verify `DODO_API_KEY` is set correctly
 3. Restart the server after editing `.env`
@@ -115,6 +121,7 @@ You should see logs like:
 **Cause**: Frontend is sending a plan name that doesn't match server product mapping.
 
 **Solution**: The server now supports both naming conventions:
+
 - `starter_1m` / `monthly`
 - `growth_3m` / `quarterly`
 - `pro_6m` / `halfyearly`
@@ -124,6 +131,7 @@ You should see logs like:
 **Cause**: Dodo API returned success but no payment link.
 
 **Solution**:
+
 1. Check if your Dodo products are configured correctly
 2. Verify product IDs in Dodo Dashboard match `.env`
 3. Check Dodo Dashboard for any account issues
@@ -133,6 +141,7 @@ You should see logs like:
 **Cause**: Dodo API rejected the request.
 
 **Solution**:
+
 1. Check server logs for detailed error message
 2. Verify API key is valid and not expired
 3. Ensure billing information is correct
@@ -154,23 +163,25 @@ You should see logs like:
 
 The plans are defined in `PaymentPage.tsx`:
 
-| Plan ID | Name | Duration | Price | SMS Credits |
-|---------|------|----------|-------|-------------|
-| `starter_1m` | Starter | 1 month | $15 | 250 |
-| `growth_3m` | Growth | 3 months | $40 | 800 |
-| `pro_6m` | Professional | 6 months | $80 | 1500 |
+| Plan ID      | Name         | Duration | Price | SMS Credits |
+| ------------ | ------------ | -------- | ----- | ----------- |
+| `starter_1m` | Starter      | 1 month  | $15   | 250         |
+| `growth_3m`  | Growth       | 3 months | $40   | 800         |
+| `pro_6m`     | Professional | 6 months | $80   | 1500        |
 
 ## 🔐 Security Notes
 
 ### For Production Deployment
 
 1. **Use Production API Keys**:
+
    ```env
    DODO_API_BASE=https://api.dodopayments.com
    DODO_API_KEY=your_production_api_key
    ```
 
 2. **Enable Webhook Signature Verification**:
+
    - Uncomment signature verification in webhook handler
    - Add `DODO_WEBHOOK_SECRET` to `.env`
    - Get webhook secret from Dodo Dashboard
@@ -192,6 +203,7 @@ The plans are defined in `PaymentPage.tsx`:
 ### Render (Backend)
 
 1. Set environment variables in Render Dashboard:
+
    ```
    DODO_API_KEY=your_dodo_api_key
    DODO_API_BASE=https://test.dodopayments.com
