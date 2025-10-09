@@ -104,6 +104,11 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
 
       // Resolve API base
       const resolveApiBase = () => {
+        // Priority: smsServerUrl from Firebase config -> explicit apiBase -> globals -> Vite env -> hosted fallback (Render)
+        try {
+          const fromSms = localStorage.getItem("smsServerUrl");
+          if (fromSms) return fromSms.replace(/\/$/, "");
+        } catch {}
         try {
           const fromLS = localStorage.getItem("apiBase");
           if (fromLS) return fromLS.replace(/\/$/, "");
@@ -116,7 +121,17 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           const env = (import.meta as any)?.env?.VITE_API_BASE;
           if (env) return String(env).replace(/\/$/, "");
         } catch {}
-        return ""; // fall back to relative
+        // Production fallback to Render when on a hosted domain
+        if (
+          typeof window !== "undefined" &&
+          window.location &&
+          window.location.hostname &&
+          window.location.hostname !== "localhost" &&
+          window.location.hostname !== "127.0.0.1"
+        ) {
+          return "https://server-cibp.onrender.com";
+        }
+        return ""; // dev: fall back to relative for local proxy
       };
 
       const apiBase = resolveApiBase();
@@ -138,13 +153,22 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         }),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get("content-type") || "";
+      let data: any = null;
+      try {
+        data = contentType.includes("application/json")
+          ? await response.json()
+          : await response.text();
+      } catch {}
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to create payment session");
+        const msg =
+          (data && typeof data === "object" && (data.error || data.message)) ||
+          (typeof data === "string" ? data : "Failed to create payment session");
+        throw new Error(msg);
       }
 
-      if (!data.url) {
+      if (!data || !data.url) {
         throw new Error("No payment URL received from server");
       }
 
