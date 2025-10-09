@@ -1622,16 +1622,35 @@ const App: React.FC = () => {
               );
             }
           } else {
+            // Buyer login: if user had selected a plan before auth, continue to payment
             setAuth({ role: "buyer" });
-            setCurrentPage(Page.Dashboard);
-            if (
-              stripBase(window.location.pathname).toLowerCase() !== "/dashboard"
-            ) {
-              window.history.pushState(
-                { page: "/dashboard" },
-                "",
-                joinBase("dashboard")
-              );
+            let pending: string | null = null;
+            try {
+              pending = localStorage.getItem("pendingPlan");
+            } catch {}
+
+            if (pending) {
+              // Continue to payment flow
+              setCurrentPage(Page.Payment);
+              const target = joinBase("payment");
+              if (
+                stripBase(window.location.pathname).toLowerCase() !== "/payment"
+              ) {
+                window.history.pushState({ page: "/payment" }, "", target);
+              }
+            } else {
+              // No pending plan -> show dashboard
+              setCurrentPage(Page.Dashboard);
+              if (
+                stripBase(window.location.pathname).toLowerCase() !==
+                "/dashboard"
+              ) {
+                window.history.pushState(
+                  { page: "/dashboard" },
+                  "",
+                  joinBase("dashboard")
+                );
+              }
             }
           }
         }}
@@ -1779,27 +1798,7 @@ const App: React.FC = () => {
         {currentPage === Page.Credentials && (
           <CredentialsPage onBack={() => navigate(Page.Dashboard)} />
         )}
-        {currentPage === Page.Payment && (
-          <PaymentPage
-            selectedPlan={localStorage.getItem("pendingPlan") || "starter_1m"}
-            onSuccess={() => {
-              const target = joinBase("payment-success");
-              if (window.location.pathname !== target) {
-                window.history.pushState({ page: target }, "", target);
-              }
-              setCurrentPage(Page.PaymentSuccess);
-            }}
-            onCancel={() => {
-              const target = joinBase("payment-cancel");
-              if (window.location.pathname !== target) {
-                window.history.pushState({ page: target }, "", target);
-              }
-              setCurrentPage(Page.PaymentCancel);
-            }}
-          />
-        )}
-        {currentPage === Page.PaymentSuccess && <PaymentSuccessPage />}
-        {currentPage === Page.PaymentCancel && <PaymentCancelPage />}
+        {/* Payment success/cancel handled by PaymentPage via onPaymentSuccess/onBack props above */}
       </main>
     </div>
   );
