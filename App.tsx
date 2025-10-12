@@ -109,6 +109,80 @@ const App: React.FC = () => {
       .catch(console.error);
   }, []);
 
+  // ==================== AUTH STATE PERSISTENCE ====================
+  // Listen to Firebase auth state changes to maintain login session across reloads
+  useEffect(() => {
+    console.log('[App] Setting up auth state listener...');
+    
+    // Dynamic import to avoid initialization issues
+    import('./lib/firebaseAuth').then((authModule) => {
+      const unsubscribe = authModule.onAuthChange(async (user) => {
+        console.log('[App] Auth state changed:', { user: user?.email || null });
+        
+        if (user) {
+          // User is logged in - restore session
+          try {
+            const clientId = await authModule.getUserClientId(user);
+            
+            if (clientId) {
+              console.log('[App] ✅ Restoring user session:', { email: user.email, clientId });
+              
+              // Restore auth state
+              setAuth({ role: 'buyer' });
+              
+              // Restore localStorage
+              localStorage.setItem('companyId', clientId);
+              localStorage.setItem('clientId', clientId);
+              localStorage.setItem('userEmail', user.email || '');
+              localStorage.setItem('auth_uid', user.uid);
+              
+              // Dispatch event so other components know auth is ready
+              window.dispatchEvent(new Event('auth:ready'));
+              
+              // If on auth/login/signup page, redirect to dashboard
+              const path = stripBase(window.location.pathname).toLowerCase();
+              if (path === '/auth' || path === '/login' || path === '/signup' || path === '/') {
+                console.log('[App] User already logged in, redirecting to dashboard');
+                navigate(Page.Dashboard);
+              }
+            } else {
+              console.warn('[App] ⚠️ User authenticated but no client profile found');
+              // User exists in Firebase Auth but not in Firestore - logout
+              await authModule.logout();
+              setAuth(null);
+            }
+          } catch (error) {
+            console.error('[App] ❌ Error restoring user session:', error);
+            setAuth(null);
+          }
+        } else {
+          // User is logged out
+          console.log('[App] User logged out or not authenticated');
+          
+          // Only clear state if we're not on public pages
+          const path = stripBase(window.location.pathname).toLowerCase();
+          const isPublicPage = path === '/' || path === '' || path === '/auth' || 
+                               path === '/login' || path === '/signup' || 
+                               path === '/feedback';
+          
+          if (!isPublicPage && auth) {
+            console.log('[App] Clearing auth state and redirecting to home');
+            setAuth(null);
+            navigate(Page.Home);
+          }
+        }
+      });
+      
+      // Cleanup listener on unmount
+      return () => {
+        console.log('[App] Cleaning up auth state listener');
+        unsubscribe();
+      };
+    }).catch(error => {
+      console.error('[App] Failed to setup auth listener:', error);
+    });
+  }, []); // Run only once on mount
+
   // Auth state: use localStorage for demo/local logins only.
   const [auth, setAuth] = useState<{ role: "buyer" | "admin" } | null>(() => {
     // Initialize auth from localStorage to prevent logout on reload
@@ -1611,7 +1685,7 @@ const App: React.FC = () => {
             } else {
               // Buyer signup: show Payment page (pricing) so they can choose a plan
               setAuth({ role: "buyer" });
-              
+
               // Check if they came from a plan selection
               let pending: string | null = null;
               try {

@@ -1,6 +1,7 @@
 # User Flows Documentation
 
 ## Overview
+
 Your app now supports **two complete user journeys** for subscription signup and dashboard access.
 
 ---
@@ -10,6 +11,7 @@ Your app now supports **two complete user journeys** for subscription signup and
 **Best for**: Users who know exactly what they want
 
 ### Journey:
+
 ```
 Homepage
    ↓ (Click "Get Started" or select a plan)
@@ -30,6 +32,7 @@ Dashboard ✅
 ```
 
 ### User Experience:
+
 1. User lands on homepage
 2. Scrolls to pricing section (or clicks CTA)
 3. Clicks "Get Started" on their preferred plan (e.g., Growth - $40)
@@ -39,6 +42,7 @@ Dashboard ✅
 7. Returns to app → Payment Success page → Dashboard
 
 ### Code Implementation:
+
 - **Homepage**: `onSelectPlan` saves `pendingPlan` to localStorage
 - **AuthPage**: `onAuthSuccess` checks for `pendingPlan` → calls `startCheckout()`
 - **App.tsx**: `startCheckout()` creates Dodo session and redirects
@@ -50,6 +54,7 @@ Dashboard ✅
 **Best for**: Returning users or those who want to explore before buying
 
 ### Journey:
+
 ```
 Homepage
    ↓ (Click "Login" or "Try Free")
@@ -68,6 +73,7 @@ Payment Page (Pricing/Plan Selection)
 ```
 
 ### User Experience:
+
 1. User clicks "Login" or "Try Free" on homepage
 2. Enters credentials (or signs up)
 3. **After login**: Redirected to Payment/Pricing page
@@ -76,6 +82,7 @@ Payment Page (Pricing/Plan Selection)
    - **Skip**: Click "Skip for now" → goes directly to dashboard (can pay later)
 
 ### Code Implementation:
+
 - **AuthPage**: `onAuthSuccess` checks if `pendingPlan` exists:
   - **If YES**: Call `startCheckout(pending)` (Flow 1 behavior)
   - **If NO**: Navigate to Payment page (Flow 2 behavior)
@@ -87,18 +94,23 @@ Payment Page (Pricing/Plan Selection)
 ## 🎯 Key Features
 
 ### Smart Plan Persistence
+
 - If user selects a plan but isn't logged in, the plan is saved in `localStorage` as `pendingPlan`
 - After login, they're automatically taken to checkout for that plan
 - If they login without selecting a plan, they see the pricing page to choose
 
 ### Skip-to-Dashboard Option
+
 Users can skip payment and explore the dashboard by:
+
 1. Clicking **"Skip for now"** button (top right of Payment page)
 2. Clicking **"skip to dashboard"** link in the welcome message
 3. They can always come back to upgrade via Dashboard or Settings
 
 ### Payment Success Flow
+
 After successful payment:
+
 ```
 Dodo Payment Page
    ↓ (Payment complete)
@@ -114,17 +126,21 @@ Dashboard ✅
 ## 📱 UI Elements
 
 ### Homepage
+
 - **Hero Section**: "Get Started" and "Try Free" buttons
 - **Pricing Section**: Three plan cards (Starter, Growth, Pro)
 - Each plan has "Get Started" button → triggers Flow 1
 
 ### Payment Page (New Features)
+
 **Header buttons**:
+
 - 🔹 **"Skip for now"** - Go to dashboard without paying
 - 🔹 **"Change plan"** - Return to homepage pricing section
 - 🔹 **"← Back"** - Go to previous page
 
 **Welcome message**:
+
 ```
 Choose Your Plan
 Welcome [Business Name] • [Email]
@@ -132,6 +148,7 @@ Select a plan to unlock unlimited SMS credits, or skip to dashboard
 ```
 
 **Plan selection**:
+
 - Visual cards for Starter, Growth, Pro
 - Clear pricing and features
 - "Pay $XX" button triggers Dodo checkout
@@ -141,6 +158,7 @@ Select a plan to unlock unlimited SMS credits, or skip to dashboard
 ## 🔄 User Journey Examples
 
 ### Example 1: Eager Buyer (Flow 1)
+
 **Sarah wants the Growth plan immediately**
 
 1. Lands on homepage
@@ -157,6 +175,7 @@ Select a plan to unlock unlimited SMS credits, or skip to dashboard
 ---
 
 ### Example 2: Cautious Explorer (Flow 2)
+
 **John wants to try before buying**
 
 1. Lands on homepage
@@ -176,6 +195,7 @@ Select a plan to unlock unlimited SMS credits, or skip to dashboard
 ---
 
 ### Example 3: Returning User
+
 **Mike already has an account but hasn't paid yet**
 
 1. Clicks "Login" on homepage
@@ -192,6 +212,7 @@ Select a plan to unlock unlimited SMS credits, or skip to dashboard
 ## 🛠️ Technical Details
 
 ### State Management
+
 ```javascript
 // Pending plan stored in localStorage
 localStorage.setItem("pendingPlan", "growth_3m");
@@ -206,6 +227,7 @@ if (pending) {
 ```
 
 ### Payment Flow
+
 ```javascript
 // Create Dodo subscription session
 const startCheckout = async (planId) => {
@@ -220,13 +242,14 @@ const startCheckout = async (planId) => {
     },
     body: JSON.stringify({ plan: planId, price, companyId, userEmail }),
   });
-  
+
   const { url } = await response.json();
   window.location.href = url; // Redirect to Dodo
 };
 ```
 
 ### Return URL
+
 ```javascript
 // Set in Render env:
 FRONTEND_URL = https://vercel-swart-chi-29.vercel.app
@@ -243,6 +266,7 @@ ${FRONTEND_URL}/payment-success
 ## 🎨 UI Mockup
 
 ### Payment Page Layout
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │  🌟 ReputationFlow                                   │
@@ -274,22 +298,26 @@ ${FRONTEND_URL}/payment-success
 ## ✅ Testing Checklist
 
 ### Flow 1: Plan First
+
 - [ ] Homepage → Select plan → Login → Auto-checkout ✅
 - [ ] Homepage → Select plan → Signup → Auto-checkout ✅
 - [ ] Dodo payment → Success page → Dashboard ✅
 
 ### Flow 2: Login First
+
 - [ ] Homepage → Login → Pricing page ✅
 - [ ] Homepage → Signup → Pricing page ✅
 - [ ] Pricing page → Select plan → Dodo checkout ✅
 - [ ] Pricing page → Skip for now → Dashboard ✅
 
 ### Skip Options
+
 - [ ] "Skip for now" button works
 - [ ] "skip to dashboard" link in message works
 - [ ] Dashboard accessible without payment
 
 ### Return Flow
+
 - [ ] Payment success returns to app
 - [ ] Auto-redirect countdown works
 - [ ] Manual "Go to Dashboard" button works
@@ -299,7 +327,9 @@ ${FRONTEND_URL}/payment-success
 ## 🎯 Business Logic
 
 ### Trial/Free Tier
+
 Users who skip payment can:
+
 - ✅ Access dashboard
 - ✅ View analytics
 - ✅ Send limited SMS (based on your business rules)
@@ -307,7 +337,9 @@ Users who skip payment can:
 - ⚠️ Hit limits (e.g., 10 SMS/day) prompting upgrade
 
 ### Upgrade Path
+
 Users can upgrade anytime via:
+
 1. **Dashboard**: "Upgrade" button/banner
 2. **Settings**: Billing/subscription section
 3. **Customer List**: When SMS credits run out
@@ -318,6 +350,7 @@ Users can upgrade anytime via:
 ## 📊 Analytics to Track
 
 **Conversion Funnel**:
+
 ```
 Homepage visits
    ↓
@@ -337,6 +370,7 @@ Homepage visits
 ```
 
 **Key Metrics**:
+
 - **Immediate conversion**: Users who pay before reaching dashboard
 - **Deferred conversion**: Users who skip → explore → pay later
 - **Trial abandonment**: Users who skip and never pay
@@ -346,12 +380,15 @@ Homepage visits
 ## 🚀 Next Steps
 
 ### Optional Enhancements
+
 1. **Freemium Features**:
+
    - Add clear "Trial" badge in dashboard for non-paying users
    - Show SMS credit counter: "8/10 free SMS remaining"
    - Upgrade prompts when nearing limits
 
 2. **Subscription Management**:
+
    - "Manage Subscription" page
    - Cancel/pause options
    - Upgrade/downgrade between plans
@@ -368,9 +405,10 @@ Homepage visits
 ✅ **Both flows implemented and working**  
 ✅ **Payment gateway fully functional**  
 ✅ **Skip-to-dashboard option available**  
-✅ **Smooth user experience for all scenarios**  
+✅ **Smooth user experience for all scenarios**
 
 Your users now have **complete flexibility**:
+
 - Want to pay immediately? Flow 1 is optimized for that.
 - Want to explore first? Flow 2 lets them try before buying.
 - Not sure yet? Skip button keeps them engaged while they decide.

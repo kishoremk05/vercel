@@ -2990,14 +2990,20 @@ app.post("/api/company/profile", async (req, res) => {
         .status(400)
         .json({ success: false, error: "Missing companyId" });
 
-    const { companyName } = req.body;
-    if (!companyName)
+    const { companyName, photoURL } = req.body;
+    
+    // Build update object with only provided fields
+    const updateData = {};
+    if (companyName) updateData.companyName = companyName;
+    if (photoURL) updateData.photoURL = photoURL;
+
+    if (Object.keys(updateData).length === 0)
       return res
         .status(400)
-        .json({ success: false, error: "Missing companyName" });
+        .json({ success: false, error: "No fields to update" });
 
-    await dbV2.updateCompanyCredentials(companyId, { companyName });
-    console.log(`[api:profile] Updated company name for: ${companyId}`);
+    await dbV2.updateCompanyCredentials(companyId, updateData);
+    console.log(`[api:profile] Updated company profile for: ${companyId}`, Object.keys(updateData));
 
     res.json({
       success: true,
@@ -3005,6 +3011,43 @@ app.post("/api/company/profile", async (req, res) => {
     });
   } catch (e) {
     console.error("[api:profile:error]", e);
+    res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// GET profile endpoint to retrieve photoURL and other profile data
+app.get("/api/company/profile", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+
+    const companyId = String(req.query.companyId || "").trim();
+    if (!companyId)
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing companyId" });
+
+    const profile = await dbV2.getCompanyCredentials(companyId);
+    
+    if (!profile) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Profile not found" 
+      });
+    }
+
+    res.json({
+      success: true,
+      profile: {
+        companyName: profile.companyName || "",
+        photoURL: profile.photoURL || "",
+        // Include other profile fields as needed
+      }
+    });
+  } catch (e) {
+    console.error("[api:profile:get:error]", e);
     res.status(500).json({ success: false, error: e.message || String(e) });
   }
 });

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ActivityLog } from "../types";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 
@@ -32,6 +32,124 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const [profileSaved, setProfileSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [profilePhoto, setProfilePhoto] = useState<string>("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  // Load profile photo from Firebase/localStorage on mount
+  useEffect(() => {
+    const loadProfilePhoto = async () => {
+      try {
+        const companyId = localStorage.getItem("companyId");
+        if (!companyId) return;
+
+        const base = await getSmsServerUrl().catch(() => API_BASE);
+        const url = base
+          ? `${base}/api/company/profile`
+          : `${API_BASE}/api/company/profile`;
+
+        const response = await fetch(`${url}?companyId=${companyId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.profile?.photoURL) {
+            setProfilePhoto(data.profile.photoURL);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading profile photo:", error);
+      }
+    };
+
+    loadProfilePhoto();
+  }, []);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file");
+      setShowError(true);
+      setTimeout(() => setShowError(false), 3000);
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Image size should be less than 5MB");
+      setShowError(true);
+      setTimeout(() => setShowError(false), 3000);
+      return;
+    }
+
+    setUploadingPhoto(true);
+    setError("");
+
+    try {
+      const companyId = localStorage.getItem("companyId");
+      if (!companyId) {
+        setError("No company ID found. Please log in again.");
+        return;
+      }
+
+      // Convert to base64
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        try {
+          const base64Image = reader.result as string;
+
+          const base = await getSmsServerUrl().catch(() => API_BASE);
+          const url = base
+            ? `${base}/api/company/profile`
+            : `${API_BASE}/api/company/profile`;
+
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              companyId,
+              photoURL: base64Image,
+            }),
+          });
+
+          const data = await response.json();
+          if (data.success) {
+            setProfilePhoto(base64Image);
+            setProfileSaved(true);
+            setTimeout(() => setProfileSaved(false), 2500);
+          } else {
+            setError(data.error || "Failed to upload photo");
+            setShowError(true);
+            setTimeout(() => setShowError(false), 3000);
+          }
+        } catch (e: any) {
+          console.error("[photo:upload:error]", e);
+          setError("Failed to upload photo. Please try again.");
+          setShowError(true);
+          setTimeout(() => setShowError(false), 3000);
+        } finally {
+          setUploadingPhoto(false);
+        }
+      };
+
+      reader.onerror = () => {
+        setError("Failed to read image file");
+        setShowError(true);
+        setTimeout(() => setShowError(false), 3000);
+        setUploadingPhoto(false);
+      };
+
+      reader.readAsDataURL(file);
+    } catch (e: any) {
+      console.error("[photo:upload:error]", e);
+      setError("Failed to upload photo. Please try again.");
+      setShowError(true);
+      setTimeout(() => setShowError(false), 3000);
+      setUploadingPhoto(false);
+    }
+  };
+
+  const [showError, setShowError] = useState(false);
 
   const handleProfileSave = async () => {
     setSaving(true);
@@ -116,12 +234,51 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
         <div className="mb-8 lg:mb-10">
           <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg transition-all duration-300 hover:shadow-xl rounded-2xl">
             <div className="relative p-8 md:p-12 flex flex-col items-center">
-              {/* Logo avatar */}
+              {/* Logo avatar with photo upload */}
               <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-gradient-to-tr from-indigo-500 via-purple-500 to-indigo-600 rounded-full p-1.5 shadow-xl ring-4 ring-indigo-400/30">
-                <div className="w-28 h-28 rounded-full bg-white flex items-center justify-center overflow-hidden border-4 border-gray-100">
-                  <span className="text-5xl text-indigo-600 font-bold">
-                    {editBusinessName?.[0]?.toUpperCase() || "B"}
-                  </span>
+                <div className="w-28 h-28 rounded-full bg-white flex items-center justify-center overflow-hidden border-4 border-gray-100 relative group">
+                  {profilePhoto ? (
+                    <img
+                      src={profilePhoto}
+                      alt={editBusinessName}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-5xl text-indigo-600 font-bold">
+                      {editBusinessName?.[0]?.toUpperCase() || "B"}
+                    </span>
+                  )}
+                  {/* Upload overlay */}
+                  <label
+                    htmlFor="photo-upload"
+                    className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  >
+                    {uploadingPhoto ? (
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                    ) : (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        className="w-8 h-8 text-white"
+                      >
+                        <path d="M12 9a3.75 3.75 0 100 7.5A3.75 3.75 0 0012 9z" />
+                        <path
+                          fillRule="evenodd"
+                          d="M9.344 3.071a49.52 49.52 0 015.312 0c.967.052 1.83.585 2.332 1.39l.821 1.317c.24.383.645.643 1.11.71.386.054.77.113 1.152.177 1.432.239 2.429 1.493 2.429 2.909V18a3 3 0 01-3 3h-15a3 3 0 01-3-3V9.574c0-1.416.997-2.67 2.429-2.909.382-.064.766-.123 1.151-.178a1.56 1.56 0 001.11-.71l.822-1.315a2.942 2.942 0 012.332-1.39zM6.75 12.75a5.25 5.25 0 1110.5 0 5.25 5.25 0 01-10.5 0zm12-1.5a.75.75 0 100-1.5.75.75 0 000 1.5z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                    <input
+                      id="photo-upload"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handlePhotoUpload}
+                      disabled={uploadingPhoto}
+                    />
+                  </label>
                 </div>
               </div>
               <div className="flex flex-col items-center gap-2 mt-16 w-full">
