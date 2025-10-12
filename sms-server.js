@@ -2991,7 +2991,7 @@ app.post("/api/company/profile", async (req, res) => {
         .json({ success: false, error: "Missing companyId" });
 
     const { companyName, photoURL } = req.body;
-    
+
     // Build update object with only provided fields
     const updateData = {};
     if (companyName) updateData.companyName = companyName;
@@ -3003,7 +3003,10 @@ app.post("/api/company/profile", async (req, res) => {
         .json({ success: false, error: "No fields to update" });
 
     await dbV2.updateCompanyCredentials(companyId, updateData);
-    console.log(`[api:profile] Updated company profile for: ${companyId}`, Object.keys(updateData));
+    console.log(
+      `[api:profile] Updated company profile for: ${companyId}`,
+      Object.keys(updateData)
+    );
 
     res.json({
       success: true,
@@ -3030,11 +3033,11 @@ app.get("/api/company/profile", async (req, res) => {
         .json({ success: false, error: "Missing companyId" });
 
     const profile = await dbV2.getCompanyCredentials(companyId);
-    
+
     if (!profile) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Profile not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Profile not found",
       });
     }
 
@@ -3044,7 +3047,7 @@ app.get("/api/company/profile", async (req, res) => {
         companyName: profile.companyName || "",
         photoURL: profile.photoURL || "",
         // Include other profile fields as needed
-      }
+      },
     });
   } catch (e) {
     console.error("[api:profile:get:error]", e);

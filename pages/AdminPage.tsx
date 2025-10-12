@@ -866,7 +866,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-3">
                             {/* Show photoURL from Firestore profile (uploaded by user) or Firebase Auth (Google login) */}
-                            {(user.profile?.photoURL || user.photoURL) ? (
+                            {user.profile?.photoURL || user.photoURL ? (
                               <img
                                 src={user.profile?.photoURL || user.photoURL}
                                 alt={businessName}
@@ -875,7 +875,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
                                   // Fallback to initials if image fails to load
                                   const target = e.target as HTMLImageElement;
                                   target.style.display = "none";
-                                  const nextEl = target.nextElementSibling as HTMLElement;
+                                  const nextEl =
+                                    target.nextElementSibling as HTMLElement;
                                   if (nextEl) {
                                     nextEl.style.display = "flex";
                                   }
@@ -885,7 +886,10 @@ const AdminPage: React.FC<AdminPageProps> = ({
                             <div
                               className="flex-shrink-0 h-10 w-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm"
                               style={{
-                                display: (user.profile?.photoURL || user.photoURL) ? "none" : "flex",
+                                display:
+                                  user.profile?.photoURL || user.photoURL
+                                    ? "none"
+                                    : "flex",
                               }}
                             >
                               {initials}

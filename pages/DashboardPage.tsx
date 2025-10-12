@@ -21,11 +21,12 @@ import {
   CartesianGrid,
 } from "recharts";
 import { Customer, ActivityLog, CustomerStatus } from "../types";
-import {
-  fetchDashboardStatsFromFirebase,
-  fetchNegativeFeedback,
-  fetchClientProfile,
-} from "../lib/dashboardFirebase";
+// Firebase direct access removed - using API endpoints only
+// import {
+//   fetchDashboardStatsFromFirebase,
+//   fetchNegativeFeedback,
+//   fetchClientProfile,
+// } from "../lib/dashboardFirebase";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 import {
   PlusIcon,
@@ -111,48 +112,12 @@ const useDashboardStats = () => {
         return;
       }
 
-      console.log("[Firebase] Fetching dashboard stats for client:", companyId);
+      console.log(
+        "[Dashboard] Fetching dashboard stats for client:",
+        companyId
+      );
 
-      // Fetch from Firebase
-      const firebaseStats = await fetchDashboardStatsFromFirebase(companyId);
-
-      if (firebaseStats) {
-        console.log("[Firebase] Stats loaded successfully:", firebaseStats);
-
-        // Convert Firebase format to expected format
-        const sentimentCounts = {
-          POSITIVE: firebaseStats.positiveFeedbackCount || 0,
-          NEUTRAL: firebaseStats.neutralFeedbackCount || 0,
-          NEGATIVE: firebaseStats.negativeFeedbackCount || 0,
-        };
-
-        const feedbackCount =
-          sentimentCounts.POSITIVE +
-          sentimentCounts.NEUTRAL +
-          sentimentCounts.NEGATIVE;
-
-        // Calculate average rating from sentiment counts (estimated)
-        const avgRating =
-          feedbackCount > 0
-            ? (sentimentCounts.POSITIVE * 5 +
-                sentimentCounts.NEUTRAL * 3 +
-                sentimentCounts.NEGATIVE * 1) /
-              feedbackCount
-            : 0;
-
-        setStats({
-          messageCount: firebaseStats.messageCount || 0,
-          feedbackCount: feedbackCount,
-          avgRating: avgRating,
-          sentimentCounts: sentimentCounts,
-        });
-        setError(null);
-        setLoading(false);
-        return;
-      }
-
-      // If Firebase returns null, fall back to API
-      console.log("[Firebase] No data returned, trying API fallback...");
+      // Use API endpoint only - Firebase direct access removed for security
       const base = await getSmsServerUrl();
       const url = base
         ? `${base}/api/dashboard/stats?companyId=${companyId}`
@@ -731,9 +696,27 @@ const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
       if (!c) return;
       const phone = (c.customerPhone || "").replace(/\s+/g, "");
       const text = String(c.commentText || "").replace(/\r?\n/g, " ");
-      const createdAtIso = c.createdAt?.toDate
-        ? new Date(c.createdAt.toDate()).toISOString()
-        : new Date(c.createdAt).toISOString();
+
+      // Safe date conversion with validation
+      let createdAtIso: string;
+      try {
+        if (c.createdAt?.toDate) {
+          const d = new Date(c.createdAt.toDate());
+          createdAtIso = !isNaN(d.getTime())
+            ? d.toISOString()
+            : new Date().toISOString();
+        } else if (c.createdAt) {
+          const d = new Date(c.createdAt);
+          createdAtIso = !isNaN(d.getTime())
+            ? d.toISOString()
+            : new Date().toISOString();
+        } else {
+          createdAtIso = new Date().toISOString();
+        }
+      } catch {
+        createdAtIso = new Date().toISOString();
+      }
+
       const key = `${phone}||${text}||${createdAtIso}`;
       const existing = map[key];
       if (!existing) map[key] = { ...c, createdAtIso };
@@ -2211,67 +2194,48 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       const companyId =
         localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
       if (!companyId) {
-        console.warn("[Firebase] No companyId found for negative feedback");
+        console.warn("[Dashboard] No companyId found for negative feedback");
         return;
       }
 
       console.log(
-        "[Firebase] 🔍 Fetching negative feedback for CURRENT LOGGED-IN CLIENT:",
+        "[Dashboard] 🔍 Fetching negative feedback for CURRENT LOGGED-IN CLIENT:",
         companyId
       );
       console.log(
-        "[Firebase] 📋 This client should ONLY see their own negative comments"
+        "[Dashboard] 📋 This client should ONLY see their own negative comments"
       );
 
-      // Fetch directly from Firebase using the correct format
-      const firebaseFeedback = await fetchNegativeFeedback(companyId, 50);
-
-      console.log("[Firebase] Raw feedback received:", firebaseFeedback);
-      console.log(
-        `[Firebase] 📊 Total comments fetched: ${firebaseFeedback?.length || 0}`
+      // Use API endpoint only - Firebase direct access removed for security
+      const base = await getSmsServerUrl();
+      const response = await fetch(
+        `${base}/api/negative-comments?companyId=${companyId}`
       );
+      const data = await response.json();
 
-      if (firebaseFeedback && firebaseFeedback.length > 0) {
+      console.log("[API] Response data:", data);
+
+      if (data.success && data.comments && data.comments.length > 0) {
         // Verify all comments belong to this client (extra security check)
-        const verifiedComments = firebaseFeedback.filter(
+        const verifiedComments = data.comments.filter(
           (comment: any) => comment.companyId === companyId
         );
 
-        if (verifiedComments.length !== firebaseFeedback.length) {
+        if (verifiedComments.length !== data.comments.length) {
           console.error(
-            `[Firebase] ⚠️ SECURITY WARNING: Filtered out ${
-              firebaseFeedback.length - verifiedComments.length
+            `[Dashboard] ⚠️ SECURITY WARNING: Filtered out ${
+              data.comments.length - verifiedComments.length
             } comments that don't belong to this client!`
           );
         }
 
-        setNegativeComments(verifiedComments as any);
+        setNegativeComments(verifiedComments);
         console.log(
-          `[Firebase] ✅ Displaying ${verifiedComments.length} negative comments for client ${companyId}`
+          `[Dashboard] ✅ Displaying ${verifiedComments.length} negative comments for client ${companyId}`
         );
       } else {
-        console.log(
-          "[Firebase] No negative feedback found, trying API fallback..."
-        );
-
-        // Fallback to API if Firebase returns empty - Use Firebase config
-        const base = await getSmsServerUrl();
-        const response = await fetch(
-          `${base}/api/negative-comments?companyId=${companyId}`
-        );
-        const data = await response.json();
-
-        console.log("[API] Response data:", data);
-
-        if (data.success && data.comments && data.comments.length > 0) {
-          setNegativeComments(data.comments);
-          console.log(
-            `[API] ✅ Fetched ${data.comments.length} comments from API`
-          );
-        } else {
-          console.log("[Firebase] No negative comments found");
-          setNegativeComments([]);
-        }
+        console.log("[Dashboard] No negative comments found");
+        setNegativeComments([]);
       }
     } catch (e: any) {
       console.error("[Firebase] Error fetching negative comments:", e);
@@ -2385,9 +2349,27 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       if (!c) return;
       const phone = (c.customerPhone || "").replace(/\s+/g, "");
       const text = String(c.commentText || "").replace(/\r?\n/g, " ");
-      const createdAtIso = c.createdAt?.toDate
-        ? new Date(c.createdAt.toDate()).toISOString()
-        : new Date(c.createdAt).toISOString();
+
+      // Safe date conversion with validation
+      let createdAtIso: string;
+      try {
+        if (c.createdAt?.toDate) {
+          const d = new Date(c.createdAt.toDate());
+          createdAtIso = !isNaN(d.getTime())
+            ? d.toISOString()
+            : new Date().toISOString();
+        } else if (c.createdAt) {
+          const d = new Date(c.createdAt);
+          createdAtIso = !isNaN(d.getTime())
+            ? d.toISOString()
+            : new Date().toISOString();
+        } else {
+          createdAtIso = new Date().toISOString();
+        }
+      } catch {
+        createdAtIso = new Date().toISOString();
+      }
+
       const key = `${phone}||${text}||${createdAtIso}`;
       // Keep the latest occurrence if multiple entries have same fingerprint
       const existing = mapByFingerprint[key];
