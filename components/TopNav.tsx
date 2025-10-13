@@ -327,13 +327,13 @@ const TopNav: React.FC<TopNavProps> = ({
 
         {/* Modern Mobile Menu (animated) */}
         <div
-          className={`lg:hidden pb-4 transform transition-transform duration-300 ease-in-out ${
+          className={`lg:hidden transform transition-transform duration-300 ease-in-out ${
             isMobileMenuOpen
               ? "translate-y-0 opacity-100"
               : "-translate-y-3 opacity-0 pointer-events-none"
           }`}
         >
-          <div className="flex flex-col gap-2 px-2 pt-3">
+          <div className="flex flex-col gap-2 px-2 pt-0">
             {/* Mobile menu header with close button */}
             <div className="flex items-center justify-between w-full px-2">
               <div className="flex items-center gap-2">
