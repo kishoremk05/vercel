@@ -187,6 +187,48 @@ const App: React.FC = () => {
                 console.warn(
                   "[App] ⚠️ User authenticated but no client profile found"
                 );
+
+                // There is a timing/race condition where an admin login (via
+                // AdminAuthPage) signs in with Firebase and then writes
+                // `adminToken`/`adminSession` into localStorage. Firebase's
+                // onAuthStateChanged can fire before that localStorage write
+                // completes, causing this code to mistakenly log the admin
+                // out because no client profile exists. To handle that, do a
+                // short retry loop checking for adminToken/adminSession before
+                // performing logout.
+                let adminAppeared = false;
+                try {
+                  for (let i = 0; i < 10; i++) {
+                    const at = localStorage.getItem("adminToken");
+                    const as = localStorage.getItem("adminSession");
+                    if (at || as === "true") {
+                      adminAppeared = true;
+                      break;
+                    }
+                    // wait 100ms and try again
+                    // eslint-disable-next-line no-await-in-loop
+                    await new Promise((r) => setTimeout(r, 100));
+                  }
+                } catch (e) {
+                  // ignore storage errors and proceed to logout path below
+                }
+
+                if (adminAppeared) {
+                  console.log(
+                    "[App] Admin token detected shortly after auth change - preserving admin session"
+                  );
+                  try {
+                    localStorage.setItem("adminSession", "true");
+                  } catch {}
+                  setAuth({ role: "admin" });
+                  window.dispatchEvent(new Event("auth:ready"));
+                  const path = stripBase(window.location.pathname).toLowerCase();
+                  if (path === "/admin-login") {
+                    navigate(Page.Admin);
+                  }
+                  return;
+                }
+
                 // User exists in Firebase Auth but not in Firestore - logout
                 await authModule.logout();
                 setAuth(null);
