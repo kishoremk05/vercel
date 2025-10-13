@@ -44,6 +44,16 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       localStorage.setItem("clientId", authUid); // Use auth_uid for data isolation
       localStorage.setItem("userEmail", user.email || "");
       localStorage.setItem("auth_uid", authUid); // Store auth_uid explicitly
+      // Store Firebase user info (used by TopNav for photoURL)
+      try {
+        const u = {
+          uid: user.uid,
+          email: user.email || "",
+          displayName: user.displayName || "",
+          photoURL: (user as any).photoURL || null,
+        };
+        localStorage.setItem("firebaseUser", JSON.stringify(u));
+      } catch {}
 
       // Dispatch auth ready event
       window.dispatchEvent(
@@ -81,6 +91,16 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       localStorage.setItem("clientId", authUid); // Use auth_uid for data isolation
       localStorage.setItem("userEmail", user.email || "");
       localStorage.setItem("auth_uid", authUid); // Store auth_uid explicitly
+      // Store Firebase user info (used by TopNav for photoURL)
+      try {
+        const u = {
+          uid: user.uid,
+          email: user.email || "",
+          displayName: user.displayName || "",
+          photoURL: (user as any).photoURL || null,
+        };
+        localStorage.setItem("firebaseUser", JSON.stringify(u));
+      } catch {}
 
       // Dispatch auth ready event
       window.dispatchEvent(
