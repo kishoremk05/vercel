@@ -262,9 +262,23 @@ const TopNav: React.FC<TopNavProps> = ({
                   alt="User"
                   className="h-7 w-7 rounded-full ring-1 ring-gray-200"
                 />
-                <div className="hidden xl:flex flex-col text-left leading-tight">
-                  <span className="text-sm font-semibold text-gray-700 truncate">
+                {/* Show email + workspace on medium+ screens (was xl only) */}
+                <div className="hidden md:flex flex-col text-left leading-tight min-w-0">
+                  <span className="text-sm font-semibold text-gray-700 truncate flex items-center gap-2">
                     {displayedEmail || "Account"}
+                    {/* small verified check like in screenshot */}
+                    <svg
+                      className="h-4 w-4 text-emerald-500 flex-shrink-0"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.707a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 10-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
                   </span>
                   <span className="text-xs text-gray-500 truncate">
                     {businessName || "Workspace"}
@@ -290,11 +304,39 @@ const TopNav: React.FC<TopNavProps> = ({
 
               {/* Simple dropdown showing email and a sign-out placeholder */}
               {showUserMenu && (
-                <div className="absolute right-0 mt-3 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-2">
-                  <div className="px-3 py-2 flex items-start justify-between gap-2">
+                <div className="absolute right-0 mt-3 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-2">
+                  <div className="px-3 py-3 flex items-center gap-3">
+                    <img
+                      src={avatarLargeSrc}
+                      onError={() => {
+                        const initials = getInitials(displayedEmail);
+                        // fallback avatar
+                        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                        // @ts-ignore
+                        setAvatarLargeSrc(
+                          `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                            initials
+                          )}&size=40&background=6366f1&color=fff&bold=true`
+                        );
+                      }}
+                      alt="User"
+                      className="h-10 w-10 rounded-full ring-1 ring-gray-200 flex-shrink-0 shadow-sm"
+                    />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
+                      <p className="text-sm font-medium text-gray-900 truncate flex items-center gap-2">
                         {displayedEmail || "user@example.com"}
+                        <svg
+                          className="h-4 w-4 text-emerald-500 flex-shrink-0"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.707a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 10-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
                       </p>
                       <p className="text-xs text-gray-500 truncate">
                         {businessName || "Workspace"}
@@ -305,7 +347,7 @@ const TopNav: React.FC<TopNavProps> = ({
                       onClick={() => setShowUserMenu(false)}
                       aria-label="Close"
                       title="Close"
-                      className="p-1.5 rounded-md text-gray-500 hover:bg-gray-50 transition-colors"
+                      className="ml-auto p-1.5 rounded-md text-gray-500 hover:bg-gray-50 transition-colors"
                     >
                       <svg
                         className="h-4 w-4"

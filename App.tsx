@@ -222,7 +222,9 @@ const App: React.FC = () => {
                   } catch {}
                   setAuth({ role: "admin" });
                   window.dispatchEvent(new Event("auth:ready"));
-                  const path = stripBase(window.location.pathname).toLowerCase();
+                  const path = stripBase(
+                    window.location.pathname
+                  ).toLowerCase();
                   if (path === "/admin-login") {
                     navigate(Page.Admin);
                   }
