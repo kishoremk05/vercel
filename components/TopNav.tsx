@@ -312,6 +312,36 @@ const TopNav: React.FC<TopNavProps> = ({
         {isMobileMenuOpen && (
           <div className="lg:hidden pb-4">
             <div className="flex flex-col gap-2 px-2 pt-3">
+              {/* Mobile menu header with close button */}
+              <div className="flex items-center justify-between w-full px-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow ring-1 ring-indigo-200/30">
+                    <BriefcaseIcon className="h-4 w-4 text-black" />
+                  </div>
+                  <span className="font-extrabold text-base text-gray-900">
+                    ReputationFlow
+                  </span>
+                </div>
+                <button
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  aria-label="Close menu"
+                  className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <svg
+                    className="h-5 w-5 text-gray-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
               {/* Mobile Navigation Pills */}
               <div className="flex flex-col gap-1 bg-gray-50 rounded-2xl p-2">
                 {navItems.map((item) => {
@@ -366,6 +396,38 @@ const TopNav: React.FC<TopNavProps> = ({
                     {businessName || "Workspace"}
                   </p>
                 </div>
+              </div>
+
+              {/* Mobile Sign out button */}
+              <div className="px-3 mt-3">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      // Close mobile menu first
+                      setIsMobileMenuOpen(false);
+
+                      console.log("[TopNav] Signing out (mobile)...");
+                      await logout();
+
+                      // Clear additional localStorage keys
+                      localStorage.removeItem("firebaseUser");
+                      localStorage.removeItem("adminSession");
+                      localStorage.removeItem("token");
+                      localStorage.removeItem("adminToken");
+
+                      window.location.href = "/auth";
+                    } catch (error) {
+                      console.error("[TopNav] Mobile logout failed:", error);
+                      localStorage.clear();
+                      sessionStorage.clear();
+                      window.location.href = "/auth";
+                    }
+                  }}
+                  className="w-full text-left px-4 py-3 rounded-xl bg-red-50 text-red-700 font-semibold hover:bg-red-100"
+                >
+                  Sign out
+                </button>
               </div>
 
               {/* Settings removed from mobile menu by request */}
