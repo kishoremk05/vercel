@@ -123,6 +123,31 @@ const App: React.FC = () => {
           });
 
           if (user) {
+            // If an admin token or adminSession flag is present, honor admin session
+            // and skip the buyer restore flow which would otherwise call logout()
+            // for Firebase users without a client profile (admins don't have one).
+            try {
+              const adminToken = localStorage.getItem("adminToken");
+              const adminSession = localStorage.getItem("adminSession");
+              if (adminToken || adminSession === "true") {
+                console.log(
+                  "[App] Admin token/session detected - preserving admin auth"
+                );
+                try {
+                  localStorage.setItem("adminSession", "true");
+                } catch {}
+                setAuth({ role: "admin" });
+                // Notify other components that auth is ready
+                window.dispatchEvent(new Event("auth:ready"));
+                const path = stripBase(window.location.pathname).toLowerCase();
+                if (path === "/admin-login") {
+                  navigate(Page.Admin);
+                }
+                return;
+              }
+            } catch (e) {
+              // Ignore storage access errors and continue with buyer restore
+            }
             // User is logged in - restore session
             try {
               const clientId = await authModule.getUserClientId(user);
