@@ -792,28 +792,34 @@ const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
             {uniqueComments.length} total
           </span>
         </h3>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="Search by phone or text..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-3 pr-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-gray-900 shadow-sm text-sm sm:text-base"
-          />
-          <button
-            type="button"
-            onClick={() => onExport && onExport()}
-            className="px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 text-sm"
-          >
-            Export
-          </button>
-          <button
-            type="button"
-            onClick={() => onClearAll && onClearAll()}
-            className="px-3 py-2 bg-red-50 border border-red-100 text-red-700 rounded-xl hover:bg-red-100 text-sm"
-          >
-            Clear data
-          </button>
+        <div className="w-full">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <input
+                type="text"
+                placeholder="Search by phone or text..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-3 pr-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-gray-900 shadow-sm text-sm sm:text-base"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => onExport && onExport()}
+                className="px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 text-sm"
+              >
+                Export
+              </button>
+              <button
+                type="button"
+                onClick={() => onClearAll && onClearAll()}
+                className="px-3 py-2 bg-red-50 border border-red-100 text-red-700 rounded-xl hover:bg-red-100 text-sm"
+              >
+                Clear data
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
