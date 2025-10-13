@@ -1415,7 +1415,7 @@ app.post("/api/payments/webhook", async (req, res) => {
             smsCredits = 250;
           } else if (metadata.plan === "growth_3m") {
             expiryDate.setMonth(expiryDate.getMonth() + 3);
-            smsCredits = 800;
+            smsCredits = 500;
           } else if (metadata.plan === "pro_6m") {
             expiryDate.setMonth(expiryDate.getMonth() + 6);
             smsCredits = 1500;
@@ -3156,6 +3156,102 @@ app.get("/api/company/profile", async (req, res) => {
   } catch (e) {
     console.error("[api:profile:get:error]", e);
     res.status(500).json({ success: false, error: e.message || String(e) });
+  }
+});
+
+// DELETE account endpoint - permanently deletes user account and all data
+app.delete("/api/account/delete", async (req, res) => {
+  try {
+    if (!firestoreEnabled)
+      return res
+        .status(503)
+        .json({ success: false, error: "Database not configured" });
+
+    const { companyId, auth_uid } = req.body;
+
+    if (!companyId || !auth_uid) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing companyId or auth_uid",
+      });
+    }
+
+    console.log(
+      `[api:account:delete] Attempting to delete account: ${companyId}`
+    );
+
+    // Delete from Firebase Auth
+    try {
+      await firebaseAdmin.auth().deleteUser(auth_uid);
+      console.log(
+        `[api:account:delete] ✅ Deleted Firebase Auth user: ${auth_uid}`
+      );
+    } catch (authError) {
+      console.error(
+        `[api:account:delete] ⚠️ Failed to delete Auth user (may not exist):`,
+        authError.message
+      );
+      // Continue with Firestore deletion even if Auth deletion fails
+    }
+
+    // Delete from Firestore
+    const firestore = firebaseAdmin.firestore();
+    const batch = firestore.batch();
+
+    // Delete company document
+    const companyRef = firestore.collection("companies").doc(companyId);
+    batch.delete(companyRef);
+
+    // Delete client document (if exists)
+    const clientRef = firestore.collection("clients").doc(auth_uid);
+    batch.delete(clientRef);
+
+    // Delete subscription data (if stored separately)
+    const subscriptionRef = firestore
+      .collection("subscriptions")
+      .doc(companyId);
+    batch.delete(subscriptionRef);
+
+    // Delete all feedback entries for this company
+    const feedbackSnapshot = await firestore
+      .collection("feedback")
+      .where("companyId", "==", companyId)
+      .get();
+
+    feedbackSnapshot.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+
+    // Delete all customer data for this company
+    const customersSnapshot = await firestore
+      .collection("customers")
+      .where("companyId", "==", companyId)
+      .get();
+
+    customersSnapshot.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+
+    // Commit the batch
+    await batch.commit();
+
+    console.log(
+      `[api:account:delete] ✅ Successfully deleted account: ${companyId}`
+    );
+    console.log(
+      `[api:account:delete] Deleted ${feedbackSnapshot.size} feedback entries and ${customersSnapshot.size} customer records`
+    );
+
+    res.json({
+      success: true,
+      message: "Account deleted successfully",
+    });
+  } catch (e) {
+    console.error("[api:account:delete:error]", e);
+    res.status(500).json({
+      success: false,
+      error: e.message || "Failed to delete account",
+    });
   }
 });
 

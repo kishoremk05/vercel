@@ -34,6 +34,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const [error, setError] = useState("");
   const [profilePhoto, setProfilePhoto] = useState<string>("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Load profile photo from Firebase/localStorage on mount
   useEffect(() => {
@@ -150,6 +153,66 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   };
 
   const [showError, setShowError] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText.toLowerCase() !== "delete") {
+      setError('Please type "DELETE" to confirm');
+      setShowError(true);
+      setTimeout(() => setShowError(false), 3000);
+      return;
+    }
+
+    setIsDeleting(true);
+    setError("");
+
+    try {
+      const companyId = localStorage.getItem("companyId");
+      const auth_uid = localStorage.getItem("auth_uid");
+
+      if (!companyId || !auth_uid) {
+        setError("No account information found. Please log in again.");
+        setShowError(true);
+        setTimeout(() => setShowError(false), 3000);
+        return;
+      }
+
+      const base = await getSmsServerUrl().catch(() => API_BASE);
+      const url = base
+        ? `${base}/api/account/delete`
+        : `${API_BASE}/api/account/delete`;
+
+      const response = await fetch(url, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyId,
+          auth_uid,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Clear all localStorage
+        localStorage.clear();
+        sessionStorage.clear();
+
+        // Redirect to home
+        window.location.href = "/";
+      } else {
+        setError(data.error || "Failed to delete account");
+        setShowError(true);
+        setTimeout(() => setShowError(false), 5000);
+      }
+    } catch (e: any) {
+      console.error("[account:delete:error]", e);
+      setError("Failed to delete account. Please try again.");
+      setShowError(true);
+      setTimeout(() => setShowError(false), 5000);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleProfileSave = async () => {
     setSaving(true);
@@ -322,7 +385,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                   {error}
                 </div>
               )}
-              <div className="flex items-center gap-4 mt-8 w-full">
+              <div className="flex items-center gap-4 mt-8 w-full flex-wrap">
                 <button
                   className="bg-gray-900 text-white px-8 py-2.5 rounded-lg hover:bg-gray-800 font-semibold shadow-md transition-all text-base inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleProfileSave}
@@ -371,9 +434,156 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                   Logout
                 </button>
               </div>
+              {/* Delete Account Section */}
+              <div className="w-full border-t border-gray-200 mt-8 pt-6">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-5">
+                  <h3 className="text-lg font-bold text-red-900 mb-2 flex items-center gap-2">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      className="h-5 w-5"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm-1.72 6.97a.75.75 0 10-1.06 1.06L10.94 12l-1.72 1.72a.75.75 0 101.06 1.06L12 13.06l1.72 1.72a.75.75 0 101.06-1.06L13.06 12l1.72-1.72a.75.75 0 10-1.06-1.06L12 10.94l-1.72-1.72z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    Danger Zone
+                  </h3>
+                  <p className="text-sm text-red-800 mb-4">
+                    Deleting your account is permanent and cannot be undone. All
+                    your data, including customers, messages, and subscription
+                    will be deleted.
+                  </p>
+                  <button
+                    className="bg-red-600 text-white px-6 py-2.5 rounded-lg hover:bg-red-700 font-semibold shadow-md transition-all text-sm inline-flex items-center gap-2"
+                    onClick={() => setShowDeleteModal(true)}
+                    type="button"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      className="h-5 w-5"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.5 4.478v.227a48.816 48.816 0 013.878.512.75.75 0 11-.256 1.478l-.209-.035-1.005 13.07a3 3 0 01-2.991 2.77H8.084a3 3 0 01-2.991-2.77L4.087 6.66l-.209.035a.75.75 0 01-.256-1.478A48.567 48.567 0 017.5 4.705v-.227c0-1.564 1.213-2.9 2.816-2.951a52.662 52.662 0 013.369 0c1.603.051 2.815 1.387 2.815 2.951zm-6.136-1.452a51.196 51.196 0 013.273 0C14.39 3.05 15 3.684 15 4.478v.113a49.488 49.488 0 00-6 0v-.113c0-.794.609-1.428 1.364-1.452zm-.355 5.945a.75.75 0 10-1.5.058l.347 9a.75.75 0 101.499-.058l-.346-9zm5.48.058a.75.75 0 10-1.498-.058l-.347 9a.75.75 0 001.5.058l.345-9z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    Delete Account
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* Delete Account Confirmation Modal */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-fade-in">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="h-6 w-6 text-red-600"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm-1.72 6.97a.75.75 0 10-1.06 1.06L10.94 12l-1.72 1.72a.75.75 0 101.06 1.06L12 13.06l1.72 1.72a.75.75 0 101.06-1.06L13.06 12l1.72-1.72a.75.75 0 10-1.06-1.06L12 10.94l-1.72-1.72z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-xl font-bold text-gray-900 mb-1">
+                    Delete Account?
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    This action cannot be undone. This will permanently delete
+                    your account and remove all your data from our servers.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                <p className="text-sm text-yellow-800 font-medium mb-2">
+                  ⚠️ You will lose:
+                </p>
+                <ul className="text-xs text-yellow-700 space-y-1 ml-4 list-disc">
+                  <li>All customer data and contacts</li>
+                  <li>Message history and activity logs</li>
+                  <li>Active subscription and SMS credits</li>
+                  <li>Business profile and settings</li>
+                </ul>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Type <span className="text-red-600 font-mono">DELETE</span> to
+                  confirm:
+                </label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  placeholder="DELETE"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  className="flex-1 bg-gray-100 text-gray-700 px-4 py-2.5 rounded-lg hover:bg-gray-200 font-semibold transition-all"
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setDeleteConfirmText("");
+                  }}
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="flex-1 bg-red-600 text-white px-4 py-2.5 rounded-lg hover:bg-red-700 font-semibold transition-all inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleDeleteAccount}
+                  disabled={
+                    isDeleting || deleteConfirmText.toLowerCase() !== "delete"
+                  }
+                >
+                  {isDeleting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        className="h-5 w-5"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M16.5 4.478v.227a48.816 48.816 0 013.878.512.75.75 0 11-.256 1.478l-.209-.035-1.005 13.07a3 3 0 01-2.991 2.77H8.084a3 3 0 01-2.991-2.77L4.087 6.66l-.209.035a.75.75 0 01-.256-1.478A48.567 48.567 0 017.5 4.705v-.227c0-1.564 1.213-2.9 2.816-2.951a52.662 52.662 0 013.369 0c1.603.051 2.815 1.387 2.815 2.951zm-6.136-1.452a51.196 51.196 0 013.273 0C14.39 3.05 15 3.684 15 4.478v.113a49.488 49.488 0 00-6 0v-.113c0-.794.609-1.428 1.364-1.452zm-.355 5.945a.75.75 0 10-1.5.058l.347 9a.75.75 0 101.499-.058l-.346-9zm5.48.058a.75.75 0 10-1.498-.058l-.347 9a.75.75 0 001.5.058l.345-9z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      Delete Forever
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
