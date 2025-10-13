@@ -902,45 +902,59 @@ const App: React.FC = () => {
     try {
       // Check SMS credits before sending
       const companyId = localStorage.getItem("companyId") || undefined;
-      
+
       if (companyId) {
         try {
           const base = await getSmsServerUrl().catch(() => API_BASE);
           const subUrl = `${base}/api/subscription?companyId=${companyId}`;
           const subRes = await fetch(subUrl);
           const subData = await subRes.json();
-          
+
           if (subData.success && subData.subscription) {
-            const remaining = subData.subscription.remainingCredits ?? subData.subscription.smsCredits ?? 0;
+            const remaining =
+              subData.subscription.remainingCredits ??
+              subData.subscription.smsCredits ??
+              0;
             const status = subData.subscription.status;
-            
+
             if (status !== "active") {
-              alert("Your subscription is not active. Please activate your plan to send SMS.");
+              alert(
+                "Your subscription is not active. Please activate your plan to send SMS."
+              );
               setCustomers((prev) =>
                 prev.map((c) =>
-                  c.id === customer.id ? { ...c, status: CustomerStatus.Failed } : c
+                  c.id === customer.id
+                    ? { ...c, status: CustomerStatus.Failed }
+                    : c
                 )
               );
               return { ok: false, reason: "Subscription not active" };
             }
-            
+
             if (remaining <= 0) {
-              alert("SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal.");
+              alert(
+                "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+              );
               setCustomers((prev) =>
                 prev.map((c) =>
-                  c.id === customer.id ? { ...c, status: CustomerStatus.Failed } : c
+                  c.id === customer.id
+                    ? { ...c, status: CustomerStatus.Failed }
+                    : c
                 )
               );
               return { ok: false, reason: "SMS limit reached" };
             }
-            
+
             console.log(`[SMS] Credits available: ${remaining}`);
           }
         } catch (subErr) {
-          console.warn("[SMS] Could not check subscription, proceeding anyway:", subErr);
+          console.warn(
+            "[SMS] Could not check subscription, proceeding anyway:",
+            subErr
+          );
         }
       }
-      
+
       const base = await getSmsServerUrl().catch(() => API_BASE);
       const sendUrl = base
         ? `${String(base).trim().replace(/\/+$/, "")}/send-sms`
@@ -984,10 +998,17 @@ const App: React.FC = () => {
         return { ok: true };
       } else {
         // Check if error is due to SMS limit
-        if (res.status === 403 || (data.error && data.error.includes("SMS limit"))) {
-          alert(`SMS limit reached: ${data.error}\n\nRemaining credits: ${data.remainingCredits || 0}`);
+        if (
+          res.status === 403 ||
+          (data.error && data.error.includes("SMS limit"))
+        ) {
+          alert(
+            `SMS limit reached: ${data.error}\n\nRemaining credits: ${
+              data.remainingCredits || 0
+            }`
+          );
         }
-        
+
         setCustomers((prev) =>
           prev.map((c) =>
             c.id === customer.id ? { ...c, status: CustomerStatus.Failed } : c

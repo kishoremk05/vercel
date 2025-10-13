@@ -817,84 +817,153 @@ const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left text-gray-500">
-          <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10">
-            <tr>
-              <th className="px-3 sm:px-6 py-3 font-medium">Phone</th>
-              <th className="px-3 sm:px-6 py-3 font-medium">Comment</th>
-              <th className="px-3 sm:px-6 py-3 font-medium">Date</th>
-              <th className="px-3 sm:px-6 py-3 text-right font-medium">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {(() => {
-              const start = (currentPage - 1) * pageSize;
-              const rows = filtered.slice(start, start + pageSize);
-              return rows.map((c) => (
-                <tr key={c.id} className="bg-white border-b hover:bg-gray-50">
-                  <td className="px-3 sm:px-6 py-3">{c.customerPhone}</td>
-                  <td className="px-3 sm:px-6 py-3">{c.commentText}</td>
-                  <td className="px-3 sm:px-6 py-3 text-xs text-gray-500">
-                    {c.createdAt?.toDate
-                      ? new Date(c.createdAt.toDate()).toLocaleString()
-                      : new Date(c.createdAt).toLocaleString()}
-                  </td>
-                  <td className="px-6 py-3 text-right">
-                    <div className="flex items-center gap-2 justify-end">
-                      <a
-                        onClick={(e) => {
-                          e.preventDefault();
-                          const phone = (c.customerPhone || "").replace(
-                            /\D/g,
-                            ""
-                          );
-                          if (!phone) return;
-                          const msg = encodeURIComponent(
-                            getSupportWaMessage(c.customerPhone || "Customer")
-                          );
-                          window.open(
-                            `https://wa.me/${phone}?text=${msg}`,
-                            "_blank",
-                            "noopener,noreferrer"
-                          );
-                        }}
-                        className="p-3 rounded-md hover:bg-green-50 text-green-700 inline-flex items-center justify-center"
-                        href="#"
-                        title="Reply via WhatsApp"
-                      >
-                        <svg
-                          className="h-6 w-6"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          aria-hidden
+      <div>
+        {/* Desktop/table view (show on sm and larger) */}
+        <div className="hidden sm:block overflow-x-auto">
+          <table className="w-full text-sm text-left text-gray-500">
+            <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10">
+              <tr>
+                <th className="px-3 sm:px-6 py-3 font-medium">Phone</th>
+                <th className="px-3 sm:px-6 py-3 font-medium">Comment</th>
+                <th className="px-3 sm:px-6 py-3 font-medium">Date</th>
+                <th className="px-3 sm:px-6 py-3 text-right font-medium">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const start = (currentPage - 1) * pageSize;
+                const rows = filtered.slice(start, start + pageSize);
+                return rows.map((c) => (
+                  <tr key={c.id} className="bg-white border-b hover:bg-gray-50">
+                    <td className="px-3 sm:px-6 py-3">{c.customerPhone}</td>
+                    <td className="px-3 sm:px-6 py-3">{c.commentText}</td>
+                    <td className="px-3 sm:px-6 py-3 text-xs text-gray-500">
+                      {c.createdAt?.toDate
+                        ? new Date(c.createdAt.toDate()).toLocaleString()
+                        : new Date(c.createdAt).toLocaleString()}
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <div className="flex items-center gap-2 justify-end">
+                        <a
+                          onClick={(e) => {
+                            e.preventDefault();
+                            const phone = (c.customerPhone || "").replace(
+                              /\D/g,
+                              ""
+                            );
+                            if (!phone) return;
+                            const msg = encodeURIComponent(
+                              getSupportWaMessage(c.customerPhone || "Customer")
+                            );
+                            window.open(
+                              `https://wa.me/${phone}?text=${msg}`,
+                              "_blank",
+                              "noopener,noreferrer"
+                            );
+                          }}
+                          className="p-3 rounded-md hover:bg-green-50 text-green-700 inline-flex items-center justify-center"
+                          href="#"
+                          title="Reply via WhatsApp"
                         >
-                          <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .02 5.36 0 12c0 2.11.55 4.18 1.6 6.01L0 24l6.12-1.59A11.95 11.95 0 0012 24c6.63 0 12-5.37 12-12 0-3.2-1.25-6.2-3.48-8.52zM12 21.5c-1.8 0-3.55-.46-5.1-1.33l-.36-.19-3.64.94.98-3.55-.23-.37A9.5 9.5 0 012.5 12c0-5.24 4.26-9.5 9.5-9.5 2.54 0 4.92.99 6.72 2.79A9.45 9.45 0 0121.5 12c0 5.24-4.26 9.5-9.5 9.5z" />
-                        </svg>
-                      </a>
-                      <button
-                        onClick={() => onDelete(c.id)}
-                        className="p-3 rounded-md hover:bg-red-50 text-red-600 inline-flex items-center justify-center"
-                        disabled={(deletingIds || []).includes(c.id)}
-                        title="Delete comment"
-                      >
-                        {(deletingIds || []).includes(c.id) ? (
-                          <span className="text-xs text-gray-500">
-                            Deleting...
-                          </span>
-                        ) : (
-                          <TrashIcon className="h-5 w-5" />
-                        )}
-                      </button>
+                          <svg
+                            className="h-6 w-6"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                            aria-hidden
+                          >
+                            <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .02 5.36 0 12c0 2.11.55 4.18 1.6 6.01L0 24l6.12-1.59A11.95 11.95 0 0012 24c6.63 0 12-5.37 12-12 0-3.2-1.25-6.2-3.48-8.52zM12 21.5c-1.8 0-3.55-.46-5.1-1.33l-.36-.19-3.64.94.98-3.55-.23-.37A9.5 9.5 0 012.5 12c0-5.24 4.26-9.5 9.5-9.5 2.54 0 4.92.99 6.72 2.79A9.45 9.45 0 0121.5 12c0 5.24-4.26 9.5-9.5 9.5z" />
+                          </svg>
+                        </a>
+                        <button
+                          onClick={() => onDelete(c.id)}
+                          className="p-3 rounded-md hover:bg-red-50 text-red-600 inline-flex items-center justify-center"
+                          disabled={(deletingIds || []).includes(c.id)}
+                          title="Delete comment"
+                        >
+                          {(deletingIds || []).includes(c.id) ? (
+                            <span className="text-xs text-gray-500">
+                              Deleting...
+                            </span>
+                          ) : (
+                            <TrashIcon className="h-5 w-5" />
+                          )}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile stacked card view (show on xs only) */}
+        <div className="block sm:hidden space-y-3">
+          {(() => {
+            const start = (currentPage - 1) * pageSize;
+            const rows = filtered.slice(start, start + pageSize);
+            return rows.map((c) => (
+              <div
+                key={c.id}
+                className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-gray-900 truncate">
+                        {c.customerPhone || "—"}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {c.createdAt?.toDate
+                          ? new Date(c.createdAt.toDate()).toLocaleString()
+                          : new Date(c.createdAt).toLocaleString()}
+                      </div>
                     </div>
-                  </td>
-                </tr>
-              ));
-            })()}
-          </tbody>
-        </table>
+                    <div className="mt-2 text-sm text-gray-700 whitespace-pre-line break-words">
+                      {c.commentText}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      const phone = (c.customerPhone || "").replace(/\D/g, "");
+                      if (!phone) return;
+                      const msg = encodeURIComponent(
+                        getSupportWaMessage(c.customerPhone || "Customer")
+                      );
+                      window.open(
+                        `https://wa.me/${phone}?text=${msg}`,
+                        "_blank",
+                        "noopener,noreferrer"
+                      );
+                    }}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-green-50 text-green-700 text-sm font-semibold hover:bg-green-100"
+                    title="Reply via WhatsApp"
+                  >
+                    Reply
+                  </button>
+                  <button
+                    onClick={() => onDelete(c.id)}
+                    disabled={(deletingIds || []).includes(c.id)}
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm font-semibold hover:bg-red-100"
+                    title="Delete comment"
+                  >
+                    {(deletingIds || []).includes(c.id) ? (
+                      <span className="text-xs text-gray-500">Deleting...</span>
+                    ) : (
+                      <TrashIcon className="h-4 w-4" />
+                    )}
+                    <span className="hidden sm:inline">Delete</span>
+                  </button>
+                </div>
+              </div>
+            ));
+          })()}
+        </div>
       </div>
 
       {/* Pagination */}
@@ -3320,7 +3389,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                       className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-gray-900 to-gray-800 text-white px-6 py-4 rounded-xl font-bold hover:from-gray-800 hover:to-gray-700 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
                     >
                       <StarIcon className="h-5 w-5" />
-                      <span>View Feedback Page</span>
+                      <span>Feedback Page</span>
                     </a>
                   </div>
                 </div>

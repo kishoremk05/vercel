@@ -416,7 +416,10 @@ const CurrentPlanBadge: React.FC = () => {
         if (data.success && data.subscription) {
           setPlanName(data.subscription.planName || "");
           // Cache it
-          localStorage.setItem("subscription", JSON.stringify(data.subscription));
+          localStorage.setItem(
+            "subscription",
+            JSON.stringify(data.subscription)
+          );
         }
       } catch (error) {
         console.error("[CurrentPlanBadge] Error fetching plan:", error);
@@ -443,9 +446,7 @@ const CurrentPlanBadge: React.FC = () => {
   return (
     <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-green-50 border border-green-200">
       <span className="h-2 w-2 rounded-full bg-emerald-500 mr-1" />
-      <span className="text-sm font-semibold text-emerald-700">
-        {planName}
-      </span>
+      <span className="text-sm font-semibold text-emerald-700">{planName}</span>
     </div>
   );
 };
@@ -476,10 +477,16 @@ const SubscriptionStatusBadge: React.FC = () => {
 
         if (data.success && data.subscription) {
           setSub(data.subscription);
-          localStorage.setItem("subscription", JSON.stringify(data.subscription));
+          localStorage.setItem(
+            "subscription",
+            JSON.stringify(data.subscription)
+          );
         }
       } catch (error) {
-        console.error("[SubscriptionStatusBadge] Error fetching subscription:", error);
+        console.error(
+          "[SubscriptionStatusBadge] Error fetching subscription:",
+          error
+        );
       }
     };
 

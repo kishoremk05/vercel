@@ -473,16 +473,18 @@ async function handleSendSms(req, res) {
         .doc(String(companyIdBody))
         .collection("billing")
         .doc("subscription");
-      
+
       const subSnap = await subRef.get();
-      
+
       if (subSnap.exists) {
         const subData = subSnap.data();
         const remaining = subData.remainingCredits ?? subData.smsCredits ?? 0;
         const status = subData.status;
-        
-        console.log(`[sms:limit-check] company=${companyIdBody} remaining=${remaining} status=${status}`);
-        
+
+        console.log(
+          `[sms:limit-check] company=${companyIdBody} remaining=${remaining} status=${status}`
+        );
+
         // Check if subscription is active and has credits
         if (status !== "active") {
           return res.status(403).json({
@@ -491,21 +493,27 @@ async function handleSendSms(req, res) {
             remainingCredits: 0,
           });
         }
-        
+
         if (remaining <= 0) {
           return res.status(403).json({
             success: false,
-            error: "SMS limit reached. Please upgrade your plan or wait for renewal.",
+            error:
+              "SMS limit reached. Please upgrade your plan or wait for renewal.",
             remainingCredits: 0,
           });
         }
-        
+
         console.log(`[sms:limit-check] ✅ Credits available: ${remaining}`);
       } else {
-        console.warn(`[sms:limit-check] ⚠️ No subscription found for company=${companyIdBody}, allowing SMS for now`);
+        console.warn(
+          `[sms:limit-check] ⚠️ No subscription found for company=${companyIdBody}, allowing SMS for now`
+        );
       }
     } catch (e) {
-      console.error(`[sms:limit-check] ❌ Error checking subscription:`, e.message);
+      console.error(
+        `[sms:limit-check] ❌ Error checking subscription:`,
+        e.message
+      );
       // Don't block SMS on check errors - allow it to proceed
     }
   }
@@ -740,23 +748,26 @@ async function handleSendSms(req, res) {
           .doc(companyIdBody)
           .collection("billing")
           .doc("subscription");
-        
+
         const subSnap = await subRef.get();
-        
+
         if (subSnap.exists) {
           const subData = subSnap.data();
           const remaining = subData.remainingCredits ?? subData.smsCredits ?? 0;
-          
+
           if (remaining > 0) {
             await subRef.update({
-              remainingCredits: firebaseAdmin.firestore.FieldValue.increment(-1),
+              remainingCredits:
+                firebaseAdmin.firestore.FieldValue.increment(-1),
               last_updated: firebaseAdmin.firestore.Timestamp.now(),
             });
-            
+
             console.log(
-              `[sms:sent][credits] ✅ Decremented credits for company=${companyIdBody} (${remaining} → ${remaining - 1})`
+              `[sms:sent][credits] ✅ Decremented credits for company=${companyIdBody} (${remaining} → ${
+                remaining - 1
+              })`
             );
-            
+
             // Dispatch event to update frontend
             // Note: Frontend will need to poll /api/subscription to refresh
           } else {
