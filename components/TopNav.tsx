@@ -170,7 +170,7 @@ const TopNav: React.FC<TopNavProps> = ({
       style={{ background: "linear-gradient(180deg, #fff 90%, #f8fafc 100%)" }}
     >
       <div className="mx-auto max-w-7xl px-4 lg:px-6">
-        <div className="flex h-16 items-center justify-between">
+        <div className="flex h-14 sm:h-16 items-center justify-between">
           {/* Brand - smaller icon */}
           <div
             className="flex items-center gap-1.5 sm:gap-2 cursor-pointer select-none"
@@ -291,13 +291,36 @@ const TopNav: React.FC<TopNavProps> = ({
               {/* Simple dropdown showing email and a sign-out placeholder */}
               {showUserMenu && (
                 <div className="absolute right-0 mt-3 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-2">
-                  <div className="px-4 py-3">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {displayedEmail || "user@example.com"}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      {businessName || "Workspace"}
-                    </p>
+                  <div className="px-3 py-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {displayedEmail || "user@example.com"}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {businessName || "Workspace"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowUserMenu(false)}
+                      aria-label="Close"
+                      title="Close"
+                      className="p-1.5 rounded-md text-gray-500 hover:bg-gray-50 transition-colors"
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
                   </div>
                   <div className="border-t border-gray-100" />
                   <button
@@ -325,116 +348,120 @@ const TopNav: React.FC<TopNavProps> = ({
           </div>
         )}
 
-        {/* Modern Mobile Menu (animated) */}
+        {/* Modern Mobile Menu (animated overlay) */}
         <div
-          className={`lg:hidden transform transition-transform duration-300 ease-in-out ${
+          className={`lg:hidden fixed left-0 right-0 top-14 z-40 transform transition-transform duration-250 ease-in-out ${
             isMobileMenuOpen
               ? "translate-y-0 opacity-100"
-              : "-translate-y-3 opacity-0 pointer-events-none"
+              : "-translate-y-2 opacity-0 pointer-events-none"
           }`}
+          style={{ backdropFilter: isMobileMenuOpen ? "blur(4px)" : undefined }}
         >
-          <div className="flex flex-col gap-2 px-2 pt-0">
-            {/* Mobile menu header with close button */}
-            <div className="flex items-center justify-between w-full px-2">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow ring-1 ring-indigo-200/30">
-                  <BriefcaseIcon className="h-4 w-4 text-black" />
+          <div className="mx-3 bg-white rounded-2xl shadow-lg overflow-hidden">
+            <div className="flex flex-col gap-2 px-2 py-2">
+              {/* Mobile menu header with close button */}
+              <div className="flex items-center justify-between w-full px-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow ring-1 ring-indigo-200/30">
+                    <BriefcaseIcon className="h-4 w-4 text-black" />
+                  </div>
+                  <span className="font-extrabold text-base text-gray-900">
+                    ReputationFlow
+                  </span>
                 </div>
-                <span className="font-extrabold text-base text-gray-900">
-                  ReputationFlow
-                </span>
-              </div>
-              <button
-                onClick={() => setIsMobileMenuOpen(false)}
-                aria-label="Close menu"
-                className="p-2 rounded-full bg-white shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors"
-              >
-                <svg
-                  className="h-4 w-4 text-gray-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                <button
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  aria-label="Close menu"
+                  className="p-2 rounded-md bg-white text-gray-600 hover:bg-gray-50 transition-colors"
+                  title="Close"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
-            {/* Mobile Navigation Pills */}
-            <div className="flex flex-col gap-1 bg-gray-50 rounded-2xl p-2">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = currentPage === item.id;
-                return (
-                  <button
-                    key={String(item.id)}
-                    onClick={() => {
-                      setCurrentPage(item.id);
-                      setIsMobileMenuOpen(false);
-                    }}
-                    aria-current={isActive ? "page" : undefined}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                      isActive
-                        ? "bg-white text-gray-900 shadow-md"
-                        : "text-gray-600 hover:text-gray-900 hover:bg-white/50"
-                    }`}
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
                   >
-                    <Icon
-                      className={`h-5 w-5 transition-colors ${
-                        isActive ? "text-indigo-600" : "text-gray-400"
-                      }`}
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
                     />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Mobile User Section */}
-            <div className="flex items-center gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl border border-gray-200/60 mt-2">
-              <img
-                src={avatarLargeSrc}
-                onError={() => {
-                  // If UI Avatars fails, use fallback with email initials
-                  const initials = getInitials(displayedEmail);
-                  setAvatarLargeSrc(
-                    `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                      initials
-                    )}&size=40&background=6366f1&color=fff&bold=true`
-                  );
-                }}
-                alt="User"
-                className="h-10 w-10 rounded-full ring-2 ring-white shadow-sm"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">
-                  {displayedEmail || "user@example.com"}
-                </p>
-                <p className="text-xs text-gray-500 truncate">
-                  {businessName || "Workspace"}
-                </p>
+                  </svg>
+                </button>
               </div>
-            </div>
+              {/* Mobile Navigation Pills */}
+              <div className="flex flex-col gap-1 bg-gray-50 rounded-2xl p-2">
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = currentPage === item.id;
+                  return (
+                    <button
+                      key={String(item.id)}
+                      onClick={() => {
+                        setCurrentPage(item.id);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      aria-current={isActive ? "page" : undefined}
+                      className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                        isActive
+                          ? "bg-white text-gray-900 shadow-md"
+                          : "text-gray-600 hover:text-gray-900 hover:bg-white/50"
+                      }`}
+                    >
+                      <Icon
+                        className={`h-5 w-5 transition-colors ${
+                          isActive ? "text-indigo-600" : "text-gray-400"
+                        }`}
+                      />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
 
-            {/* Mobile Sign out button */}
-            <div className="px-3 mt-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  handleSignOut();
-                }}
-                className="w-full text-left px-4 py-3 rounded-xl bg-red-50 text-red-700 font-semibold hover:bg-red-100"
-              >
-                Sign out
-              </button>
-            </div>
+              {/* Mobile User Section */}
+              <div className="flex items-center gap-3 p-3 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl border border-gray-200/60 mt-2">
+                <img
+                  src={avatarLargeSrc}
+                  onError={() => {
+                    // If UI Avatars fails, use fallback with email initials
+                    const initials = getInitials(displayedEmail);
+                    setAvatarLargeSrc(
+                      `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                        initials
+                      )}&size=40&background=6366f1&color=fff&bold=true`
+                    );
+                  }}
+                  alt="User"
+                  className="h-10 w-10 rounded-full ring-2 ring-white shadow-sm"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {displayedEmail || "user@example.com"}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {businessName || "Workspace"}
+                  </p>
+                </div>
+              </div>
 
-            {/* Settings removed from mobile menu by request */}
+              {/* Mobile Sign out button */}
+              <div className="px-3 mt-3 mb-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    handleSignOut();
+                  }}
+                  className="w-full text-left px-4 py-3 rounded-xl bg-red-50 text-red-700 font-semibold hover:bg-red-100"
+                >
+                  Sign out
+                </button>
+              </div>
+
+              {/* Settings removed from mobile menu by request */}
+            </div>
           </div>
         </div>
       </div>
