@@ -359,37 +359,7 @@ const TopNav: React.FC<TopNavProps> = ({
         >
           <div className="mx-3 bg-white rounded-2xl shadow-lg overflow-hidden">
             <div className="flex flex-col gap-2 px-2 py-2">
-              {/* Mobile menu header with close button */}
-              <div className="flex items-center justify-between w-full px-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow ring-1 ring-indigo-200/30">
-                    <BriefcaseIcon className="h-4 w-4 text-black" />
-                  </div>
-                  <span className="font-extrabold text-base text-gray-900">
-                    ReputationFlow
-                  </span>
-                </div>
-                <button
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  aria-label="Close menu"
-                  className="p-2 rounded-md bg-white text-gray-600 hover:bg-gray-50 transition-colors"
-                  title="Close"
-                >
-                  <svg
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
+              {/* Mobile menu header removed (brand is shown in the main header) */}
               {/* Mobile Navigation Pills */}
               <div className="flex flex-col gap-1 bg-gray-50 rounded-2xl p-2">
                 {navItems.map((item) => {
