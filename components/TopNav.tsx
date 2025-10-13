@@ -24,6 +24,40 @@ const TopNav: React.FC<TopNavProps> = ({
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Shared sign-out handler to show a toast and redirect after a short delay
+  const handleSignOut = async () => {
+    try {
+      console.log("[TopNav] Signing out (shared)...");
+      await logout();
+
+      // Clear additional localStorage keys
+      try {
+        localStorage.removeItem("firebaseUser");
+        localStorage.removeItem("adminSession");
+        localStorage.removeItem("token");
+        localStorage.removeItem("adminToken");
+      } catch {}
+
+      setToastMessage("Signed out");
+      // Allow toast to display briefly before redirecting
+      setTimeout(() => {
+        window.location.href = "/auth";
+      }, 800);
+    } catch (error) {
+      console.error("[TopNav] Sign out failed (shared):", error);
+      // Fallback: clear storage and redirect
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {}
+      setToastMessage("Signed out");
+      setTimeout(() => {
+        window.location.href = "/auth";
+      }, 600);
+    }
+  };
 
   // Firebase removed. Use props only.
   const displayedEmail = email || "";
@@ -268,35 +302,9 @@ const TopNav: React.FC<TopNavProps> = ({
                   <div className="border-t border-gray-100" />
                   <button
                     type="button"
-                    onClick={async () => {
-                      try {
-                        console.log("[TopNav] Signing out...");
-
-                        // Close the menu first
-                        setShowUserMenu(false);
-
-                        // Call Firebase logout (clears some localStorage internally)
-                        await logout();
-
-                        // Clear additional localStorage items that Firebase logout might miss
-                        localStorage.removeItem("firebaseUser");
-                        localStorage.removeItem("adminSession");
-                        localStorage.removeItem("token");
-                        localStorage.removeItem("adminToken");
-
-                        console.log(
-                          "[TopNav] Cleared auth data, redirecting to /auth"
-                        );
-
-                        // Force a full page reload to /auth to reset all state
-                        window.location.href = "/auth";
-                      } catch (error: any) {
-                        console.error("[TopNav] Logout failed:", error);
-                        // Even if Firebase logout fails, force clear everything and redirect
-                        localStorage.clear();
-                        sessionStorage.clear();
-                        window.location.href = "/auth";
-                      }
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      handleSignOut();
                     }}
                     className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
                   >
@@ -308,132 +316,127 @@ const TopNav: React.FC<TopNavProps> = ({
           </div>
         </div>
 
-        {/* Modern Mobile Menu */}
-        {isMobileMenuOpen && (
-          <div className="lg:hidden pb-4">
-            <div className="flex flex-col gap-2 px-2 pt-3">
-              {/* Mobile menu header with close button */}
-              <div className="flex items-center justify-between w-full px-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow ring-1 ring-indigo-200/30">
-                    <BriefcaseIcon className="h-4 w-4 text-black" />
-                  </div>
-                  <span className="font-extrabold text-base text-gray-900">
-                    ReputationFlow
-                  </span>
-                </div>
-                <button
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  aria-label="Close menu"
-                  className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-                >
-                  <svg
-                    className="h-5 w-5 text-gray-600"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-              {/* Mobile Navigation Pills */}
-              <div className="flex flex-col gap-1 bg-gray-50 rounded-2xl p-2">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = currentPage === item.id;
-                  return (
-                    <button
-                      key={String(item.id)}
-                      onClick={() => {
-                        setCurrentPage(item.id);
-                        setIsMobileMenuOpen(false);
-                      }}
-                      aria-current={isActive ? "page" : undefined}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                        isActive
-                          ? "bg-white text-gray-900 shadow-md"
-                          : "text-gray-600 hover:text-gray-900 hover:bg-white/50"
-                      }`}
-                    >
-                      <Icon
-                        className={`h-5 w-5 transition-colors ${
-                          isActive ? "text-indigo-600" : "text-gray-400"
-                        }`}
-                      />
-                      <span>{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Mobile User Section */}
-              <div className="flex items-center gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl border border-gray-200/60 mt-2">
-                <img
-                  src={avatarLargeSrc}
-                  onError={() => {
-                    // If UI Avatars fails, use fallback with email initials
-                    const initials = getInitials(displayedEmail);
-                    setAvatarLargeSrc(
-                      `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                        initials
-                      )}&size=40&background=6366f1&color=fff&bold=true`
-                    );
-                  }}
-                  alt="User"
-                  className="h-10 w-10 rounded-full ring-2 ring-white shadow-sm"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">
-                    {displayedEmail || "user@example.com"}
-                  </p>
-                  <p className="text-xs text-gray-500 truncate">
-                    {businessName || "Workspace"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Mobile Sign out button */}
-              <div className="px-3 mt-3">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      // Close mobile menu first
-                      setIsMobileMenuOpen(false);
-
-                      console.log("[TopNav] Signing out (mobile)...");
-                      await logout();
-
-                      // Clear additional localStorage keys
-                      localStorage.removeItem("firebaseUser");
-                      localStorage.removeItem("adminSession");
-                      localStorage.removeItem("token");
-                      localStorage.removeItem("adminToken");
-
-                      window.location.href = "/auth";
-                    } catch (error) {
-                      console.error("[TopNav] Mobile logout failed:", error);
-                      localStorage.clear();
-                      sessionStorage.clear();
-                      window.location.href = "/auth";
-                    }
-                  }}
-                  className="w-full text-left px-4 py-3 rounded-xl bg-red-50 text-red-700 font-semibold hover:bg-red-100"
-                >
-                  Sign out
-                </button>
-              </div>
-
-              {/* Settings removed from mobile menu by request */}
+        {/* Toast (shows briefly on sign-out) */}
+        {toastMessage && (
+          <div className="fixed right-4 top-20 z-50">
+            <div className="bg-black text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in">
+              {toastMessage}
             </div>
           </div>
         )}
+
+        {/* Modern Mobile Menu (animated) */}
+        <div
+          className={`lg:hidden pb-4 transform transition-transform duration-300 ease-in-out ${
+            isMobileMenuOpen
+              ? "translate-y-0 opacity-100"
+              : "-translate-y-3 opacity-0 pointer-events-none"
+          }`}
+        >
+          <div className="flex flex-col gap-2 px-2 pt-3">
+            {/* Mobile menu header with close button */}
+            <div className="flex items-center justify-between w-full px-2">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow ring-1 ring-indigo-200/30">
+                  <BriefcaseIcon className="h-4 w-4 text-black" />
+                </div>
+                <span className="font-extrabold text-base text-gray-900">
+                  ReputationFlow
+                </span>
+              </div>
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                aria-label="Close menu"
+                className="p-2 rounded-full bg-white shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors"
+              >
+                <svg
+                  className="h-4 w-4 text-gray-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+            {/* Mobile Navigation Pills */}
+            <div className="flex flex-col gap-1 bg-gray-50 rounded-2xl p-2">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = currentPage === item.id;
+                return (
+                  <button
+                    key={String(item.id)}
+                    onClick={() => {
+                      setCurrentPage(item.id);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                      isActive
+                        ? "bg-white text-gray-900 shadow-md"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-white/50"
+                    }`}
+                  >
+                    <Icon
+                      className={`h-5 w-5 transition-colors ${
+                        isActive ? "text-indigo-600" : "text-gray-400"
+                      }`}
+                    />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Mobile User Section */}
+            <div className="flex items-center gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl border border-gray-200/60 mt-2">
+              <img
+                src={avatarLargeSrc}
+                onError={() => {
+                  // If UI Avatars fails, use fallback with email initials
+                  const initials = getInitials(displayedEmail);
+                  setAvatarLargeSrc(
+                    `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                      initials
+                    )}&size=40&background=6366f1&color=fff&bold=true`
+                  );
+                }}
+                alt="User"
+                className="h-10 w-10 rounded-full ring-2 ring-white shadow-sm"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">
+                  {displayedEmail || "user@example.com"}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  {businessName || "Workspace"}
+                </p>
+              </div>
+            </div>
+
+            {/* Mobile Sign out button */}
+            <div className="px-3 mt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  handleSignOut();
+                }}
+                className="w-full text-left px-4 py-3 rounded-xl bg-red-50 text-red-700 font-semibold hover:bg-red-100"
+              >
+                Sign out
+              </button>
+            </div>
+
+            {/* Settings removed from mobile menu by request */}
+          </div>
+        </div>
       </div>
 
       {/* Modern Animated Bottom Border */}
