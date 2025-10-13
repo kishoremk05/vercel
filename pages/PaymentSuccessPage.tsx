@@ -1,9 +1,77 @@
 import React, { useEffect, useState } from "react";
+import { getSmsServerUrl } from "../lib/firebaseConfig";
 
 const PaymentSuccessPage: React.FC = () => {
   const [countdown, setCountdown] = useState(5);
+  const [planInfo, setPlanInfo] = useState<{
+    planName: string;
+    smsCredits: number;
+  } | null>(null);
 
   useEffect(() => {
+    // Extract plan info from URL params and save subscription
+    const saveSubscription = async () => {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const planId =
+          urlParams.get("plan") || localStorage.getItem("pendingPlan");
+        const companyId = localStorage.getItem("companyId");
+
+        if (!planId || !companyId) {
+          console.warn("Missing plan or companyId, skipping subscription save");
+          return;
+        }
+
+        // Map plan to SMS credits and name
+        const planMapping: Record<
+          string,
+          { name: string; sms: number; months: number }
+        > = {
+          starter_1m: { name: "1-Month Plan", sms: 250, months: 1 },
+          monthly: { name: "1-Month Plan", sms: 250, months: 1 },
+          growth_3m: { name: "3-Month Plan", sms: 500, months: 3 },
+          quarterly: { name: "3-Month Plan", sms: 500, months: 3 },
+          pro_6m: { name: "6-Month Plan", sms: 1500, months: 6 },
+          halfyearly: { name: "6-Month Plan", sms: 1500, months: 6 },
+        };
+
+        const plan = planMapping[planId];
+        if (!plan) {
+          console.warn("Unknown plan:", planId);
+          return;
+        }
+
+        setPlanInfo({ planName: plan.name, smsCredits: plan.sms });
+
+        // Save subscription to database
+        const base = await getSmsServerUrl();
+        const response = await fetch(`${base}/api/subscription`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyId,
+            planId,
+            smsCredits: plan.sms,
+            durationMonths: plan.months,
+            status: "active",
+          }),
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          console.log("✅ Subscription saved successfully");
+          // Clear pending plan
+          localStorage.removeItem("pendingPlan");
+        } else {
+          console.error("Failed to save subscription:", data.error);
+        }
+      } catch (error) {
+        console.error("Error saving subscription:", error);
+      }
+    };
+
+    saveSubscription();
+
     // Auto-redirect to dashboard after 5 seconds
     const timer = setInterval(() => {
       setCountdown((prev) => {
@@ -52,7 +120,9 @@ const PaymentSuccessPage: React.FC = () => {
               Payment Successful! 🎉
             </h1>
             <p className="text-lg text-gray-600">
-              Your subscription is now active
+              {planInfo
+                ? `${planInfo.planName} is now active`
+                : "Your subscription is now active"}
             </p>
           </div>
 
@@ -84,9 +154,11 @@ const PaymentSuccessPage: React.FC = () => {
               <div className="flex justify-between">
                 <span>✅ Subscription activated</span>
               </div>
-              <div className="flex justify-between">
-                <span>✅ SMS credits loaded</span>
-              </div>
+              {planInfo && (
+                <div className="flex justify-between">
+                  <span>✅ {planInfo.smsCredits} SMS credits loaded</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span>✅ Dashboard ready</span>
               </div>

@@ -204,14 +204,9 @@ const TopNav: React.FC<TopNavProps> = ({
           </button>
           {/* Right actions */}
           <div className="hidden md:flex items-center gap-2 lg:gap-3">
-            {/* Subscription status (remaining credits + renewal) */}
+            {/* Current Plan + SMS Status */}
             <SubscriptionStatusBadge />
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-green-50 border border-green-200">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 mr-1" />
-              <span className="text-sm font-semibold text-emerald-700">
-                Graffity
-              </span>
-            </div>
+            <CurrentPlanBadge />
             <div className="hidden lg:flex items-center relative">
               <button
                 onClick={() => setShowUserMenu((s) => !s)}
@@ -389,7 +384,73 @@ const TopNav: React.FC<TopNavProps> = ({
 
 export default TopNav;
 
-// Lightweight inline component to display subscription remaining credits & renewal date
+// Current Plan Badge - shows the active subscription plan
+const CurrentPlanBadge: React.FC = () => {
+  const [planName, setPlanName] = React.useState<string>("");
+
+  React.useEffect(() => {
+    const fetchPlanName = async () => {
+      try {
+        const companyId = localStorage.getItem("companyId");
+        if (!companyId) return;
+
+        // Try to get from localStorage first
+        const cached = localStorage.getItem("subscription");
+        if (cached) {
+          const sub = JSON.parse(cached);
+          if (sub && sub.planName) {
+            setPlanName(sub.planName);
+            return;
+          }
+        }
+
+        // Fetch from API
+        const smsServerUrl = localStorage.getItem("smsServerUrl");
+        if (!smsServerUrl) return;
+
+        const response = await fetch(
+          `${smsServerUrl}/api/subscription?companyId=${companyId}`
+        );
+        const data = await response.json();
+
+        if (data.success && data.subscription) {
+          setPlanName(data.subscription.planName || "");
+          // Cache it
+          localStorage.setItem("subscription", JSON.stringify(data.subscription));
+        }
+      } catch (error) {
+        console.error("[CurrentPlanBadge] Error fetching plan:", error);
+      }
+    };
+
+    fetchPlanName();
+
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchPlanName, 30000);
+
+    // Listen for subscription updates
+    const handler = () => fetchPlanName();
+    window.addEventListener("subscription:updated", handler);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("subscription:updated", handler);
+    };
+  }, []);
+
+  if (!planName) return null;
+
+  return (
+    <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-green-50 border border-green-200">
+      <span className="h-2 w-2 rounded-full bg-emerald-500 mr-1" />
+      <span className="text-sm font-semibold text-emerald-700">
+        {planName}
+      </span>
+    </div>
+  );
+};
+
+// Lightweight inline component to display SMS remaining (format: "SMS Left: 120/250")
 const SubscriptionStatusBadge: React.FC = () => {
   const [sub, setSub] = React.useState<any>(() => {
     try {
@@ -398,37 +459,65 @@ const SubscriptionStatusBadge: React.FC = () => {
     } catch {}
     return null;
   });
+
   useEffect(() => {
+    const fetchSubscription = async () => {
+      try {
+        const companyId = localStorage.getItem("companyId");
+        if (!companyId) return;
+
+        const smsServerUrl = localStorage.getItem("smsServerUrl");
+        if (!smsServerUrl) return;
+
+        const response = await fetch(
+          `${smsServerUrl}/api/subscription?companyId=${companyId}`
+        );
+        const data = await response.json();
+
+        if (data.success && data.subscription) {
+          setSub(data.subscription);
+          localStorage.setItem("subscription", JSON.stringify(data.subscription));
+        }
+      } catch (error) {
+        console.error("[SubscriptionStatusBadge] Error fetching subscription:", error);
+      }
+    };
+
+    // Initial fetch
+    fetchSubscription();
+
+    // Listen for storage changes
     const handler = () => {
       try {
         const raw = localStorage.getItem("subscription");
         if (raw) setSub(JSON.parse(raw));
       } catch {}
     };
+
     window.addEventListener("storage", handler);
-    const id = setInterval(handler, 5000);
+    window.addEventListener("subscription:updated", fetchSubscription);
+
+    // Refresh every 30 seconds
+    const id = setInterval(fetchSubscription, 30000);
+
     return () => {
       window.removeEventListener("storage", handler);
+      window.removeEventListener("subscription:updated", fetchSubscription);
       clearInterval(id);
     };
   }, []);
+
   if (!sub || sub.status !== "active") return null;
-  let remaining = sub.remainingCredits ?? sub.smsCredits;
-  let endDateStr = "";
-  try {
-    if (sub.endDate) endDateStr = new Date(sub.endDate).toLocaleDateString();
-  } catch {}
+
+  const remaining = sub.remainingCredits ?? sub.smsCredits ?? 0;
+  const total = sub.smsCredits ?? 0;
+
   return (
     <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200">
       <span className="h-2 w-2 rounded-full bg-indigo-500" />
       <span className="text-xs font-semibold text-indigo-700 whitespace-nowrap">
-        {remaining} credits
+        SMS Left: {remaining}/{total}
       </span>
-      {endDateStr && (
-        <span className="text-[10px] text-indigo-600 font-medium hidden xl:inline">
-          renew {endDateStr}
-        </span>
-      )}
     </div>
   );
 };

@@ -211,6 +211,10 @@ export async function logout(): Promise<void> {
     localStorage.removeItem('googleReviewLink');
     localStorage.removeItem('customers');
     localStorage.removeItem('tenantKey');
+    localStorage.removeItem('firebaseUser'); // Clear Firebase user cache
+    localStorage.removeItem('pendingPlan'); // Clear pending plan
+    localStorage.removeItem('messageTemplate');
+    localStorage.removeItem('smsServerUrl');
     
     console.log('✅ User logged out successfully - all data cleared');
   } catch (error: any) {

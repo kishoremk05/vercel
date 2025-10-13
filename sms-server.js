@@ -463,6 +463,54 @@ async function handleSendSms(req, res) {
   const envToken = process.env.TWILIO_AUTH_TOKEN || null;
   const envMss = process.env.TWILIO_MESSAGING_SERVICE_SID || null;
 
+  // ============== SMS LIMIT CHECK ==============
+  // Check subscription SMS credits before sending
+  if (companyIdBody && firestoreEnabled) {
+    try {
+      const firestore = firebaseAdmin.firestore();
+      const subRef = firestore
+        .collection("clients")
+        .doc(String(companyIdBody))
+        .collection("billing")
+        .doc("subscription");
+      
+      const subSnap = await subRef.get();
+      
+      if (subSnap.exists) {
+        const subData = subSnap.data();
+        const remaining = subData.remainingCredits ?? subData.smsCredits ?? 0;
+        const status = subData.status;
+        
+        console.log(`[sms:limit-check] company=${companyIdBody} remaining=${remaining} status=${status}`);
+        
+        // Check if subscription is active and has credits
+        if (status !== "active") {
+          return res.status(403).json({
+            success: false,
+            error: "Subscription is not active. Please activate your plan.",
+            remainingCredits: 0,
+          });
+        }
+        
+        if (remaining <= 0) {
+          return res.status(403).json({
+            success: false,
+            error: "SMS limit reached. Please upgrade your plan or wait for renewal.",
+            remainingCredits: 0,
+          });
+        }
+        
+        console.log(`[sms:limit-check] ✅ Credits available: ${remaining}`);
+      } else {
+        console.warn(`[sms:limit-check] ⚠️ No subscription found for company=${companyIdBody}, allowing SMS for now`);
+      }
+    } catch (e) {
+      console.error(`[sms:limit-check] ❌ Error checking subscription:`, e.message);
+      // Don't block SMS on check errors - allow it to proceed
+    }
+  }
+  // ============================================
+
   // Load company and admin-global (if Firestore is enabled)
   let companyCreds = {};
   let adminCreds = {};
@@ -683,6 +731,51 @@ async function handleSendSms(req, res) {
           `[sms:sent][recordMessage] ⏭️ Skipped storing feedback request SMS (only store actual feedback responses)`
         );
       }
+
+      // ============== DECREMENT SMS CREDITS ==============
+      // Decrement subscription credits after successful SMS send
+      try {
+        const subRef = firestore
+          .collection("clients")
+          .doc(companyIdBody)
+          .collection("billing")
+          .doc("subscription");
+        
+        const subSnap = await subRef.get();
+        
+        if (subSnap.exists) {
+          const subData = subSnap.data();
+          const remaining = subData.remainingCredits ?? subData.smsCredits ?? 0;
+          
+          if (remaining > 0) {
+            await subRef.update({
+              remainingCredits: firebaseAdmin.firestore.FieldValue.increment(-1),
+              last_updated: firebaseAdmin.firestore.Timestamp.now(),
+            });
+            
+            console.log(
+              `[sms:sent][credits] ✅ Decremented credits for company=${companyIdBody} (${remaining} → ${remaining - 1})`
+            );
+            
+            // Dispatch event to update frontend
+            // Note: Frontend will need to poll /api/subscription to refresh
+          } else {
+            console.warn(
+              `[sms:sent][credits] ⚠️ No credits to decrement for company=${companyIdBody}`
+            );
+          }
+        } else {
+          console.warn(
+            `[sms:sent][credits] ⚠️ No subscription found for company=${companyIdBody}`
+          );
+        }
+      } catch (creditsErr) {
+        console.error(
+          `[sms:sent][credits] ❌ Failed to decrement credits for company=${companyIdBody}:`,
+          creditsErr.message
+        );
+      }
+      // ===============================================
     } catch (e) {
       console.error(
         `[sms:sent:error] Failed to update dashboard stats for ${companyIdBody}:`,
