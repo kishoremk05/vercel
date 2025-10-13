@@ -3167,12 +3167,76 @@ app.delete("/api/account/delete", async (req, res) => {
         .status(503)
         .json({ success: false, error: "Database not configured" });
 
-    const { companyId, auth_uid } = req.body;
+    // Be resilient: some clients/hosts may not populate req.body for DELETE.
+    // Try a few fallbacks: req.body, req.rawBody (captured by express.json verify),
+    // query params, and common headers (x-company-id).
+    let bodyData = req.body && Object.keys(req.body).length ? req.body : null;
+
+    if (!bodyData && req.rawBody) {
+      try {
+        bodyData = JSON.parse(req.rawBody);
+        console.log("[api:account:delete] Parsed body from rawBody");
+      } catch (e) {
+        console.warn(
+          "[api:account:delete] Failed to parse req.rawBody, raw length=",
+          String(req.rawBody || "").length
+        );
+      }
+    }
+
+    // Manual stream read fallback (some hosting proxies require it)
+    if (
+      !bodyData &&
+      req.headers["content-type"] &&
+      String(req.headers["content-type"]).includes("application/json")
+    ) {
+      try {
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        const raw = Buffer.concat(chunks).toString("utf8");
+        if (raw && raw.trim()) {
+          bodyData = JSON.parse(raw);
+          console.log(
+            "[api:account:delete] Parsed body from manual stream read"
+          );
+        }
+      } catch (e) {
+        console.warn(
+          "[api:account:delete] Manual stream read failed:",
+          e?.message || e
+        );
+      }
+    }
+
+    // Finally, fall back to query params or headers
+    const companyId =
+      (bodyData && (bodyData.companyId || bodyData.company_id)) ||
+      req.query.companyId ||
+      req.query.company_id ||
+      req.headers["x-company-id"] ||
+      req.headers["x-companyid"];
+    const auth_uid =
+      (bodyData && (bodyData.auth_uid || bodyData.authUid || bodyData.auth)) ||
+      req.query.auth_uid ||
+      req.query.authUid ||
+      req.headers["x-auth-uid"] ||
+      req.headers["x-authuid"];
 
     if (!companyId || !auth_uid) {
+      console.error("[api:account:delete] Missing companyId/auth_uid", {
+        bodyData,
+        query: req.query,
+        headers: req.headers && {
+          "x-company-id": req.headers["x-company-id"],
+          "x-auth-uid": req.headers["x-auth-uid"],
+        },
+      });
       return res.status(400).json({
         success: false,
-        error: "Missing companyId or auth_uid",
+        error:
+          "Missing companyId or auth_uid. Provide JSON body, query params or x-company-id/x-auth-uid headers.",
       });
     }
 
