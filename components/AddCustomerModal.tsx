@@ -39,14 +39,28 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     }
 
     try {
-      const phoneDigits = phone.replace(/[^0-9]/g, "");
+      const phoneDigits = phone.replace(/[^\d]/g, "");
       if (!/\d{8,15}/.test(phoneDigits)) {
         setError("Invalid phone number format for SMS.");
         return;
       }
 
-      // Send SMS using Twilio
-      const message = `Hi ${name}, we'd love your feedback for ${businessName}. Link: ${feedbackPageLink}`;
+      const clientCompanyId = localStorage.getItem("companyId") || "";
+      let review =
+        feedbackPageLink || `${window.location.origin}/quick-feedback`;
+      if (clientCompanyId) {
+        try {
+          const url = new URL(review, window.location.origin);
+          url.searchParams.set("clientId", clientCompanyId);
+          review = url.toString();
+        } catch {
+          review = `${review}${
+            review.includes("?") ? "&" : "?"
+          }clientId=${encodeURIComponent(clientCompanyId)}`;
+        }
+      }
+
+      const message = `Hi ${name}, we'd love your feedback for ${businessName}. Link: ${review}`;
       const response = await fetch("/api/send-sms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
