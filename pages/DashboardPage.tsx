@@ -2778,7 +2778,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         ),
       [customers]
     );
-    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    // Use Set for robust selection handling
+    const [selected, setSelected] = useState<Set<string>>(new Set());
     const [search, setSearch] = useState("");
     const [status, setStatus] = useState("");
     const [successBanner, setSuccessBanner] = useState<string | null>(null);
@@ -2806,7 +2807,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     useEffect(() => {
       if (selectAllSignal > 0 && eligible.length > 0) {
         const allIds = eligible.map((c) => c.id);
-        setSelectedIds(allIds);
+        setSelected(new Set(allIds));
         setStatus(
           `Selected all ${eligible.length} customers. Review and click Send SMS.`
         );
@@ -2817,16 +2818,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     // Auto-select all when signal changes (e.g., after upload)
     useEffect(() => {
       if (selectAllSignal > 0 && eligible.length > 0) {
-        // Delay to ensure React has fully updated state with new customers
-        const timer = setTimeout(() => {
-          const allIds = eligible.map((c) => c.id);
-          setSelectedIds(allIds);
-          setStatus(
-            `Selected all ${eligible.length} customers. Review and click Send SMS.`
-          );
-          console.log(`Auto-selected ${allIds.length} customers:`, allIds);
-        }, 300); // Increased delay for reliability
-        return () => clearTimeout(timer);
+        const allIds = eligible.map((c) => c.id);
+        setSelected(new Set(allIds));
+        setStatus(
+          `Selected all ${eligible.length} customers. Review and click Send SMS.`
+        );
       }
     }, [selectAllSignal, eligible]);
 
@@ -2841,9 +2837,12 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     }, [eligible, search]);
 
     const toggle = (id: string) => {
-      setSelectedIds((prev) =>
-        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-      );
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
     };
 
     // Notify parent about selection changes so the Add Customer button can
@@ -2851,15 +2850,15 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     React.useEffect(() => {
       try {
         const ev = new CustomEvent("sendmessages:selection", {
-          detail: { count: selectedIds.length },
+          detail: { count: selected.size },
         });
         window.dispatchEvent(ev as any);
       } catch (e) {
         // ignore
       }
-    }, [selectedIds]);
-    const selectAll = () => setSelectedIds(eligible.map((c) => c.id));
-    const clearSel = () => setSelectedIds([]);
+    }, [selected]);
+    const selectAll = () => setSelected(new Set(filtered.map((c) => c.id)));
+    const clearSel = () => setSelected(new Set());
     // Local helpers for WhatsApp message (same as CustomerTable)
     function appendIdToLink(link: string, customerId?: string) {
       if (!link) return link;
@@ -2931,6 +2930,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     }
 
     const send = () => {
+      const selectedIds = Array.from(selected);
       if (selectedIds.length === 0) {
         setStatus("Select at least one recipient.");
         return;
@@ -3027,7 +3027,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2">
           <div className="text-xs sm:text-sm font-semibold text-gray-900 flex items-center gap-2">
             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 border border-indigo-200">
-              {selectedIds.length}
+              {selected.size}
             </span>
             <span className="text-gray-600">of {eligible.length} selected</span>
           </div>
@@ -3078,7 +3078,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                   </div>
                   <input
                     type="checkbox"
-                    checked={selectedIds.includes(c.id)}
+                    checked={selected.has(c.id)}
                     onChange={() => toggle(c.id)}
                     onClick={(e) => e.stopPropagation()}
                     className="h-4 w-4 text-primary-600 cursor-pointer"
@@ -3088,7 +3088,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             </ul>
           )}
         </div>
-        {selectedIds.length === 1 && (
+        {selected.size === 1 && (
           <div className="mb-3 bg-green-50 border-2 border-green-300 rounded-lg p-3 flex items-start gap-3 animate-fadeIn">
             <svg
               className="h-6 w-6 text-green-600 flex-shrink-0 mt-0.5"
@@ -3113,28 +3113,26 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             type="button"
             onClick={send}
             disabled={
-              selectedIds.length === 0 ||
-              (selectedIds.length > 1 && !twilioConfigured)
+              selected.size === 0 || (selected.size > 1 && !twilioConfigured)
             }
             className={`w-full sm:w-auto px-5 py-3 rounded-lg font-bold text-base sm:text-lg flex items-center justify-center gap-2 shadow-lg transition-all duration-200 ${
-              selectedIds.length === 0 ||
-              (selectedIds.length > 1 && !twilioConfigured)
+              selected.size === 0 || (selected.size > 1 && !twilioConfigured)
                 ? "bg-gray-400 cursor-not-allowed"
-                : selectedIds.length === 1
+                : selected.size === 1
                 ? "bg-green-600 hover:bg-green-700 text-white hover:scale-105 animate-pulse"
                 : "bg-gray-900 hover:bg-gray-800 text-white hover:scale-105"
             }`}
           >
-            {selectedIds.length === 1 && (
+            {selected.size === 1 && (
               <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
               </svg>
             )}
             <span className="font-extrabold">
-              {selectedIds.length === 1
+              {selected.size === 1
                 ? "📱 Send via WhatsApp"
-                : selectedIds.length > 1
-                ? `Send ${selectedIds.length} SMS`
+                : selected.size > 1
+                ? `Send ${selected.size} SMS`
                 : "Send Message"}
             </span>
           </button>
@@ -3194,7 +3192,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             <span>{status}</span>
           </div>
         )}
-        {!twilioConfigured && selectedIds.length > 1 && (
+        {!twilioConfigured && selected.size > 1 && (
           <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded p-2">
             Twilio is not configured. Add Account SID, Auth Token, and Phone in
             Messenger to enable sending.
@@ -3245,102 +3243,94 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           <input
             type="file"
             ref={fileInputRef}
+            accept=".csv,.xlsx,.xls"
             onChange={handleFileUpload}
-            accept=".xlsx,.xls,.csv"
             className="hidden"
           />
-          <div className="mb-6 sm:mb-8 lg:mb-10">
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.8fr] gap-4 sm:gap-5 lg:gap-6">
-              {/* Left bar: Title & description */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 sm:mb-8 lg:mb-10">
+            <div>
               <div className="gradient-border premium-card bg-white shadow-lg p-5 sm:p-6 transition-all duration-300 rounded-2xl edge-left-rounded hover:shadow-xl">
-                <div className="space-y-2 flex flex-col justify-center h-full">
-                  <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
-                    <span
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white pulse-scale"
-                      style={{
-                        boxShadow:
-                          "0 0 20px rgba(99, 102, 241, 0.4), 0 4px 6px -1px rgba(99, 102, 241, 0.3)",
-                      }}
+                <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      className="h-5 w-5"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                        className="h-5 w-5"
-                      >
-                        <path d="M12 3l9 4.5v9L12 21 3 16.5v-9L12 3z" />
-                      </svg>
-                    </span>
-                    {isEditingName ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={editedName}
-                          onChange={(e) => setEditedName(e.target.value)}
-                          className="text-2xl font-bold text-gray-900 border-b-2 border-primary-500 focus:outline-none bg-transparent"
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleSaveName();
-                            if (e.key === "Escape") {
-                              setIsEditingName(false);
-                              setEditedName(businessName);
-                            }
-                          }}
-                        />
-                        <button
-                          onClick={handleSaveName}
-                          className="text-sm bg-primary-600 text-white px-3 py-1 rounded-lg hover:bg-primary-700"
-                          title="Save"
-                        >
-                          ✓
-                        </button>
-                        <button
-                          onClick={() => {
+                      <path d="M12 3l9 4.5v9L12 21 3 16.5v-9L12 3z" />
+                    </svg>
+                  </span>
+                  {isEditingName ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={editedName}
+                        onChange={(e) => setEditedName(e.target.value)}
+                        className="text-2xl font-bold text-gray-900 border-b-2 border-primary-500 focus:outline-none bg-transparent"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveName();
+                          if (e.key === "Escape") {
                             setIsEditingName(false);
                             setEditedName(businessName);
-                          }}
-                          className="text-sm bg-gray-300 text-gray-700 px-3 py-1 rounded-lg hover:bg-gray-400"
-                          title="Cancel"
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={handleSaveName}
+                        className="text-sm bg-primary-600 text-white px-3 py-1 rounded-lg hover:bg-primary-700"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsEditingName(false);
+                          setEditedName(businessName);
+                        }}
+                        className="text-sm bg-gray-300 text-gray-700 px-3 py-1 rounded-lg hover:bg-gray-400"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      {businessName || "Acme Inc."}
+                      <button
+                        onClick={() => {
+                          setIsEditingName(true);
+                          setEditedName(businessName);
+                        }}
+                        className="text-primary-600 hover:text-primary-700 transition-colors"
+                        title="Change business name"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        {businessName || "Acme Inc."}
-                        <button
-                          onClick={() => {
-                            setIsEditingName(true);
-                            setEditedName(businessName);
-                          }}
-                          className="text-primary-600 hover:text-primary-700 transition-colors"
-                          title="Change business name"
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="h-5 w-5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                            />
-                          </svg>
-                        </button>
-                      </span>
-                    )}
-                  </h2>
-                  <p className="text-sm sm:text-base text-gray-600 leading-relaxed">
-                    Your reputation dashboard — track messages, feedback, and
-                    growth in real time.
-                  </p>
-                </div>
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                          />
+                        </svg>
+                      </button>
+                    </span>
+                  )}
+                </h2>
+                <p className="text-sm sm:text-base text-gray-600 leading-relaxed">
+                  Your reputation dashboard — track messages, feedback, and
+                  growth in real time.
+                </p>
               </div>
-
+            </div>
+            <div>
               {/* Right bar: Unified card with stats in 2x2 grid */}
               <div className="gradient-border premium-card bg-white shadow-lg p-5 sm:p-6 transition-all duration-300 rounded-2xl edge-right-rounded hover:shadow-xl">
                 {dashLoading ? (
@@ -3379,7 +3369,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                         </svg>
                       </div>
                     </div>
-
                     {/* 2. Feedback Received Card - Top Right */}
                     <div className="flex flex-col items-center justify-center bg-gradient-to-br from-green-50 to-green-100/50 border border-green-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
                       <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
@@ -3405,13 +3394,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                         </svg>
                       </div>
                     </div>
-
                     {/* 3. Negative Comments Card - Bottom Left */}
                     <div className="flex items-center justify-center">
                       <button
                         type="button"
                         onClick={() => {
-                          // Prefer scrolling to the full negative comments section
                           const el = document.getElementById(
                             "negative-comments-list"
                           );
@@ -3422,7 +3409,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                             });
                             return;
                           }
-                          // Fallback to global opener if available
                           if (
                             typeof (window as any).openFeedbackFromDashboard ===
                             "function"
@@ -3443,7 +3429,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                         </span>
                       </button>
                     </div>
-
                     {/* 4. View Feedback Button - Bottom Right */}
                     <div className="flex items-center justify-center">
                       <a
