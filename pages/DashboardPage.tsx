@@ -3224,44 +3224,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     setModalOpenForWhatsapp(Boolean(forWhatsapp));
     setIsModalOpen(true);
   }
-  // DebugBoundary is provided via components/DebugBoundary.tsx
-
-  // Runtime sanity: ensure the main child components are valid React element types.
-  try {
-    const checks: Record<string, string> = {
-      AddCustomerModal: typeof AddCustomerModal,
-      DebugBoundary: typeof DebugBoundary,
-      AnalyticsSection: typeof (AnalyticsSection as any),
-      FunnelAnalytics: typeof (FunnelAnalytics as any),
-      NegativeFeedbackSection: typeof (NegativeFeedbackSection as any),
-      CustomerTable: typeof (CustomerTable as any),
-      SendMessagesCard: typeof (SendMessagesCard as any),
-    };
-    const invalid = Object.entries(checks).filter(
-      ([, t]) => t !== "function" && t !== "object"
-    );
-    if (invalid.length > 0) {
-      console.error("[DashboardPage] Invalid element types detected:", checks);
-      return (
-        <div className="min-h-screen flex items-center justify-center p-8">
-          <div className="max-w-3xl bg-white p-6 rounded-xl shadow-lg border border-yellow-100">
-            <h2 className="text-xl font-bold text-yellow-800 mb-3">
-              Dashboard initialization issue
-            </h2>
-            <p className="text-sm text-gray-700 mb-4">
-              One or more internal components failed to initialize. See console
-              for details.
-            </p>
-            <pre className="text-xs bg-yellow-50 p-3 rounded">
-              {JSON.stringify(checks, null, 2)}
-            </pre>
-          </div>
-        </div>
-      );
-    }
-  } catch (err) {
-    console.warn("[DashboardPage] sanity check failed", err);
-  }
 
   return (
     <DebugBoundary>
