@@ -114,10 +114,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         res && typeof (res as any).then === "function"
           ? await (res as any)
           : res;
-
-      // Only treat string return as error if it looks like an error message (not a customer ID)
-      // Customer IDs typically start with "cust-" or similar, errors are descriptive text
-      if (typeof value === "string" && value && !value.startsWith("cust-")) {
+      if (typeof value === "string" && value) {
         setError(value);
         return;
       }
