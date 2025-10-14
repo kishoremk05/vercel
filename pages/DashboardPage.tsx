@@ -832,7 +832,7 @@ const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
               <tr>
                 <th className="px-3 sm:px-6 py-3 font-medium">Phone</th>
                 <th className="px-3 sm:px-6 py-3 font-medium">Comment</th>
-                <th className="px-3 sm:px-6 py-3 font-medium">Date</th>
+
                 <th className="px-3 sm:px-6 py-3 text-right font-medium">
                   Actions
                 </th>
@@ -846,11 +846,7 @@ const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
                   <tr key={c.id} className="bg-white border-b hover:bg-gray-50">
                     <td className="px-3 sm:px-6 py-3">{c.customerPhone}</td>
                     <td className="px-3 sm:px-6 py-3">{c.commentText}</td>
-                    <td className="px-3 sm:px-6 py-3 text-xs text-gray-500">
-                      {c.createdAt?.toDate
-                        ? new Date(c.createdAt.toDate()).toLocaleString()
-                        : new Date(c.createdAt).toLocaleString()}
-                    </td>
+
                     <td className="px-6 py-3 text-right">
                       <div className="flex items-center gap-2 justify-end">
                         <a
