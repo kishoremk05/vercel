@@ -3050,7 +3050,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
               {filtered.map((c) => (
                 <li
                   key={c.id}
-                  className="flex items-center justify-between px-3 py-2 text-sm border-b last:border-b-0"
+                  className="flex items-center justify-between px-3 py-2 text-sm border-b last:border-b-0 hover:bg-gray-100 cursor-pointer"
+                  onClick={() => toggle(c.id)}
                 >
                   <div>
                     <div className="font-medium text-gray-800">{c.name}</div>
@@ -3060,7 +3061,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     type="checkbox"
                     checked={selectedIds.includes(c.id)}
                     onChange={() => toggle(c.id)}
-                    className="h-4 w-4 text-primary-600"
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-4 w-4 text-primary-600 cursor-pointer"
                   />
                 </li>
               ))}
@@ -3509,9 +3511,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                 businessName={businessName}
                 feedbackPageLink={feedbackPageLink}
                 onUploadCustomers={triggerFileUpload}
-                onOpenAddCustomer={() =>
-                  openAddCustomer(true)
-                }
+                onOpenAddCustomer={() => openAddCustomer(true)}
               />
             </div>
             <div className="flex flex-col gap-8">
