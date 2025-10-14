@@ -2800,17 +2800,18 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     // Auto-select all when signal changes (e.g., after upload)
     useEffect(() => {
       if (selectAllSignal > 0 && eligible.length > 0) {
-        // Small delay to ensure UI has updated with new customers
+        // Delay to ensure React has fully updated state with new customers
         const timer = setTimeout(() => {
-          setSelectedIds(eligible.map((c) => c.id));
+          const allIds = eligible.map((c) => c.id);
+          setSelectedIds(allIds);
           setStatus(
             `Selected all ${eligible.length} customers. Review and click Send SMS.`
           );
-        }, 100);
+          console.log(`Auto-selected ${allIds.length} customers:`, allIds);
+        }, 300); // Increased delay for reliability
         return () => clearTimeout(timer);
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectAllSignal, eligible.length]);
+    }, [selectAllSignal, eligible]);
 
     const filtered = useMemo(() => {
       const q = search.trim().toLowerCase();
@@ -2995,11 +2996,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     };
 
     return (
-      <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg p-4 sm:p-5 lg:p-6 transition-all duration-300 hover:shadow-xl h-full rounded-2xl">
+      <div className="bg-white shadow-lg p-4 sm:p-5 lg:p-6 border border-gray-200 h-full rounded-2xl">
         <h3 className="text-base sm:text-lg lg:text-xl font-semibold text-gray-900 mb-2 sm:mb-3 flex items-center gap-2">
           <span
-            className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-md ring-2 ring-indigo-400/50 text-white pulse-scale"
-            style={{ boxShadow: "0 0 15px rgba(99, 102, 241, 0.3)" }}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-md text-white"
           >
             <PaperAirplaneIcon className="h-3.5 w-3.5 rotate-45" />
           </span>
