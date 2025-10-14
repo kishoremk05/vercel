@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { XIcon } from "./icons";
+import { getSmsServerUrl } from "../lib/firebaseConfig";
 
 interface AddCustomerModalProps {
   onClose: () => void;
@@ -25,7 +26,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
 
-  // Handler for Send SMS button
+  // Handler for Send SMS button - uses the same logic as sendSmsToCustomer from App.tsx
   const handleSendSms = async (e: React.MouseEvent) => {
     e.preventDefault();
     setError("");
@@ -39,40 +40,105 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     }
 
     try {
-      const phoneDigits = phone.replace(/[^\d]/g, "");
-      if (!/\d{8,15}/.test(phoneDigits)) {
-        setError("Invalid phone number format for SMS.");
-        return;
+      // Get companyId for subscription check and SMS sending
+      const companyId = localStorage.getItem("companyId") || "";
+
+      // Check SMS credits before sending
+      if (companyId) {
+        try {
+          const base = await getSmsServerUrl().catch(() => "");
+          if (base) {
+            const subUrl = `${base}/api/subscription?companyId=${companyId}`;
+            const subRes = await fetch(subUrl);
+            const subData = await subRes.json();
+
+            if (subData.success && subData.subscription) {
+              const remaining =
+                subData.subscription.remainingCredits ??
+                subData.subscription.smsCredits ??
+                0;
+              const status = subData.subscription.status;
+
+              if (status !== "active") {
+                setError(
+                  "Your subscription is not active. Please activate your plan to send SMS."
+                );
+                return;
+              }
+
+              if (remaining <= 0) {
+                setError(
+                  "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                );
+                return;
+              }
+
+              console.log(`[SMS] Credits available: ${remaining}`);
+            }
+          }
+        } catch (subErr) {
+          console.warn(
+            "[SMS] Could not check subscription, proceeding anyway:",
+            subErr
+          );
+        }
       }
 
-      const clientCompanyId = localStorage.getItem("companyId") || "";
+      // Build feedback link with clientId
       let review =
         feedbackPageLink || `${window.location.origin}/quick-feedback`;
-      if (clientCompanyId) {
+      if (companyId) {
         try {
           const url = new URL(review, window.location.origin);
-          url.searchParams.set("clientId", clientCompanyId);
+          url.searchParams.set("clientId", companyId);
           review = url.toString();
         } catch {
           review = `${review}${
             review.includes("?") ? "&" : "?"
-          }clientId=${encodeURIComponent(clientCompanyId)}`;
+          }clientId=${encodeURIComponent(companyId)}`;
         }
       }
 
-      const message = `Hi ${name}, we'd love your feedback for ${businessName}. Link: ${review}`;
-      const response = await fetch("/api/send-sms", {
+      const body = `Hi ${name}, we'd love your feedback for ${businessName}. Link: ${review}`;
+
+      // Use the same SMS server URL and endpoint as sendSmsToCustomer
+      const base = await getSmsServerUrl().catch(() => "");
+      const sendUrl = base
+        ? `${String(base).trim().replace(/\/+$/, "")}/send-sms`
+        : `/send-sms`;
+
+      const response = await fetch(sendUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: phoneDigits, message }),
+        body: JSON.stringify({
+          ...(companyId ? { companyId } : {}),
+          to: phone,
+          body,
+        }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to send SMS. Please try again.");
-      }
+      const data = await response.json();
 
-      alert(`✅ SMS sent successfully to ${name}!`);
-      onClose();
+      if (data.success) {
+        alert(`✅ SMS sent successfully to ${name}!`);
+        // Trigger subscription refresh
+        window.dispatchEvent(new Event("subscription:updated"));
+        onClose();
+      } else {
+        // Check if error is due to SMS limit
+        if (
+          response.status === 403 ||
+          (data.error && data.error.includes("SMS limit"))
+        ) {
+          setError(
+            `SMS limit reached: ${data.error}\n\nRemaining credits: ${
+              data.remainingCredits || 0
+            }`
+          );
+        } else {
+          setError(data.error || "Failed to send SMS. Please try again.");
+        }
+      }
     } catch (err) {
       console.error("Error sending SMS:", err);
       setError("Failed to send SMS. Please try again.");
