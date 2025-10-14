@@ -1296,8 +1296,10 @@ const App: React.FC = () => {
     };
     setCustomers((prev) => [newCustomer, ...prev]);
     logActivity("Added to customer list", newCustomer.name);
-    // Auto-send immediately for manual add
-    enqueueSmsCustomers([newCustomer.id]);
+    // NOTE: Do NOT auto-send SMS here anymore. The AddCustomerModal will handle
+    // WhatsApp send when openWhatsappOnSubmit=true. For regular adds (not from
+    // the modal or when WhatsApp is not desired), users can manually select and send.
+    // Removed: enqueueSmsCustomers([newCustomer.id]);
     return newCustomer.id;
   };
 
