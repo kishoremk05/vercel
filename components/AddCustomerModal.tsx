@@ -39,7 +39,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     }
 
     try {
-      const phoneDigits = phone.replace(/[^\d]/g, "");
+      const phoneDigits = phone.replace(/[^0-9]/g, "");
       if (!/\d{8,15}/.test(phoneDigits)) {
         setError("Invalid phone number format for SMS.");
         return;
