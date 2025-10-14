@@ -3373,9 +3373,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                         </svg>
                       </div>
                     </div>
-                    {/* 3. Negative Comments Card - Bottom Left */}
-                    <div className="flex flex-col items-center justify-center h-full">
-                      <button
+                    {/* 3 & 4. Bottom Cards: Negative Comments & Feedback Page */}
+                    <div className="flex flex-row gap-4 w-full h-full">
+                      <div className="flex flex-col items-center justify-center h-full w-1/2">
+                        <button
                         type="button"
                         onClick={() => {
                           const el = document.getElementById(
@@ -3397,20 +3398,18 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                             );
                           }
                         }}
-                        className="inline-flex flex-col sm:flex-row items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white p-4 sm:p-5 rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
+                        className="flex flex-col items-center justify-center h-full w-full bg-gradient-to-r from-red-600 to-red-700 text-white p-4 sm:p-5 rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg"
                       >
-                        <XCircleIcon className="h-5 w-5" />
-                        <span className="flex items-center gap-2">
-                          Negative Comments
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-red-800/30 text-white border border-red-400/30">
-                            {negativeComments?.length || 0}
-                          </span>
+                        <XCircleIcon className="h-5 w-5 mb-2" />
+                        <span className="font-bold text-lg mb-1">Negative Comments</span>
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-red-800/30 text-white border border-red-400/30 mb-2">
+                          {negativeComments?.length || 0}
                         </span>
                       </button>
                     </div>
-                    {/* 4. View Feedback Button - Bottom Right */}
-                    <div className="flex items-center justify-center">
-                      <a
+                      </div>
+                      <div className="flex flex-col items-center justify-center h-full w-1/2">
+                        <a
                         href={`${
                           (import.meta as any).env?.BASE_URL || "/"
                         }feedback`}
@@ -3428,11 +3427,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                             window.dispatchEvent(new PopStateEvent("popstate"));
                           }
                         }}
-                        className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-gray-900 to-gray-800 text-white px-6 py-4 rounded-xl font-bold hover:from-gray-800 hover:to-gray-700 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
+                        className="flex flex-col items-center justify-center h-full w-full bg-gradient-to-r from-gray-900 to-gray-800 text-white p-4 sm:p-5 rounded-xl font-bold hover:from-gray-800 hover:to-gray-700 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg"
                       >
-                        <StarIcon className="h-5 w-5" />
-                        <span>Feedback Page</span>
-                      </a>
+                        <StarIcon className="h-5 w-5 mb-2" />
+                        <span className="font-bold text-lg mb-1">Feedback Page</span>
+                      </div>
                     </div>
                   </div>
                 )}
