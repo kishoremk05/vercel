@@ -2801,7 +2801,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     const prevSignalRef = useRef(0);
     useEffect(() => {
       // Only run if signal actually incremented (new upload)
-      if (selectAllSignal > 0 && selectAllSignal > prevSignalRef.current && eligible.length > 0) {
+      if (
+        selectAllSignal > 0 &&
+        selectAllSignal > prevSignalRef.current &&
+        eligible.length > 0
+      ) {
         // Select all eligible customers
         const allIds = eligible.map((c) => c.id);
         setSelected(new Set(allIds));
@@ -3345,7 +3349,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                       </div>
                     </div>
                     {/* 2. Feedback Received Card - Top Right */}
-                    <div className="flex flex-col items-center justify-center bg-gradient-to-br from-green-50 to-green-100/50 border border-green-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
+                    <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-green-50 to-green-100/50 border border-green-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
                       <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
                         Feedback Received
                       </div>
@@ -3370,7 +3374,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                       </div>
                     </div>
                     {/* 3. Negative Comments Card - Bottom Left */}
-                    <div className="flex items-center justify-center">
+                    <div className="flex flex-col items-center justify-center h-full">
                       <button
                         type="button"
                         onClick={() => {
@@ -3393,7 +3397,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                             );
                           }
                         }}
-                        className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-4 rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
+                        className="inline-flex flex-col sm:flex-row items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white p-4 sm:p-5 rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
                       >
                         <XCircleIcon className="h-5 w-5" />
                         <span className="flex items-center gap-2">
