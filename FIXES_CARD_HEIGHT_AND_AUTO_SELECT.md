@@ -6,17 +6,21 @@
 ## Issues Fixed
 
 ### 1. ✅ Card Height Mismatch
+
 **Problem:** Left card (business name) was shorter than right card (stats grid)
 
 **Solution:**
+
 - Added `flex flex-col` to both parent divs
 - Added `h-full flex flex-col justify-center` to both card containers
 - Both cards now stretch to match height and content is vertically centered
 
 ### 2. ✅ Auto-Select After Customer Upload
+
 **Problem:** After uploading CSV/XLSX, customers were not being auto-selected in Send Messages section
 
 **Solution Implemented:**
+
 1. **100ms Delay:** Added `setTimeout` before incrementing `selectAllSignal` to ensure React state updates propagate
 2. **Force Remount:** `SendMessagesCard` has `key={selectAllSignal}` which forces full component remount
 3. **Dual Trigger System:**
@@ -28,6 +32,7 @@
 ## How It Works
 
 ### Upload Flow:
+
 ```
 1. User uploads CSV/XLSX → handleFileUpload()
 2. Parse file and extract customer data
@@ -43,6 +48,7 @@
 ```
 
 ### Visual Feedback:
+
 - **Badge:** Shows "N of N selected" in indigo pill
 - **Status:** "✅ Selected all N customers. Review and click Send SMS."
 - **Console:** Logs confirm auto-selection triggered
@@ -51,6 +57,7 @@
 ## Testing Steps
 
 1. **Upload Test:**
+
    ```
    1. Go to Customer List section
    2. Click "Upload now" or "Append customers"
@@ -62,6 +69,7 @@
    ```
 
 2. **Card Height Test:**
+
    ```
    1. View dashboard in desktop mode (lg breakpoint)
    2. Left card (Graffity) and Right card (Stats grid) should be same height
@@ -79,9 +87,11 @@
 ## Technical Details
 
 ### Components Modified:
+
 - `DashboardPage.tsx` (lines 2580-3516)
 
 ### Key Changes:
+
 1. Card layout: `grid-cols-1 lg:grid-cols-2` with `flex flex-col` wrappers
 2. Card styling: Added `h-full flex flex-col justify-center`
 3. Upload handler: Added 100ms setTimeout before signal increment
@@ -89,6 +99,7 @@
 5. Debug logging: Console logs for selection tracking
 
 ### State Flow:
+
 ```typescript
 selectAllSignal: number  // Increment triggers remount
 pendingAutoSelect: boolean  // Retry flag for prop updates
@@ -110,6 +121,7 @@ eligible: Customer[]  // Filtered customers (valid phone + name)
 ## Rollback Instructions
 
 If issues occur, revert to previous commit:
+
 ```bash
 git revert ebf4f73
 git push origin main
@@ -118,6 +130,7 @@ git push origin main
 ## Support
 
 If auto-select still fails:
+
 1. Check browser console for logs
 2. Verify `selectAllSignal` increments (should be > 0)
 3. Check `eligible.length` matches uploaded count

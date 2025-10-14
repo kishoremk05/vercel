@@ -2779,8 +2779,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         ),
       [customers]
     );
-  // Use Set for robust selection handling
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+    // Use Set for robust selection handling
+    const [selected, setSelected] = useState<Set<string>>(new Set());
     const [search, setSearch] = useState("");
     const [status, setStatus] = useState("");
     const [successBanner, setSuccessBanner] = useState<string | null>(null);
@@ -2811,13 +2811,19 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     // This is the ONLY effect that handles auto-selection to avoid loops
     useEffect(() => {
       // Only run if signal is new and greater than what we've processed
-      if (selectAllSignal > 0 && selectAllSignal > lastProcessedSignal.current && eligible.length > 0) {
+      if (
+        selectAllSignal > 0 &&
+        selectAllSignal > lastProcessedSignal.current &&
+        eligible.length > 0
+      ) {
         const allIds = eligible.map((c) => c.id);
         setSelected(new Set(allIds));
         setStatus(
           `✅ Selected all ${eligible.length} customers. Review and click Send SMS.`
         );
-        console.log(`[SendMessagesCard] Auto-select triggered: ${allIds.length} customers selected (signal: ${selectAllSignal})`);
+        console.log(
+          `[SendMessagesCard] Auto-select triggered: ${allIds.length} customers selected (signal: ${selectAllSignal})`
+        );
         // Mark this signal as processed
         lastProcessedSignal.current = selectAllSignal;
       }
@@ -2990,7 +2996,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
       // For multiple customers, use Twilio SMS if configured
       if (twilioConfigured) {
-  onQueue(selectedIds);
+        onQueue(selectedIds);
 
         // Show JavaScript alert for bulk SMS (Requirement 1)
         alert(
@@ -3110,12 +3116,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             type="button"
             onClick={send}
             disabled={
-              selected.size === 0 ||
-              (selected.size > 1 && !twilioConfigured)
+              selected.size === 0 || (selected.size > 1 && !twilioConfigured)
             }
             className={`w-full sm:w-auto px-5 py-3 rounded-lg font-bold text-base sm:text-lg flex items-center justify-center gap-2 shadow-lg transition-all duration-200 ${
-              selected.size === 0 ||
-              (selected.size > 1 && !twilioConfigured)
+              selected.size === 0 || (selected.size > 1 && !twilioConfigured)
                 ? "bg-gray-400 cursor-not-allowed"
                 : selected.size === 1
                 ? "bg-green-600 hover:bg-green-700 text-white hover:scale-105 animate-pulse"
@@ -3250,9 +3254,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             <div className="flex flex-col">
               <div className="gradient-border premium-card bg-white shadow-lg p-5 sm:p-6 transition-all duration-300 rounded-2xl edge-left-rounded hover:shadow-xl h-full flex flex-col justify-center">
                 <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
-                  <span
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white"
-                  >
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white">
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       viewBox="0 0 24 24"
@@ -3338,28 +3340,60 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                   <div className="h-48 animate-pulse bg-gray-50 rounded-xl" />
                 ) : dashError ? (
                   <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">
-                    <p className="text-sm font-semibold">Failed to load stats</p>
+                    <p className="text-sm font-semibold">
+                      Failed to load stats
+                    </p>
                     <p className="text-xs">{dashError}</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-4 sm:gap-5">
                     {/* 1. Messages Sent Card - Top Left */}
                     <div className="flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
-                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Messages Sent</div>
-                      <div className="text-4xl sm:text-5xl font-extrabold text-blue-600 mb-2">{messageCount}</div>
+                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                        Messages Sent
+                      </div>
+                      <div className="text-4xl sm:text-5xl font-extrabold text-blue-600 mb-2">
+                        {messageCount}
+                      </div>
                       <div className="bg-blue-100 p-2 rounded-lg inline-flex">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5 text-blue-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                          />
                         </svg>
                       </div>
                     </div>
                     {/* 2. Feedback Received Card - Top Right */}
                     <div className="flex flex-col items-center justify-center bg-gradient-to-br from-green-50 to-green-100/50 border border-green-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
-                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Feedback Received</div>
-                      <div className="text-4xl sm:text-5xl font-extrabold text-green-600 mb-2">{feedbackCount}</div>
+                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                        Feedback Received
+                      </div>
+                      <div className="text-4xl sm:text-5xl font-extrabold text-green-600 mb-2">
+                        {feedbackCount}
+                      </div>
                       <div className="bg-green-100 p-2 rounded-lg inline-flex">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-5 w-5 text-green-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
                         </svg>
                       </div>
                     </div>
@@ -3368,13 +3402,23 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          const el = document.getElementById("negative-comments-list");
+                          const el = document.getElementById(
+                            "negative-comments-list"
+                          );
                           if (el) {
-                            el.scrollIntoView({ behavior: "smooth", block: "start" });
+                            el.scrollIntoView({
+                              behavior: "smooth",
+                              block: "start",
+                            });
                             return;
                           }
-                          if (typeof (window as any).openFeedbackFromDashboard === "function") {
-                            (window as any).openFeedbackFromDashboard("negative");
+                          if (
+                            typeof (window as any).openFeedbackFromDashboard ===
+                            "function"
+                          ) {
+                            (window as any).openFeedbackFromDashboard(
+                              "negative"
+                            );
                           }
                         }}
                         className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-4 rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
@@ -3382,20 +3426,29 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                         <XCircleIcon className="h-5 w-5" />
                         <span className="flex items-center gap-2">
                           Negative Comments
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-red-800/30 text-white border border-red-400/30">{negativeComments?.length || 0}</span>
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-red-800/30 text-white border border-red-400/30">
+                            {negativeComments?.length || 0}
+                          </span>
                         </span>
                       </button>
                     </div>
                     {/* 4. View Feedback Button - Bottom Right */}
                     <div className="flex items-center justify-center">
                       <a
-                        href={`${(import.meta as any).env?.BASE_URL || "/"}feedback`}
+                        href={`${
+                          (import.meta as any).env?.BASE_URL || "/"
+                        }feedback`}
                         onClick={(e) => {
                           e.preventDefault();
-                          const base = (import.meta as any).env?.BASE_URL || "/";
+                          const base =
+                            (import.meta as any).env?.BASE_URL || "/";
                           const target = `${base}feedback`;
                           if (window.location.pathname !== target) {
-                            window.history.pushState({ page: target }, "", target);
+                            window.history.pushState(
+                              { page: target },
+                              "",
+                              target
+                            );
                             window.dispatchEvent(new PopStateEvent("popstate"));
                           }
                         }}
