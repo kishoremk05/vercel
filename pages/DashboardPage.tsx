@@ -2699,6 +2699,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         if (customersData.length > 0) {
           const result = onBulkAddCustomers(customersData);
           const totalInvalid = result.invalid + normalizationInvalid;
+          
+          console.log('Excel Upload Complete:', {
+            added: result.added,
+            duplicates: result.duplicates,
+            invalid: totalInvalid,
+            totalCustomersAfter: customers.length
+          });
+          
           alert(
             `✅ Upload complete!\n\nAdded: ${
               result.added
@@ -2710,8 +2718,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                 : ""
             }\n\n📱 All customers have been automatically selected in Send Messages. You can now send SMS to everyone immediately!`
           );
+          
           // After successful upload, auto-select all recipients in the Send Messages card
-          setSelectAllSignal((x) => x + 1);
+          console.log('Incrementing selectAllSignal to trigger auto-selection...');
+          setSelectAllSignal((x) => {
+            console.log(`selectAllSignal: ${x} -> ${x + 1}`);
+            return x + 1;
+          });
         } else {
           const headerPreview = rows[headerRowIdx]
             ?.map((c) => String(c))
@@ -2779,6 +2792,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     const [successBanner, setSuccessBanner] = useState<string | null>(null);
     const [showSuccessAlert, setShowSuccessAlert] = useState(false);
     const [successAlertMessage, setSuccessAlertMessage] = useState("");
+    const [prevEligibleLength, setPrevEligibleLength] = useState(0);
 
     // Show a local success banner inside this card when messages are sent successfully
     useEffect(() => {
@@ -2797,21 +2811,36 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         window.removeEventListener("dash:sms:success", onSuccess as any);
     }, []);
 
-    // Auto-select all when signal changes (e.g., after upload)
+    // Auto-select all when eligible customers list grows (new customers added via upload or Add Customer)
+    useEffect(() => {
+      // If eligible list grew (new customers were added), auto-select all
+      if (eligible.length > prevEligibleLength && eligible.length > 0) {
+        console.log(
+          `Customer list grew from ${prevEligibleLength} to ${eligible.length} - auto-selecting all`
+        );
+        const allIds = eligible.map((c) => c.id);
+        setSelectedIds(allIds);
+        setStatus(
+          `Selected all ${eligible.length} customers. Review and click Send SMS.`
+        );
+      }
+      // Update the previous length for next comparison
+      setPrevEligibleLength(eligible.length);
+    }, [eligible.length]);
+
+    // ALSO keep the signal-based selection for backwards compatibility
     useEffect(() => {
       if (selectAllSignal > 0 && eligible.length > 0) {
-        // Delay to ensure React has fully updated state with new customers
-        const timer = setTimeout(() => {
-          const allIds = eligible.map((c) => c.id);
-          setSelectedIds(allIds);
-          setStatus(
-            `Selected all ${eligible.length} customers. Review and click Send SMS.`
-          );
-          console.log(`Auto-selected ${allIds.length} customers:`, allIds);
-        }, 300); // Increased delay for reliability
-        return () => clearTimeout(timer);
+        console.log(
+          `Signal triggered (${selectAllSignal}) - auto-selecting all ${eligible.length} customers`
+        );
+        const allIds = eligible.map((c) => c.id);
+        setSelectedIds(allIds);
+        setStatus(
+          `Selected all ${eligible.length} customers. Review and click Send SMS.`
+        );
       }
-    }, [selectAllSignal, eligible]);
+    }, [selectAllSignal]);
 
     const filtered = useMemo(() => {
       const q = search.trim().toLowerCase();
@@ -2998,9 +3027,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     return (
       <div className="bg-white shadow-lg p-4 sm:p-5 lg:p-6 border border-gray-200 h-full rounded-2xl">
         <h3 className="text-base sm:text-lg lg:text-xl font-semibold text-gray-900 mb-2 sm:mb-3 flex items-center gap-2">
-          <span
-            className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-md text-white"
-          >
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-md text-white">
             <PaperAirplaneIcon className="h-3.5 w-3.5 rotate-45" />
           </span>
           Send Messages
