@@ -2700,7 +2700,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           const result = onBulkAddCustomers(customersData);
           const totalInvalid = result.invalid + normalizationInvalid;
           alert(
-            `Upload complete!\n\nAdded: ${
+            `✅ Upload complete!\n\nAdded: ${
               result.added
             } new customers.\nDuplicates Skipped: ${
               result.duplicates
@@ -2708,7 +2708,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
               normalizationInvalid
                 ? ` (Phone format issues: ${normalizationInvalid})`
                 : ""
-            }`
+            }\n\n📱 All customers have been automatically selected in Send Messages. You can now send SMS to everyone immediately!`
           );
           // After successful upload, auto-select all recipients in the Send Messages card
           setSelectAllSignal((x) => x + 1);
@@ -2799,14 +2799,18 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
     // Auto-select all when signal changes (e.g., after upload)
     useEffect(() => {
-      if (eligible.length > 0) {
-        setSelectedIds(eligible.map((c) => c.id));
-        setStatus(
-          `Selected all ${eligible.length} customers. Review and click Send SMS.`
-        );
+      if (selectAllSignal > 0 && eligible.length > 0) {
+        // Small delay to ensure UI has updated with new customers
+        const timer = setTimeout(() => {
+          setSelectedIds(eligible.map((c) => c.id));
+          setStatus(
+            `Selected all ${eligible.length} customers. Review and click Send SMS.`
+          );
+        }, 100);
+        return () => clearTimeout(timer);
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectAllSignal]);
+    }, [selectAllSignal, eligible.length]);
 
     const filtered = useMemo(() => {
       const q = search.trim().toLowerCase();
