@@ -2802,6 +2802,18 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         window.removeEventListener("dash:sms:success", onSuccess as any);
     }, []);
 
+    // Also select all on mount (this component is force-remounted via key when selectAllSignal changes)
+    useEffect(() => {
+      if (selectAllSignal > 0 && eligible.length > 0) {
+        const allIds = eligible.map((c) => c.id);
+        setSelectedIds(allIds);
+        setStatus(
+          `Selected all ${eligible.length} customers. Review and click Send SMS.`
+        );
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // Auto-select all when signal changes (e.g., after upload)
     useEffect(() => {
       if (selectAllSignal > 0 && eligible.length > 0) {
@@ -3535,6 +3547,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
             <div className="flex flex-col gap-8">
               <SendMessagesCard
+                key={selectAllSignal}
                 customers={customers}
                 onQueue={onQueueSmsCustomers}
                 selectAllSignal={selectAllSignal}
