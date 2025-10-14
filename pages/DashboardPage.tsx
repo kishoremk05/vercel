@@ -45,32 +45,6 @@ import {
 } from "../components/icons";
 import AddCustomerModal from "../components/AddCustomerModal";
 import DebugBoundary from "../components/DebugBoundary";
-// Runtime sanity checks — will log to console in the browser to help trace React error #185
-try {
-  // @ts-ignore
-  console.debug &&
-    console.debug("[DashboardPage] Debug imports:", {
-      AddCustomerModal: typeof AddCustomerModal,
-      DebugBoundary: typeof DebugBoundary,
-    });
-} catch (e) {
-  // ignore in SSR or build
-}
-try {
-  // @ts-ignore
-  console.debug &&
-    console.debug("[DashboardPage] More debug:", {
-      ResponsiveContainer: typeof ResponsiveContainer,
-      PieChart: typeof PieChart,
-      LineChart: typeof LineChart,
-      BarChart: typeof BarChart,
-      PlusIcon: typeof PlusIcon,
-      PaperAirplaneIcon: typeof PaperAirplaneIcon,
-      XCircleIcon: typeof XCircleIcon,
-    });
-} catch (e) {
-  // ignore
-}
 
 interface DashboardStats {
   messageCount: number;
@@ -3536,7 +3510,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                 feedbackPageLink={feedbackPageLink}
                 onUploadCustomers={triggerFileUpload}
                 onOpenAddCustomer={() =>
-                  openAddCustomer(sendMessagesSelectedCount === 1)
+                  openAddCustomer(true)
                 }
               />
             </div>
