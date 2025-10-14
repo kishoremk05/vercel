@@ -2798,16 +2798,19 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     }, []);
 
     // AUTO-SELECT: When selectAllSignal changes (after upload), select all customers
+    const prevSignalRef = useRef(0);
     useEffect(() => {
-      if (selectAllSignal > 0 && eligible.length > 0) {
+      // Only run if signal actually incremented (new upload)
+      if (selectAllSignal > 0 && selectAllSignal > prevSignalRef.current && eligible.length > 0) {
         // Select all eligible customers
         const allIds = eligible.map((c) => c.id);
         setSelected(new Set(allIds));
         setStatus(
           `✅ Selected all ${eligible.length} customers. Ready to send messages.`
         );
+        prevSignalRef.current = selectAllSignal;
       }
-    }, [selectAllSignal]); // Only depend on selectAllSignal
+    }, [selectAllSignal, eligible.length]);
 
     // Filtered customers based on search
     const filtered = useMemo(() => {
@@ -2829,18 +2832,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         return next;
       });
     };
-
-    // Notify parent about selection changes
-    useEffect(() => {
-      try {
-        const ev = new CustomEvent("sendmessages:selection", {
-          detail: { count: selected.size },
-        });
-        window.dispatchEvent(ev as any);
-      } catch (e) {
-        // ignore
-      }
-    }, [selected.size]); // Use size instead of the Set itself
 
     // Select all filtered customers
     const selectAll = () => {
@@ -3208,17 +3199,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       return () => clearTimeout(t);
     }
   }, [customers, pendingAutoSelect]);
-
-  // Listen for selection events from SendMessagesCard
-  React.useEffect(() => {
-    const handler = (e: any) => {
-      const cnt = Number(e?.detail?.count || 0);
-      setSendMessagesSelectedCount(cnt);
-    };
-    window.addEventListener("sendmessages:selection", handler as any);
-    return () =>
-      window.removeEventListener("sendmessages:selection", handler as any);
-  }, []);
 
   function openAddCustomer(forWhatsapp: boolean) {
     setModalOpenForWhatsapp(Boolean(forWhatsapp));
