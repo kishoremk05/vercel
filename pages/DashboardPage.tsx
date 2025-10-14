@@ -2232,6 +2232,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const [sendBanner, setSendBanner] = useState<string | null>(null);
   // Signal the SendMessagesCard to select all after an upload completes
   const [selectAllSignal, setSelectAllSignal] = useState(0);
+  // If an upload just happened, wait for customers prop to update and trigger selection again
+  const [pendingAutoSelect, setPendingAutoSelect] = useState(false);
   // Realtime stats for unified top card
   const {
     stats: dashStats,
@@ -2699,14 +2701,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         if (customersData.length > 0) {
           const result = onBulkAddCustomers(customersData);
           const totalInvalid = result.invalid + normalizationInvalid;
-          
-          console.log('Excel Upload Complete:', {
-            added: result.added,
-            duplicates: result.duplicates,
-            invalid: totalInvalid,
-            totalCustomersAfter: customers.length
-          });
-          
           alert(
             `✅ Upload complete!\n\nAdded: ${
               result.added
@@ -2718,13 +2712,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                 : ""
             }\n\n📱 All customers have been automatically selected in Send Messages. You can now send SMS to everyone immediately!`
           );
-          
           // After successful upload, auto-select all recipients in the Send Messages card
-          console.log('Incrementing selectAllSignal to trigger auto-selection...');
-          setSelectAllSignal((x) => {
-            console.log(`selectAllSignal: ${x} -> ${x + 1}`);
-            return x + 1;
-          });
+          // First trigger immediately (in case customers are already in props)
+          setSelectAllSignal((x) => x + 1);
+          // Also mark as pending so we re-trigger once customers prop updates from parent
+          setPendingAutoSelect(true);
         } else {
           const headerPreview = rows[headerRowIdx]
             ?.map((c) => String(c))
@@ -2792,7 +2784,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     const [successBanner, setSuccessBanner] = useState<string | null>(null);
     const [showSuccessAlert, setShowSuccessAlert] = useState(false);
     const [successAlertMessage, setSuccessAlertMessage] = useState("");
-    const [prevEligibleLength, setPrevEligibleLength] = useState(0);
 
     // Show a local success banner inside this card when messages are sent successfully
     useEffect(() => {
@@ -2811,36 +2802,21 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         window.removeEventListener("dash:sms:success", onSuccess as any);
     }, []);
 
-    // Auto-select all when eligible customers list grows (new customers added via upload or Add Customer)
-    useEffect(() => {
-      // If eligible list grew (new customers were added), auto-select all
-      if (eligible.length > prevEligibleLength && eligible.length > 0) {
-        console.log(
-          `Customer list grew from ${prevEligibleLength} to ${eligible.length} - auto-selecting all`
-        );
-        const allIds = eligible.map((c) => c.id);
-        setSelectedIds(allIds);
-        setStatus(
-          `Selected all ${eligible.length} customers. Review and click Send SMS.`
-        );
-      }
-      // Update the previous length for next comparison
-      setPrevEligibleLength(eligible.length);
-    }, [eligible.length]);
-
-    // ALSO keep the signal-based selection for backwards compatibility
+    // Auto-select all when signal changes (e.g., after upload)
     useEffect(() => {
       if (selectAllSignal > 0 && eligible.length > 0) {
-        console.log(
-          `Signal triggered (${selectAllSignal}) - auto-selecting all ${eligible.length} customers`
-        );
-        const allIds = eligible.map((c) => c.id);
-        setSelectedIds(allIds);
-        setStatus(
-          `Selected all ${eligible.length} customers. Review and click Send SMS.`
-        );
+        // Delay to ensure React has fully updated state with new customers
+        const timer = setTimeout(() => {
+          const allIds = eligible.map((c) => c.id);
+          setSelectedIds(allIds);
+          setStatus(
+            `Selected all ${eligible.length} customers. Review and click Send SMS.`
+          );
+          console.log(`Auto-selected ${allIds.length} customers:`, allIds);
+        }, 300); // Increased delay for reliability
+        return () => clearTimeout(timer);
       }
-    }, [selectAllSignal]);
+    }, [selectAllSignal, eligible]);
 
     const filtered = useMemo(() => {
       const q = search.trim().toLowerCase();
@@ -3215,6 +3191,18 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       </div>
     );
   };
+
+  // Re-trigger auto-select once the customers prop updates after an upload
+  useEffect(() => {
+    if (pendingAutoSelect) {
+      // Defer to end of tick to ensure child memo (eligible) has recalculated
+      const t = setTimeout(() => {
+        setSelectAllSignal((x) => x + 1);
+        setPendingAutoSelect(false);
+      }, 0);
+      return () => clearTimeout(t);
+    }
+  }, [customers, pendingAutoSelect]);
 
   // Listen for selection events from SendMessagesCard
   React.useEffect(() => {
