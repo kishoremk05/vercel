@@ -100,10 +100,8 @@ const TopNav: React.FC<TopNavProps> = ({
           const user = JSON.parse(userData);
           // Use photoURL directly from Firebase Auth user object
           if (user.photoURL) {
-            console.log("[TopNav] Found photo URL:", user.photoURL);
             setDisplayedPhoto(user.photoURL);
           } else {
-            console.log("[TopNav] No photoURL found in user data");
             setDisplayedPhoto(null);
           }
         }
@@ -118,8 +116,8 @@ const TopNav: React.FC<TopNavProps> = ({
     // Listen for storage changes (in case user data is updated)
     window.addEventListener("storage", updatePhoto);
 
-    // Poll every 500ms for faster real-time updates
-    const interval = setInterval(updatePhoto, 500);
+    // Poll every 2 seconds instead of 500ms to reduce load
+    const interval = setInterval(updatePhoto, 2000);
 
     return () => {
       window.removeEventListener("storage", updatePhoto);

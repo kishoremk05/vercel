@@ -1419,11 +1419,6 @@ const AnalyticsSection: React.FC<{
 
   // Use Firebase messages if available, fallback to activityLogs
   if (firebaseMessages.length > 0) {
-    console.log(
-      "[AnalyticsSection] Using Firebase messages data (",
-      firebaseMessages.length,
-      "messages)"
-    );
     firebaseMessages.forEach((msg) => {
       const d = new Date(msg.timestamp);
       d.setHours(0, 0, 0, 0);
@@ -1431,7 +1426,6 @@ const AnalyticsSection: React.FC<{
       if (key in messageActivityMap) messageActivityMap[key] += 1;
     });
   } else {
-    console.log("[AnalyticsSection] Using activityLogs as fallback");
     activityLogs.forEach((log) => {
       const a = log.action.toLowerCase();
       if (
@@ -2771,7 +2765,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     selectAllSignal: number;
     twilioConfigured: boolean;
   }> = ({ customers, onQueue, selectAllSignal, twilioConfigured }) => {
-    // Exclude synthetic/public bucket
+    // Filter eligible customers (exclude synthetic/public bucket)
     const eligible = useMemo(
       () =>
         customers.filter(
@@ -2779,15 +2773,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         ),
       [customers]
     );
-    // Use Set for robust selection handling
+
+    // State
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [search, setSearch] = useState("");
     const [status, setStatus] = useState("");
     const [successBanner, setSuccessBanner] = useState<string | null>(null);
-    const [showSuccessAlert, setShowSuccessAlert] = useState(false);
-    const [successAlertMessage, setSuccessAlertMessage] = useState("");
 
-    // Show a local success banner inside this card when messages are sent successfully
+    // Show success banner when messages are sent successfully
     useEffect(() => {
       const onSuccess = (e: any) => {
         const to = e?.detail?.to;
@@ -2804,31 +2797,19 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         window.removeEventListener("dash:sms:success", onSuccess as any);
     }, []);
 
-    // Track the last signal we processed to avoid re-running
-    const lastProcessedSignal = useRef(0);
-
-    // Auto-select all when signal changes (e.g., after upload)
-    // This is the ONLY effect that handles auto-selection to avoid loops
+    // AUTO-SELECT: When selectAllSignal changes (after upload), select all customers
     useEffect(() => {
-      // Only run if signal is new and greater than what we've processed
-      if (
-        selectAllSignal > 0 &&
-        selectAllSignal > lastProcessedSignal.current &&
-        eligible.length > 0
-      ) {
+      if (selectAllSignal > 0 && eligible.length > 0) {
+        // Select all eligible customers
         const allIds = eligible.map((c) => c.id);
         setSelected(new Set(allIds));
         setStatus(
-          `✅ Selected all ${eligible.length} customers. Review and click Send SMS.`
+          `✅ Selected all ${eligible.length} customers. Ready to send messages.`
         );
-        console.log(
-          `[SendMessagesCard] Auto-select triggered: ${allIds.length} customers selected (signal: ${selectAllSignal})`
-        );
-        // Mark this signal as processed
-        lastProcessedSignal.current = selectAllSignal;
       }
-    }, [selectAllSignal, eligible.length]); // Use length instead of array to avoid loop
+    }, [selectAllSignal]); // Only depend on selectAllSignal
 
+    // Filtered customers based on search
     const filtered = useMemo(() => {
       const q = search.trim().toLowerCase();
       if (!q) return eligible;
@@ -2839,6 +2820,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       );
     }, [eligible, search]);
 
+    // Toggle selection for a single customer
     const toggle = (id: string) => {
       setSelected((prev) => {
         const next = new Set(prev);
@@ -2848,9 +2830,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       });
     };
 
-    // Notify parent about selection changes so the Add Customer button can
-    // open the modal in WhatsApp mode when a single customer is selected.
-    React.useEffect(() => {
+    // Notify parent about selection changes
+    useEffect(() => {
       try {
         const ev = new CustomEvent("sendmessages:selection", {
           detail: { count: selected.size },
@@ -2859,9 +2840,20 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       } catch (e) {
         // ignore
       }
-    }, [selected]);
-    const selectAll = () => setSelected(new Set(filtered.map((c) => c.id)));
-    const clearSel = () => setSelected(new Set());
+    }, [selected.size]); // Use size instead of the Set itself
+
+    // Select all filtered customers
+    const selectAll = () => {
+      const allFilteredIds = filtered.map((c) => c.id);
+      setSelected(new Set(allFilteredIds));
+      setStatus(`✅ Selected ${allFilteredIds.length} customers`);
+    };
+
+    // Clear selection
+    const clearSel = () => {
+      setSelected(new Set());
+      setStatus("");
+    };
     // Local helpers for WhatsApp message (same as CustomerTable)
     function appendIdToLink(link: string, customerId?: string) {
       if (!link) return link;
