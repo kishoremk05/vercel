@@ -188,7 +188,10 @@ try {
 
   // CORS configuration: allow a comma-separated list via CORS_ORIGINS env var
   // Example: CORS_ORIGINS=https://app.vercel.app,https://admin.example.com
-  const corsOrigins = (process.env.CORS_ORIGINS || "")
+  const corsOrigins = (
+    process.env.CORS_ORIGINS ||
+    "http://localhost:5173,https://vercel-swart-chi-29.vercel.app"
+  )
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
