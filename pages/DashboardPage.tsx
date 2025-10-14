@@ -1856,19 +1856,21 @@ const CustomerTable: React.FC<CustomerTableProps> = ({
           {/* Inline subscription lock overlay (reads from localStorage) */}
           <SubscriptionCustomerLock />
           <div className="flex flex-col gap-3">
-            <div className="relative w-full flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3">
-                <SearchIcon className="h-5 w-5 text-gray-400" />
-              </span>
-              <input
-                type="text"
-                placeholder="Search by name or phone..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 sm:w-72 pl-10 pr-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-gray-900 shadow-sm text-sm sm:text-base"
-              />
+            <div className="w-full flex flex-col sm:flex-row items-center gap-2">
+              <div className="relative w-full sm:flex-1">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <SearchIcon className="h-5 w-5 text-gray-400" />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search by name or phone..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-12 pr-4 h-10 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-gray-900 shadow-sm text-sm sm:text-base"
+                />
+              </div>
               <button
-                className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium text-sm sm:text-base whitespace-nowrap"
+                className="w-full sm:w-auto px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium text-sm sm:text-base whitespace-nowrap"
                 onClick={onClearCustomers}
               >
                 Clear
