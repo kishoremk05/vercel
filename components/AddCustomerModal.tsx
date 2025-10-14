@@ -3,67 +3,169 @@ import { XIcon } from "./icons";
 
 interface AddCustomerModalProps {
   onClose: () => void;
-  onAddCustomer: (name: string, phone: string) => string | void;
+  onAddCustomer: (
+    name: string,
+    phone: string
+  ) => string | void | Promise<string | void>;
+  openWhatsappOnSubmit?: boolean;
+  businessName?: string;
+  feedbackPageLink?: string;
 }
 
 const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   onClose,
   onAddCustomer,
+  openWhatsappOnSubmit = false,
+  businessName = "",
+  feedbackPageLink = "",
 }) => {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Helpers copied from DashboardPage to ensure consistent link construction
+  function appendIdToLink(link: string, customerId?: string) {
+    if (!link) return link;
+    try {
+      const url = new URL(link, window.location.origin);
+      if (customerId) url.searchParams.set("id", customerId);
+      return url.toString();
+    } catch {
+      let base = link;
+      let hash = "";
+      const hashIdx = base.indexOf("#");
+      if (hashIdx >= 0) {
+        hash = base.slice(hashIdx);
+        base = base.slice(0, hashIdx);
+      }
+      const [path, query = ""] = base.split("?");
+      const params = query
+        .split("&")
+        .filter((kv) => kv && !/^id=/i.test(kv))
+        .join("&");
+      const sep = params ? "&" : "";
+      const qs = customerId
+        ? `${params}${sep}id=${encodeURIComponent(customerId)}`
+        : params;
+      return qs ? `${path}?${qs}${hash}` : `${path}${hash}`;
+    }
+  }
+
+  function ensureTenantKey(link: string) {
+    if (!link) return link;
+    try {
+      const url = new URL(link, window.location.origin);
+      if (!url.searchParams.get("tenantKey")) {
+        const tkFromUrl = new URLSearchParams(window.location.search).get(
+          "tenantKey"
+        );
+        const host = window.location.hostname;
+        const fallback =
+          tkFromUrl ||
+          (host === "localhost" || host === "127.0.0.1"
+            ? "demo"
+            : "business-saas");
+        url.searchParams.set("tenantKey", fallback);
+      }
+      return url.toString();
+    } catch {
+      const hasQ = link.includes("?");
+      const hasTk = /(?:^|[?&])tenantKey=/.test(link);
+      if (hasTk) return link;
+      const host = window.location.hostname;
+      const tk =
+        host === "localhost" || host === "127.0.0.1" ? "demo" : "business-saas";
+      return `${link}${hasQ ? "&" : "?"}tenantKey=${encodeURIComponent(tk)}`;
+    }
+  }
+
+  function buildWaMessage(opts: {
+    customerName: string;
+    businessName: string;
+    reviewLink: string;
+  }) {
+    const { customerName, businessName, reviewLink } = opts;
+    const template =
+      "Hi [Customer Name], we'd love your feedback for [Business Name]. Link: [Review Link]";
+    return template
+      .replace(/\[Customer Name\]/g, customerName || "Customer")
+      .replace(/\[Business Name\]/g, businessName)
+      .replace(/\[Review Link\]/g, reviewLink);
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
+
     if (!name.trim() || !phone.trim()) {
       setError("Name and phone number are required.");
       return;
     }
+
     if (!/^\+?[1-9]\d{1,14}$/.test(phone)) {
       setError("Please enter a valid phone number (e.g., +1234567890).");
       return;
     }
+
     try {
-      // Call the parent handler to add the customer locally.
       const res = onAddCustomer(name, phone);
-      // If handler returns a string, treat it as an error message
-      if (typeof res === "string" && res) {
-        setError(res);
+      // Support promise-based handlers as well
+      const value =
+        res && typeof (res as any).then === "function"
+          ? await (res as any)
+          : res;
+      if (typeof value === "string" && value) {
+        setError(value);
         return;
       }
 
-      // Build a pre-filled WhatsApp message and open WhatsApp Web/mobile.
-      // Convert phone to digits-only format expected by wa.me (no plus or spaces).
-      const digits = phone.replace(/[^0-9]/g, "");
-
-      const companyId = (() => {
+      if (openWhatsappOnSubmit) {
         try {
-          return localStorage.getItem("companyId") || "";
-        } catch {
-          return "";
+          const digits = phone.replace(/[^0-9]/g, "");
+          if (!digits) throw new Error("No digits in phone");
+
+          const clientCompanyId = localStorage.getItem("companyId") || "";
+          // Use provided feedbackPageLink if available, else fallback to quick-feedback
+          let review = feedbackPageLink
+            ? appendIdToLink(ensureTenantKey(feedbackPageLink), phone)
+            : `${
+                window.location.origin
+              }/quick-feedback?companyId=${encodeURIComponent(
+                clientCompanyId
+              )}&phone=${encodeURIComponent(phone)}`;
+
+          if (clientCompanyId) {
+            try {
+              const u = new URL(review, window.location.origin);
+              u.searchParams.set("clientId", clientCompanyId);
+              review = u.toString();
+            } catch {
+              review =
+                review +
+                (review.includes("?") ? "&" : "?") +
+                `clientId=${encodeURIComponent(clientCompanyId)}`;
+            }
+          }
+
+          const text = encodeURIComponent(
+            buildWaMessage({
+              customerName: name,
+              businessName,
+              reviewLink: review,
+            })
+          );
+          const waUrl = `https://wa.me/${digits}?text=${text}`;
+          window.open(waUrl, "_blank", "noopener");
+        } catch (waErr) {
+          console.error("[AddCustomerModal] error sending WhatsApp:", waErr);
+          // Non-fatal: still close the modal but show a toast/error if desired
         }
-      })();
+      }
 
-      const origin = window.location.origin;
-      const feedbackUrl = `${origin}/quick-feedback?companyId=${encodeURIComponent(
-        companyId
-      )}&phone=${encodeURIComponent(phone)}`;
-
-      const message = `Hi ${name}, we'd love your feedback for our service. Please leave a quick review: ${feedbackUrl}`;
-
-      const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(
-        message
-      )}`;
-
-      // Open WhatsApp in a new tab/window
-      window.open(waUrl, "_blank");
-
-      // Close the modal
       onClose();
     } catch (err: any) {
-      console.error("[AddCustomerModal] error sending WhatsApp:", err);
-      setError("Failed to initiate WhatsApp. Please try again.");
+      console.error("[AddCustomerModal] error:", err);
+      setError("Failed to add customer. Please try again.");
     }
   };
 
@@ -97,6 +199,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             <XIcon className="h-6 w-6" />
           </button>
         </div>
+
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
             <div>
@@ -132,13 +235,13 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               />
             </div>
           </div>
-          {/* Email field removed per requirement */}
 
           {error && (
             <p className="text-red-500 text-sm mb-4 bg-red-50 p-3 rounded-lg border border-red-100">
               {error}
             </p>
           )}
+
           <div className="flex justify-end space-x-4 mt-8">
             <button
               type="button"
@@ -159,7 +262,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               >
                 <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
               </svg>
-              Send via WhatsApp
+              Send
             </button>
           </div>
         </form>

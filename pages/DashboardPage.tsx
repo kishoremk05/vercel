@@ -2225,6 +2225,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   onBusinessNameChange,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalOpenForWhatsapp, setModalOpenForWhatsapp] = useState(false);
+  const [sendMessagesSelectedCount, setSendMessagesSelectedCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sendBanner, setSendBanner] = useState<string | null>(null);
   // Signal the SendMessagesCard to select all after an upload completes
@@ -2820,6 +2822,19 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
       );
     };
+
+    // Notify parent about selection changes so the Add Customer button can
+    // open the modal in WhatsApp mode when a single customer is selected.
+    React.useEffect(() => {
+      try {
+        const ev = new CustomEvent("sendmessages:selection", {
+          detail: { count: selectedIds.length },
+        });
+        window.dispatchEvent(ev as any);
+      } catch (e) {
+        // ignore
+      }
+    }, [selectedIds]);
     const selectAll = () => setSelectedIds(eligible.map((c) => c.id));
     const clearSel = () => setSelectedIds([]);
     // Local helpers for WhatsApp message (same as CustomerTable)
@@ -3166,6 +3181,22 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       </div>
     );
   };
+
+  // Listen for selection events from SendMessagesCard
+  React.useEffect(() => {
+    const handler = (e: any) => {
+      const cnt = Number(e?.detail?.count || 0);
+      setSendMessagesSelectedCount(cnt);
+    };
+    window.addEventListener("sendmessages:selection", handler as any);
+    return () =>
+      window.removeEventListener("sendmessages:selection", handler as any);
+  }, []);
+
+  function openAddCustomer(forWhatsapp: boolean) {
+    setModalOpenForWhatsapp(Boolean(forWhatsapp));
+    setIsModalOpen(true);
+  }
   return (
     <div className="min-h-screen grid-pattern relative overflow-hidden ">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
@@ -3470,7 +3501,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
               businessName={businessName}
               feedbackPageLink={feedbackPageLink}
               onUploadCustomers={triggerFileUpload}
-              onOpenAddCustomer={() => setIsModalOpen(true)}
+              onOpenAddCustomer={() =>
+                openAddCustomer(sendMessagesSelectedCount === 1)
+              }
             />
           </div>
           <div className="flex flex-col gap-8">
@@ -3487,6 +3520,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           <AddCustomerModal
             onClose={() => setIsModalOpen(false)}
             onAddCustomer={onAddCustomer}
+            openWhatsappOnSubmit={modalOpenForWhatsapp}
+            businessName={businessName}
+            feedbackPageLink={feedbackPageLink}
           />
         )}
       </div>
