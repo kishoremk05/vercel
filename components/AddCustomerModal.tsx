@@ -24,8 +24,47 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       setError("Please enter a valid phone number (e.g., +1234567890).");
       return;
     }
-    onAddCustomer(name, phone);
-    onClose();
+    try {
+      // Call the parent handler to add the customer locally.
+      const res = onAddCustomer(name, phone);
+      // If handler returns a string, treat it as an error message
+      if (typeof res === "string" && res) {
+        setError(res);
+        return;
+      }
+
+      // Build a pre-filled WhatsApp message and open WhatsApp Web/mobile.
+      // Convert phone to digits-only format expected by wa.me (no plus or spaces).
+      const digits = phone.replace(/[^0-9]/g, "");
+
+      const companyId = (() => {
+        try {
+          return localStorage.getItem("companyId") || "";
+        } catch {
+          return "";
+        }
+      })();
+
+      const origin = window.location.origin;
+      const feedbackUrl = `${origin}/quick-feedback?companyId=${encodeURIComponent(
+        companyId
+      )}&phone=${encodeURIComponent(phone)}`;
+
+      const message = `Hi ${name}, we'd love your feedback for our service. Please leave a quick review: ${feedbackUrl}`;
+
+      const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(
+        message
+      )}`;
+
+      // Open WhatsApp in a new tab/window
+      window.open(waUrl, "_blank");
+
+      // Close the modal
+      onClose();
+    } catch (err: any) {
+      console.error("[AddCustomerModal] error sending WhatsApp:", err);
+      setError("Failed to initiate WhatsApp. Please try again.");
+    }
   };
 
   return (
