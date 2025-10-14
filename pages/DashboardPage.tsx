@@ -3519,7 +3519,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           {isModalOpen && (
             <AddCustomerModal
               onClose={() => setIsModalOpen(false)}
-              onAddCustomer={onAddCustomer}
+              onAddCustomer={
+                modalOpenForWhatsapp ? () => undefined : onAddCustomer
+              }
               openWhatsappOnSubmit={modalOpenForWhatsapp}
               businessName={businessName}
               feedbackPageLink={feedbackPageLink}

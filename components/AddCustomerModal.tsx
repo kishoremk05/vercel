@@ -7,6 +7,7 @@ interface AddCustomerModalProps {
     name: string,
     phone: string
   ) => string | void | Promise<string | void>;
+  onSendSms?: (name: string, phone: string) => void | Promise<void>;
   openWhatsappOnSubmit?: boolean;
   businessName?: string;
   feedbackPageLink?: string;
@@ -15,10 +16,32 @@ interface AddCustomerModalProps {
 const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   onClose,
   onAddCustomer,
+  onSendSms,
   openWhatsappOnSubmit = false,
   businessName = "",
   feedbackPageLink = "",
 }) => {
+  // Handler for Send SMS button
+  const handleSendSms = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    setError("");
+    if (!name.trim() || !phone.trim()) {
+      setError("Name and phone number are required.");
+      return;
+    }
+    if (!/^\+?[1-9]\d{1,14}$/.test(phone)) {
+      setError("Please enter a valid phone number (e.g., +1234567890).");
+      return;
+    }
+    try {
+      if (onSendSms) {
+        await onSendSms(name, phone);
+      }
+      onClose();
+    } catch (err) {
+      setError("Failed to send SMS. Please try again.");
+    }
+  };
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
@@ -108,17 +131,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     }
 
     try {
-      const res = onAddCustomer(name, phone);
-      // Support promise-based handlers as well
-      const value =
-        res && typeof (res as any).then === "function"
-          ? await (res as any)
-          : res;
-      if (typeof value === "string" && value) {
-        setError(value);
-        return;
-      }
-
+      // If configured to only open WhatsApp on submit, DO NOT persist the customer
       if (openWhatsappOnSubmit) {
         try {
           const digits = phone.replace(/[^0-9]/g, "");
@@ -158,8 +171,25 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           window.open(waUrl, "_blank", "noopener");
         } catch (waErr) {
           console.error("[AddCustomerModal] error sending WhatsApp:", waErr);
-          // Non-fatal: still close the modal but show a toast/error if desired
+          setError("Failed to open WhatsApp. Please try again.");
+          return;
         }
+
+        // Close modal, but DO NOT call onAddCustomer so the customer is not persisted
+        onClose();
+        return;
+      }
+
+      // Default behavior: persist the customer via onAddCustomer
+      const res = onAddCustomer(name, phone);
+      // Support promise-based handlers as well
+      const value =
+        res && typeof (res as any).then === "function"
+          ? await (res as any)
+          : res;
+      if (typeof value === "string" && value) {
+        setError(value);
+        return;
       }
 
       onClose();
@@ -251,6 +281,16 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               Cancel
             </button>
             <button
+              type="button"
+              onClick={handleSendSms}
+              className="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg shadow-md font-semibold transition-all duration-200 flex items-center gap-2 hover:from-blue-600 hover:to-blue-700"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-5 w-5">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V10a2 2 0 012-2h2m2-4h4m-4 0a2 2 0 00-2 2v4a2 2 0 002 2h4a2 2 0 002-2V6a2 2 0 00-2-2m-4 0V2m4 2V2" />
+              </svg>
+              Send SMS
+            </button>
+            <button
               type="submit"
               className="px-5 py-2.5 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg hover:shadow-lg shadow-md font-semibold transition-all duration-200 flex items-center gap-2 hover:from-green-600 hover:to-green-700"
             >
@@ -262,7 +302,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               >
                 <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
               </svg>
-              Send
+              Send WhatsApp
             </button>
           </div>
         </form>
