@@ -21,6 +21,10 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   businessName = "",
   feedbackPageLink = "",
 }) => {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [error, setError] = useState("");
+
   // Handler for Send SMS button
   const handleSendSms = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -33,18 +37,33 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       setError("Please enter a valid phone number (e.g., +1234567890).");
       return;
     }
+
     try {
-      if (onSendSms) {
-        await onSendSms(name, phone);
+      const phoneDigits = phone.replace(/[^\d]/g, "");
+      if (!/\d{8,15}/.test(phoneDigits)) {
+        setError("Invalid phone number format for SMS.");
+        return;
       }
+
+      // Send SMS using Twilio
+      const message = `Hi ${name}, we'd love your feedback for ${businessName}. Link: ${feedbackPageLink}`;
+      const response = await fetch("/api/send-sms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: phoneDigits, message }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to send SMS. Please try again.");
+      }
+
+      alert(`✅ SMS sent successfully to ${name}!`);
       onClose();
     } catch (err) {
+      console.error("Error sending SMS:", err);
       setError("Failed to send SMS. Please try again.");
     }
   };
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [error, setError] = useState("");
 
   // Helpers copied from DashboardPage to ensure consistent link construction
   function appendIdToLink(link: string, customerId?: string) {
@@ -285,8 +304,19 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               onClick={handleSendSms}
               className="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg shadow-md font-semibold transition-all duration-200 flex items-center gap-2 hover:from-blue-600 hover:to-blue-700"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-5 w-5">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V10a2 2 0 012-2h2m2-4h4m-4 0a2 2 0 00-2 2v4a2 2 0 002 2h4a2 2 0 002-2V6a2 2 0 00-2-2m-4 0V2m4 2V2" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                className="h-5 w-5"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M17 8h2a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V10a2 2 0 012-2h2m2-4h4m-4 0a2 2 0 00-2 2v4a2 2 0 002 2h4a2 2 0 002-2V6a2 2 0 00-2-2m-4 0V2m4 2V2"
+                />
               </svg>
               Send SMS
             </button>
