@@ -78,12 +78,12 @@ const App: React.FC = () => {
   // Helper: plan -> display price mapping (used only for logging/consistency)
   const PLAN_PRICES: Record<string, number> = useMemo(
     () => ({
-      starter_1m: 15,
-      growth_3m: 40,
-      pro_6m: 80,
-      monthly: 15,
-      quarterly: 40,
-      halfyearly: 80,
+      starter_1m: 30,
+      growth_3m: 75,
+      pro_6m: 100,
+      monthly: 30,
+      quarterly: 75,
+      halfyearly: 100,
     }),
     []
   );
@@ -656,8 +656,27 @@ const App: React.FC = () => {
         if (data.success && data.profile) {
           // Update business name if present
           if (data.profile.businessName) {
-            setBusinessName(data.profile.businessName);
-            localStorage.setItem("businessName", data.profile.businessName);
+            try {
+              const updatedAt = Number(
+                localStorage.getItem("businessNameUpdatedAt") || "0"
+              );
+              const now = Date.now();
+              // If user recently updated the businessName locally (within 5s),
+              // don't overwrite it with the server value which may be stale or
+              // reflect the previously saved name. This prevents an immediate
+              // revert when user edits their name in the Profile page.
+              if (!updatedAt || now - updatedAt > 5000) {
+                setBusinessName(data.profile.businessName);
+                localStorage.setItem("businessName", data.profile.businessName);
+              } else {
+                console.log(
+                  "[App] Skipping server businessName because local edit is recent"
+                );
+              }
+            } catch (e) {
+              setBusinessName(data.profile.businessName);
+              localStorage.setItem("businessName", data.profile.businessName);
+            }
           }
           // Update feedback page link if present
           if (data.profile.feedbackPageLink) {

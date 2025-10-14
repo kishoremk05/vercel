@@ -1415,10 +1415,10 @@ app.post("/api/payments/webhook", async (req, res) => {
             smsCredits = 250;
           } else if (metadata.plan === "growth_3m") {
             expiryDate.setMonth(expiryDate.getMonth() + 3);
-            smsCredits = 500;
+            smsCredits = 600;
           } else if (metadata.plan === "pro_6m") {
             expiryDate.setMonth(expiryDate.getMonth() + 6);
-            smsCredits = 1500;
+            smsCredits = 900;
           }
 
           await companyRef.set(

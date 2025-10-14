@@ -364,7 +364,7 @@ const HomePage: React.FC<HomePageProps> = ({
               <div className="space-y-2">
                 <h3 className="text-2xl font-bold text-gray-900">Starter</h3>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-5xl font-bold text-gray-900">$15</span>
+                  <span className="text-5xl font-bold text-gray-900">$30</span>
                   <span className="text-gray-600">/month</span>
                 </div>
               </div>
@@ -457,10 +457,10 @@ const HomePage: React.FC<HomePageProps> = ({
               <div className="space-y-2">
                 <h3 className="text-2xl font-bold text-white">Growth</h3>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-5xl font-bold text-white">$40</span>
+                  <span className="text-5xl font-bold text-white">$75</span>
                   <span className="text-gray-300">/3 months</span>
                 </div>
-                <p className="text-sm text-gray-400">Save $5 vs monthly</p>
+                <p className="text-sm text-gray-400">Save $15 vs monthly</p>
               </div>
 
               <div className="space-y-4">
@@ -479,7 +479,7 @@ const HomePage: React.FC<HomePageProps> = ({
                     />
                   </svg>
                   <span>
-                    <strong>800 SMS credits</strong>
+                    <strong>600 SMS credits</strong>
                   </span>
                 </div>
                 <div className="flex items-center gap-3 text-white">
@@ -547,10 +547,10 @@ const HomePage: React.FC<HomePageProps> = ({
                   Professional
                 </h3>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-5xl font-bold text-gray-900">$80</span>
+                  <span className="text-5xl font-bold text-gray-900">$100</span>
                   <span className="text-gray-600">/6 months</span>
                 </div>
-                <p className="text-sm text-gray-600">Save $10 vs monthly</p>
+                <p className="text-sm text-gray-600">Save $80 vs monthly</p>
               </div>
 
               <div className="space-y-4">
@@ -569,7 +569,7 @@ const HomePage: React.FC<HomePageProps> = ({
                     />
                   </svg>
                   <span>
-                    <strong>1500 SMS credits</strong>
+                    <strong>900 SMS credits</strong>
                   </span>
                 </div>
                 <div className="flex items-center gap-3 text-gray-700">

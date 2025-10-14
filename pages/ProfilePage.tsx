@@ -37,6 +37,8 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
+  const [subscriptionData, setSubscriptionData] = useState<any>(null);
+  const [loadingSubscription, setLoadingSubscription] = useState(true);
 
   // Load profile photo from Firebase/localStorage on mount
   useEffect(() => {
@@ -63,6 +65,38 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     };
 
     loadProfilePhoto();
+  }, []);
+
+  // Load subscription data
+  useEffect(() => {
+    const loadSubscriptionData = async () => {
+      try {
+        const companyId = localStorage.getItem("companyId");
+        if (!companyId) {
+          setLoadingSubscription(false);
+          return;
+        }
+
+        const base = await getSmsServerUrl().catch(() => API_BASE);
+        const url = base
+          ? `${base}/api/subscription?companyId=${companyId}`
+          : `${API_BASE}/api/subscription?companyId=${companyId}`;
+
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.subscription) {
+            setSubscriptionData(data.subscription);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading subscription data:", error);
+      } finally {
+        setLoadingSubscription(false);
+      }
+    };
+
+    loadSubscriptionData();
   }, []);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -242,6 +276,15 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
       const data = await response.json();
       if (data.success) {
         setBusinessName(editBusinessName);
+        try {
+          // Persist businessName locally so other parts of the app read the
+          // newly edited value immediately and don't get reverted by a
+          // near-simultaneous background profile sync.
+          localStorage.setItem("businessName", editBusinessName);
+          // Mark the time of this local edit so App.tsx can avoid overwriting
+          // with a server value fetched within a short window.
+          localStorage.setItem("businessNameUpdatedAt", String(Date.now()));
+        } catch {}
         setBusinessEmail(editEmail);
         setProfileSaved(true);
         setTimeout(() => setProfileSaved(false), 2500);
@@ -356,79 +399,230 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                 </span>
               </div>
               <div className="w-full border-t border-gray-200 my-6"></div>
-              <form className="w-full grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Business Name
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all bg-white shadow-sm"
-                    value={editBusinessName}
-                    onChange={(e) => setEditBusinessName(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    className="w-full border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all bg-white shadow-sm"
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                  />
-                </div>
-              </form>
+
+              {/* Subscription Payment Details */}
+              <div className="w-full space-y-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-4">
+                  Payment Details
+                </h3>
+
+                {loadingSubscription ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                  </div>
+                ) : subscriptionData ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Current Plan */}
+                    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-lg border border-indigo-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="w-5 h-5 text-indigo-600"
+                        >
+                          <path d="M4.5 3.75a3 3 0 00-3 3v.75h21v-.75a3 3 0 00-3-3h-15z" />
+                          <path
+                            fillRule="evenodd"
+                            d="M22.5 9.75h-21v7.5a3 3 0 003 3h15a3 3 0 003-3v-7.5zm-18 3.75a.75.75 0 01.75-.75h6a.75.75 0 010 1.5h-6a.75.75 0 01-.75-.75zm.75 2.25a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-semibold text-gray-700">
+                          Current Plan
+                        </span>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-900 capitalize">
+                        {subscriptionData.plan
+                          ?.replace(/_/g, " ")
+                          .replace(/1m/gi, "(1 Month)")
+                          .replace(/3m/gi, "(3 Months)")
+                          .replace(/6m/gi, "(6 Months)") || "N/A"}
+                      </p>
+                    </div>
+
+                    {/* Plan Status */}
+                    <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="w-5 h-5 text-green-600"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-semibold text-gray-700">
+                          Status
+                        </span>
+                      </div>
+                      <p className="text-2xl font-bold capitalize text-gray-900">
+                        {subscriptionData.status || "N/A"}
+                      </p>
+                    </div>
+
+                    {/* Start Date */}
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="w-5 h-5 text-gray-600"
+                        >
+                          <path d="M12.75 12.75a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM7.5 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM8.25 17.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM9.75 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM10.5 17.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM12.75 17.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM14.25 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM15 17.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM16.5 15.75a.75.75 0 100-1.5.75.75 0 000 1.5zM15 12.75a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM16.5 13.5a.75.75 0 100-1.5.75.75 0 000 1.5z" />
+                          <path
+                            fillRule="evenodd"
+                            d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zm13.5 9a1.5 1.5 0 00-1.5-1.5H5.25a1.5 1.5 0 00-1.5 1.5v7.5a1.5 1.5 0 001.5 1.5h13.5a1.5 1.5 0 001.5-1.5v-7.5z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-semibold text-gray-700">
+                          Start Date
+                        </span>
+                      </div>
+                      <p className="text-lg font-bold text-gray-900">
+                        {subscriptionData.startDate?.toDate
+                          ? new Date(
+                              subscriptionData.startDate.toDate()
+                            ).toLocaleDateString("en-US", {
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            })
+                          : subscriptionData.startDate
+                          ? new Date(
+                              subscriptionData.startDate._seconds * 1000
+                            ).toLocaleDateString("en-US", {
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            })
+                          : "N/A"}
+                      </p>
+                    </div>
+
+                    {/* Expiry Date */}
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="w-5 h-5 text-gray-600"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 000-1.5h-3.75V6z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-semibold text-gray-700">
+                          Expiry Date
+                        </span>
+                      </div>
+                      <p className="text-lg font-bold text-gray-900">
+                        {subscriptionData.expiryDate?.toDate
+                          ? new Date(
+                              subscriptionData.expiryDate.toDate()
+                            ).toLocaleDateString("en-US", {
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            })
+                          : subscriptionData.expiryDate
+                          ? new Date(
+                              subscriptionData.expiryDate._seconds * 1000
+                            ).toLocaleDateString("en-US", {
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            })
+                          : "N/A"}
+                      </p>
+                    </div>
+
+                    {/* SMS Usage */}
+                    <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-4 rounded-lg border border-blue-200 md:col-span-2">
+                      <div className="flex items-center gap-2 mb-3">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="w-5 h-5 text-blue-600"
+                        >
+                          <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" />
+                          <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" />
+                        </svg>
+                        <span className="text-sm font-semibold text-gray-700">
+                          SMS Credits
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-3xl font-bold text-gray-900">
+                            {subscriptionData.remainingCredits || 0} /{" "}
+                            {subscriptionData.smsCredits || 0}
+                          </p>
+                          <p className="text-sm text-gray-600 mt-1">
+                            {subscriptionData.remainingCredits || 0} credits
+                            remaining
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-semibold text-blue-600">
+                            {subscriptionData.smsCredits
+                              ? Math.round(
+                                  ((subscriptionData.remainingCredits || 0) /
+                                    subscriptionData.smsCredits) *
+                                    100
+                                )
+                              : 0}
+                            % Available
+                          </p>
+                        </div>
+                      </div>
+                      {/* Progress bar */}
+                      <div className="w-full bg-gray-200 rounded-full h-3 mt-4">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-cyan-500 h-3 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${
+                              subscriptionData.smsCredits
+                                ? Math.round(
+                                    ((subscriptionData.remainingCredits || 0) /
+                                      subscriptionData.smsCredits) *
+                                      100
+                                  )
+                                : 0
+                            }%`,
+                          }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-600">
+                    <p className="text-lg">No subscription data available</p>
+                    <p className="text-sm mt-2">
+                      Please purchase a plan to get started
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {error && (
-                <div className="w-full mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                <div className="w-full mt-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
                   {error}
                 </div>
               )}
-              <div className="flex items-center gap-4 mt-8 w-full flex-wrap">
+              <div className="flex items-center gap-4 mt-8 w-full flex-wrap justify-end">
                 <button
-                  className="bg-gray-900 text-white px-8 py-2.5 rounded-lg hover:bg-gray-800 font-semibold shadow-md transition-all text-base inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={handleProfileSave}
-                  type="button"
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  ) : (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      className="h-5 w-5"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M19.916 4.626a.75.75 0 01.208 1.04l-9 13.5a.75.75 0 01-1.154.114l-6-6a.75.75 0 011.06-1.06l5.353 5.353 8.493-12.739a.75.75 0 011.04-.208z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  )}
-                  {saving ? "Saving..." : "Save Profile"}
-                </button>
-                {profileSaved && (
-                  <span className="text-green-600 font-semibold flex items-center gap-1">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      className="h-5 w-5"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    Saved!
-                  </span>
-                )}
-                <button
-                  className="ml-auto bg-white border border-gray-200 px-8 py-2.5 rounded-lg hover:bg-gray-50 text-base font-semibold shadow-sm transition-all text-gray-900"
+                  className="bg-white border border-gray-200 px-8 py-2.5 rounded-lg hover:bg-gray-50 text-base font-semibold shadow-sm transition-all text-gray-900"
                   onClick={onLogout}
                 >
                   Logout

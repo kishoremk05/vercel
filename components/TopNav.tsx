@@ -622,12 +622,21 @@ const SubscriptionStatusBadge: React.FC = () => {
 
   const remaining = sub.remainingCredits ?? sub.smsCredits ?? 0;
   const total = sub.smsCredits ?? 0;
+  const sent = total - remaining;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200">
-      <span className="h-2 w-2 rounded-full bg-indigo-500" />
-      <span className="text-xs font-semibold text-indigo-700 whitespace-nowrap">
-        SMS Left: {remaining}/{total}
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 shadow-sm">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        className="h-4 w-4 text-indigo-600"
+      >
+        <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" />
+        <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" />
+      </svg>
+      <span className="text-xs font-bold text-indigo-700 whitespace-nowrap">
+        {sent}/{total} SMS
       </span>
     </div>
   );
