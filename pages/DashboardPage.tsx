@@ -2804,30 +2804,24 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         window.removeEventListener("dash:sms:success", onSuccess as any);
     }, []);
 
-    // Also select all on mount (this component is force-remounted via key when selectAllSignal changes)
-    useEffect(() => {
-      if (selectAllSignal > 0 && eligible.length > 0) {
-        const allIds = eligible.map((c) => c.id);
-        setSelected(new Set(allIds));
-        setStatus(
-          `✅ Selected all ${eligible.length} customers. Review and click Send SMS.`
-        );
-        console.log(`[SendMessagesCard] Mount-time auto-select: ${allIds.length} customers selected`);
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    // Track the last signal we processed to avoid re-running
+    const lastProcessedSignal = useRef(0);
 
     // Auto-select all when signal changes (e.g., after upload)
+    // This is the ONLY effect that handles auto-selection to avoid loops
     useEffect(() => {
-      if (selectAllSignal > 0 && eligible.length > 0) {
+      // Only run if signal is new and greater than what we've processed
+      if (selectAllSignal > 0 && selectAllSignal > lastProcessedSignal.current && eligible.length > 0) {
         const allIds = eligible.map((c) => c.id);
         setSelected(new Set(allIds));
         setStatus(
           `✅ Selected all ${eligible.length} customers. Review and click Send SMS.`
         );
-        console.log(`[SendMessagesCard] Signal-triggered auto-select: ${allIds.length} customers selected (signal: ${selectAllSignal})`);
+        console.log(`[SendMessagesCard] Auto-select triggered: ${allIds.length} customers selected (signal: ${selectAllSignal})`);
+        // Mark this signal as processed
+        lastProcessedSignal.current = selectAllSignal;
       }
-    }, [selectAllSignal, eligible]);
+    }, [selectAllSignal, eligible.length]); // Use length instead of array to avoid loop
 
     const filtered = useMemo(() => {
       const q = search.trim().toLowerCase();
