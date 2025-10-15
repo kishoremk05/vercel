@@ -1520,6 +1520,71 @@ const AnalyticsSection: React.FC<{
     0
   );
 
+  // Measure chart container width to adapt tick density and margins on small screens
+  const chartContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const [chartWidth, setChartWidth] = React.useState<number>(0);
+  React.useEffect(() => {
+    if (!chartContainerRef.current) return;
+    let ro: any;
+    try {
+      ro = new (window as any).ResizeObserver((entries: any) => {
+        const w = entries?.[0]?.contentRect?.width || 0;
+        setChartWidth(Math.round(w));
+      });
+      ro.observe(chartContainerRef.current);
+      // initial
+      setChartWidth(chartContainerRef.current.offsetWidth || 0);
+    } catch (e) {
+      // ResizeObserver not available - fallback
+      const onResize = () =>
+        setChartWidth(chartContainerRef.current?.offsetWidth || 0);
+      window.addEventListener("resize", onResize);
+      onResize();
+      return () => window.removeEventListener("resize", onResize);
+    }
+    return () => ro && ro.disconnect();
+  }, [chartContainerRef.current]);
+
+  // Determine responsive chart parameters
+  const isNarrow = chartWidth > 0 && chartWidth < 420;
+  const chartMargin = React.useMemo(() => {
+    return {
+      // shift slightly left on narrow screens so the plot area is better centered
+      left: isNarrow ? -14 : -10,
+      right: 50,
+      top: 5,
+      // provide extra bottom spacing for legend on narrow screens
+      bottom: isNarrow ? 56 : 0,
+    };
+  }, [isNarrow]);
+  const chartHeight = isNarrow ? 235 : 260;
+
+  // Custom tick renderer: hide some ticks on narrow screens and rotate labels
+  const CustomTick: React.FC<any> = (props) => {
+    const { x, y, payload, index } = props || {};
+    if (!payload) return null;
+    const total = (msgData && msgData.length) || dayKeys.length || 30;
+    const maxTicks = Math.max(3, Math.floor((chartWidth || 360) / 70));
+    const step = Math.max(1, Math.ceil(total / maxTicks));
+    // Always show the last tick (today) for context
+    if (index % step !== 0 && index !== total - 1) return null;
+    const label = payload.value;
+    // Keep labels horizontal (not slanted) per mobile UX request
+    const dy = 14; // drop below axis
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text
+          x={0}
+          y={dy}
+          textAnchor="middle"
+          style={{ fontSize: 11, fill: "#374151" }}
+        >
+          {label}
+        </text>
+      </g>
+    );
+  };
+
   return (
     <div className="mb-6 sm:mb-8 lg:mb-10">
       <div className="gradient-border glow-on-hover premium-card bg-transparent shadow-lg p-4 sm:p-5 lg:p-6 transition-all duration-300 hover:shadow-xl rounded-2xl particle-bg">
@@ -1550,24 +1615,41 @@ const AnalyticsSection: React.FC<{
         </div>
 
         {/* Requirement 2: Show only Messages Sent vs Received chart */}
-        <div className="gradient-border glow-on-hover bg-white shadow-md p-6 lg:p-8 transition-all duration-300 hover:shadow-lg rounded-2xl">
+        <div
+          ref={chartContainerRef as any}
+          className="gradient-border glow-on-hover bg-white shadow-md p-6 lg:p-8 transition-all duration-300 hover:shadow-lg rounded-2xl"
+        >
           <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-5">
             Messages Sent vs. Received (last 30 days)
           </h4>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart
-              data={msgData}
-              margin={{ left: -10, right: 10, top: 5, bottom: 0 }}
-            >
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <BarChart data={msgData} margin={chartMargin}>
               <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-              <XAxis dataKey="day" tick={{ fontSize: 11 }} interval={3} />
+              <XAxis dataKey="day" tick={<CustomTick />} interval={0} />
               <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
               <Tooltip />
-              <Legend />
               <Bar dataKey="sent" fill="#6366f1" name="Sent" />
               <Bar dataKey="received" fill="#10b981" name="Received" />
             </BarChart>
           </ResponsiveContainer>
+
+          {/* Custom legend placed below the chart so it can be centered relative to the plot */}
+          <div className="flex items-center justify-center gap-6 mt-4">
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-block h-3 w-6 rounded-sm"
+                style={{ background: "#6366f1" }}
+              />
+              <span className="text-sm text-gray-700">Sent</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-block h-3 w-6 rounded-sm"
+                style={{ background: "#10b981" }}
+              />
+              <span className="text-sm text-gray-700">Received</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -3441,8 +3523,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           {/* Analytics Section: Real-time stats are now summarized in the unified card above */}
 
           {/* Charts Grid: Analytics (fills full width) */}
-          <div className="w-full flex flex-row gap-4 sm:gap-6 mt-6">
-            <div className="flex-1 min-w-0">
+          <div className="w-full flex flex-col sm:flex-row gap-4 sm:gap-6 mt-6">
+            <div className="w-full sm:flex-1 min-w-0 px-2 sm:px-0">
               <AnalyticsSection
                 customers={customers}
                 activityLogs={activityLogs}
