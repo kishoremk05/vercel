@@ -374,13 +374,6 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           <div className="flex justify-end space-x-4 mt-8">
             <button
               type="button"
-              onClick={onClose}
-              className="px-5 py-2.5 bg-gradient-to-r from-gray-200 to-gray-300 text-gray-800 rounded-lg hover:shadow-md shadow-sm font-semibold transition-all duration-200"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
               onClick={handleSendSms}
               className="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg shadow-md font-semibold transition-all duration-200 flex items-center gap-2 hover:from-blue-600 hover:to-blue-700"
             >
