@@ -84,18 +84,21 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         }
       }
 
-      // Build feedback link with clientId
+      // Build feedback link with clientId and phone number
       let review =
         feedbackPageLink || `${window.location.origin}/quick-feedback`;
       if (companyId) {
         try {
           const url = new URL(review, window.location.origin);
           url.searchParams.set("clientId", companyId);
+          url.searchParams.set("id", phone);
           review = url.toString();
         } catch {
           review = `${review}${
             review.includes("?") ? "&" : "?"
-          }clientId=${encodeURIComponent(companyId)}`;
+          }clientId=${encodeURIComponent(companyId)}&id=${encodeURIComponent(
+            phone
+          )}`;
         }
       }
 
