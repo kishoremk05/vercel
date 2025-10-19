@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
-import { getFirebaseDb, getFirebaseAuth, initializeFirebase } from "../lib/firebaseClient";
+import {
+  getFirebaseDb,
+  getFirebaseAuth,
+  initializeFirebase,
+} from "../lib/firebaseClient";
 import { doc, setDoc, Timestamp, getDoc, updateDoc } from "firebase/firestore";
 
 const PaymentSuccessPage: React.FC = () => {
@@ -16,33 +20,39 @@ const PaymentSuccessPage: React.FC = () => {
       try {
         // Ensure Firebase App is initialized before using Auth/Firestore
         initializeFirebase();
-        // Wait for auth to be ready
+        // Use helper to wait for auth to be restored (hosted checkout redirects can be slow)
         const auth = getFirebaseAuth();
-        const currentUser = auth.currentUser;
+        const waitForAuth = (authObj: any, timeoutMs = 15000) =>
+          new Promise<void>((resolve) => {
+            if (authObj.currentUser) return resolve();
+            const unsubscribe = authObj.onAuthStateChanged((user: any) => {
+              if (user) {
+                console.log("[PaymentSuccess] Auth state ready:", user.uid);
+                try {
+                  unsubscribe();
+                } catch {}
+                return resolve();
+              }
+            });
+            setTimeout(() => {
+              try {
+                unsubscribe();
+              } catch {}
+              return resolve();
+            }, timeoutMs);
+          });
 
+        await waitForAuth(auth, 10000); // wait up to 10s
+        let currentUser = auth.currentUser;
         console.log("[PaymentSuccess] Auth state:", {
           authenticated: !!currentUser,
           uid: currentUser?.uid,
           email: currentUser?.email,
         });
-
         if (!currentUser) {
-          console.error("❌ User not authenticated, waiting for auth...");
-          // Wait for auth state to be ready
-          await new Promise<void>((resolve) => {
-            const unsubscribe = auth.onAuthStateChanged((user) => {
-              if (user) {
-                console.log("✅ Auth state ready:", user.uid);
-                unsubscribe();
-                resolve();
-              }
-            });
-            // Timeout after 5 seconds
-            setTimeout(() => {
-              unsubscribe();
-              resolve();
-            }, 5000);
-          });
+          console.warn(
+            "[PaymentSuccess] Warning: auth not available after wait; Firestore writes may fail"
+          );
         }
 
         const urlParams = new URLSearchParams(window.location.search);
@@ -194,10 +204,24 @@ const PaymentSuccessPage: React.FC = () => {
             email: currentUser.email,
           });
 
-          await updateDoc(profileRef, subscriptionData);
-          console.log(
-            "✅✅✅ Subscription saved to Firebase profile/main successfully!"
-          );
+          try {
+            // Use setDoc with merge so the document is created if it doesn't exist
+            await setDoc(profileRef, subscriptionData, { merge: true });
+            console.log(
+              "✅✅✅ Subscription saved to Firebase profile/main successfully!"
+            );
+          } catch (writeError: any) {
+            console.error(
+              "[PaymentSuccess] Failed to write subscription to Firestore:",
+              writeError
+            );
+            if (writeError?.code === "permission-denied") {
+              console.error(
+                "[PaymentSuccess] Firestore permission-denied: check security rules and ensure the authenticated user is authorized to write to clients/{companyId}/profile/main"
+              );
+            }
+            throw writeError;
+          }
 
           // Also keep local snapshot for immediate fallback
           const snapshot = {
