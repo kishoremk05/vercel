@@ -69,15 +69,18 @@ const PaymentSuccessPage: React.FC = () => {
           console.error("Error posting subscription to server:", e);
         }
 
-        // Persist a local subscription snapshot so ProfilePage shows the
-        // chosen plan immediately even if webhooks are delayed.
+        // Persist a local subscription snapshot with activation and expiry dates
         try {
+          const activatedAt = Date.now();
+          // Calculate expiry date based on plan duration
+          const expiryAt = activatedAt + plan.months * 30 * 24 * 60 * 60 * 1000;
           const snapshot = {
             planId,
             planName: plan.name,
             smsCredits: plan.sms,
             status: "active",
-            activatedAt: Date.now(),
+            activatedAt,
+            expiryAt,
           };
           localStorage.setItem(
             "subscriptionSnapshot",

@@ -448,23 +448,43 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         </span>
                       </div>
                       <p className="text-lg font-bold text-gray-900">
-                        {subscriptionData.startDate?.toDate
-                          ? new Date(
+                        {/* Show payment date from localStorage if available */}
+                        {(() => {
+                          let snapshot;
+                          try {
+                            snapshot = JSON.parse(
+                              localStorage.getItem("subscriptionSnapshot")
+                            );
+                          } catch {}
+                          if (snapshot?.activatedAt) {
+                            return new Date(
+                              snapshot.activatedAt
+                            ).toLocaleDateString("en-US", {
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            });
+                          }
+                          if (subscriptionData.startDate?.toDate) {
+                            return new Date(
                               subscriptionData.startDate.toDate()
                             ).toLocaleDateString("en-US", {
                               year: "numeric",
                               month: "long",
                               day: "numeric",
-                            })
-                          : subscriptionData.startDate
-                          ? new Date(
+                            });
+                          }
+                          if (subscriptionData.startDate) {
+                            return new Date(
                               subscriptionData.startDate._seconds * 1000
                             ).toLocaleDateString("en-US", {
                               year: "numeric",
                               month: "long",
                               day: "numeric",
-                            })
-                          : "N/A"}
+                            });
+                          }
+                          return "N/A";
+                        })()}
                       </p>
                     </div>
 
@@ -488,23 +508,43 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         </span>
                       </div>
                       <p className="text-lg font-bold text-gray-900">
-                        {subscriptionData.expiryDate?.toDate
-                          ? new Date(
+                        {/* Show expiry date from localStorage if available */}
+                        {(() => {
+                          let snapshot;
+                          try {
+                            snapshot = JSON.parse(
+                              localStorage.getItem("subscriptionSnapshot")
+                            );
+                          } catch {}
+                          if (snapshot?.expiryAt) {
+                            return new Date(
+                              snapshot.expiryAt
+                            ).toLocaleDateString("en-US", {
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            });
+                          }
+                          if (subscriptionData.expiryDate?.toDate) {
+                            return new Date(
                               subscriptionData.expiryDate.toDate()
                             ).toLocaleDateString("en-US", {
                               year: "numeric",
                               month: "long",
                               day: "numeric",
-                            })
-                          : subscriptionData.expiryDate
-                          ? new Date(
+                            });
+                          }
+                          if (subscriptionData.expiryDate) {
+                            return new Date(
                               subscriptionData.expiryDate._seconds * 1000
                             ).toLocaleDateString("en-US", {
                               year: "numeric",
                               month: "long",
                               day: "numeric",
-                            })
-                          : "N/A"}
+                            });
+                          }
+                          return "N/A";
+                        })()}
                       </p>
                     </div>
 
