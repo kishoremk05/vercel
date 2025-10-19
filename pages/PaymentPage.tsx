@@ -188,6 +188,11 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       }
 
       console.log("[Payment] ✅ Redirecting to Dodo payment:", data.url);
+      // Persist the pending plan so we can recover it after redirect from the
+      // hosted checkout (server or redirect may not include the plan param).
+      try {
+        localStorage.setItem("pendingPlan", selectedPlan.id);
+      } catch (e) {}
       window.location.href = data.url; // Redirect to Dodo hosted checkout
     } catch (error: any) {
       console.error("Payment error:", error);
@@ -232,15 +237,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           <div className="flex items-center gap-6">
             <button
               onClick={() => {
-                // Skip to dashboard without paying
-                window.location.href = "/dashboard";
-              }}
-              className="text-sm text-gray-600 hover:text-gray-900 font-medium"
-            >
-              Skip for now
-            </button>
-            <button
-              onClick={() => {
                 // Allow user to change plan selection - navigate back to pricing section on Home page
                 try {
                   localStorage.setItem("pendingPlan", selectedPlan.id);
@@ -271,13 +267,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             Welcome <strong>{businessName}</strong> • {userEmail}
           </p>
           <p className="text-sm text-gray-500">
-            Select a plan to unlock unlimited SMS credits, or{" "}
-            <button
-              onClick={() => (window.location.href = "/dashboard")}
-              className="text-indigo-600 hover:text-indigo-800 font-medium underline"
-            >
-              skip to dashboard
-            </button>
+            Select a plan to unlock unlimited SMS credits.
           </p>
         </div>
 

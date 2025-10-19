@@ -89,6 +89,19 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
             setSubscriptionData(data.subscription);
           }
         }
+        // If server returns no subscription yet (webhook delay), fall back to
+        // a local snapshot stored after a successful checkout redirect.
+        if (!subscriptionData) {
+          try {
+            const snap = localStorage.getItem("subscriptionSnapshot");
+            if (snap) {
+              const parsed = JSON.parse(snap);
+              setSubscriptionData(parsed);
+            }
+          } catch (e) {
+            console.warn("Failed to read subscription snapshot", e);
+          }
+        }
       } catch (error) {
         console.error("Error loading subscription data:", error);
       } finally {

@@ -27,12 +27,12 @@ const PaymentSuccessPage: React.FC = () => {
           string,
           { name: string; sms: number; months: number }
         > = {
-          starter_1m: { name: "1-Month Plan", sms: 250, months: 1 },
-          monthly: { name: "1-Month Plan", sms: 250, months: 1 },
-          growth_3m: { name: "3-Month Plan", sms: 500, months: 3 },
-          quarterly: { name: "3-Month Plan", sms: 500, months: 3 },
-          pro_6m: { name: "6-Month Plan", sms: 1500, months: 6 },
-          halfyearly: { name: "6-Month Plan", sms: 1500, months: 6 },
+          starter_1m: { name: "Starter", sms: 250, months: 1 },
+          monthly: { name: "Starter", sms: 250, months: 1 },
+          growth_3m: { name: "Growth", sms: 600, months: 3 },
+          quarterly: { name: "Growth", sms: 600, months: 3 },
+          pro_6m: { name: "Professional", sms: 900, months: 6 },
+          halfyearly: { name: "Professional", sms: 900, months: 6 },
         };
 
         const plan = planMapping[planId];
@@ -43,27 +43,49 @@ const PaymentSuccessPage: React.FC = () => {
 
         setPlanInfo({ planName: plan.name, smsCredits: plan.sms });
 
-        // Save subscription to database
-        const base = await getSmsServerUrl();
-        const response = await fetch(`${base}/api/subscription`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            companyId,
-            planId,
-            smsCredits: plan.sms,
-            durationMonths: plan.months,
-            status: "active",
-          }),
-        });
+        // Save subscription to database (server) and keep a local copy so
+        // ProfilePage can show the active subscription immediately.
+        try {
+          const base = await getSmsServerUrl();
+          const response = await fetch(`${base}/api/subscription`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              companyId,
+              planId,
+              smsCredits: plan.sms,
+              durationMonths: plan.months,
+              status: "active",
+            }),
+          });
 
-        const data = await response.json();
-        if (data.success) {
-          console.log("✅ Subscription saved successfully");
-          // Clear pending plan
+          const data = await response.json();
+          if (data.success) {
+            console.log("✅ Subscription saved successfully");
+          } else {
+            console.error("Failed to save subscription:", data.error);
+          }
+        } catch (e) {
+          console.error("Error posting subscription to server:", e);
+        }
+
+        // Persist a local subscription snapshot so ProfilePage shows the
+        // chosen plan immediately even if webhooks are delayed.
+        try {
+          const snapshot = {
+            planId,
+            planName: plan.name,
+            smsCredits: plan.sms,
+            status: "active",
+            activatedAt: Date.now(),
+          };
+          localStorage.setItem(
+            "subscriptionSnapshot",
+            JSON.stringify(snapshot)
+          );
           localStorage.removeItem("pendingPlan");
-        } else {
-          console.error("Failed to save subscription:", data.error);
+        } catch (e) {
+          console.warn("Failed to persist local subscription snapshot", e);
         }
       } catch (error) {
         console.error("Error saving subscription:", error);

@@ -2000,10 +2000,11 @@ const App: React.FC = () => {
   }
   return (
     <div className="flex">
-      {/* Top navigation bar replaces sidebar across the app except Admin and Feedback */}
+      {/* Top navigation bar replaces sidebar across the app except Admin, Feedback, Home and Payment */}
       {currentPage !== Page.Feedback &&
         currentPage !== Page.Admin &&
-        currentPage !== Page.Home && (
+        currentPage !== Page.Home &&
+        currentPage !== Page.Payment && (
           <TopNav
             currentPage={currentPage}
             setCurrentPage={navigate}
@@ -2013,7 +2014,9 @@ const App: React.FC = () => {
         )}
       <main
         className={`flex-1 min-h-screen bg-gray-50 ${
-          currentPage !== Page.Feedback && currentPage !== Page.Admin
+          currentPage !== Page.Feedback &&
+          currentPage !== Page.Admin &&
+          currentPage !== Page.Payment
             ? "pt-14"
             : ""
         }`}
