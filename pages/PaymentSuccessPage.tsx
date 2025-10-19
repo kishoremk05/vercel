@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
-import { getFirebaseDb } from "../lib/firebaseClient";
+import { getFirebaseDb, getFirebaseAuth, initializeFirebase } from "../lib/firebaseClient";
 import { doc, setDoc, Timestamp, getDoc, updateDoc } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
 
 const PaymentSuccessPage: React.FC = () => {
   const [countdown, setCountdown] = useState(5);
@@ -15,8 +14,10 @@ const PaymentSuccessPage: React.FC = () => {
     // Extract plan info from URL params and save subscription
     const saveSubscription = async () => {
       try {
+        // Ensure Firebase App is initialized before using Auth/Firestore
+        initializeFirebase();
         // Wait for auth to be ready
-        const auth = getAuth();
+        const auth = getFirebaseAuth();
         const currentUser = auth.currentUser;
 
         console.log("[PaymentSuccess] Auth state:", {
@@ -115,7 +116,7 @@ const PaymentSuccessPage: React.FC = () => {
         });
         try {
           const db = getFirebaseDb();
-          const auth = getAuth();
+          const auth = getFirebaseAuth();
           const currentUser = auth.currentUser;
 
           if (!currentUser) {
