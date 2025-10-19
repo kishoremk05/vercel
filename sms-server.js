@@ -190,7 +190,7 @@ try {
   // Example: CORS_ORIGINS=https://app.vercel.app,https://admin.example.com
   const corsOrigins = (
     process.env.CORS_ORIGINS ||
-    "http://localhost:5173,https://vercel-swart-chi-29.vercel.app"
+    "http://localhost:5173,https://vercel-swart-chi-29.vercel.app,https://*.vercel.app"
   )
     .split(",")
     .map((s) => s.trim())
