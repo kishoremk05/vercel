@@ -564,47 +564,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                           SMS Credits
                         </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-3xl font-bold text-gray-900">
-                            {subscriptionData.remainingCredits || 0} /{" "}
-                            {subscriptionData.smsCredits || 0}
-                          </p>
-                          <p className="text-sm text-gray-600 mt-1">
-                            {subscriptionData.remainingCredits || 0} credits
-                            remaining
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-lg font-semibold text-blue-600">
-                            {subscriptionData.smsCredits
-                              ? Math.round(
-                                  ((subscriptionData.remainingCredits || 0) /
-                                    subscriptionData.smsCredits) *
-                                    100
-                                )
-                              : 0}
-                            % Available
-                          </p>
-                        </div>
-                      </div>
-                      {/* Progress bar */}
-                      <div className="w-full bg-gray-200 rounded-full h-3 mt-4">
-                        <div
-                          className="bg-gradient-to-r from-blue-500 to-cyan-500 h-3 rounded-full transition-all duration-500"
-                          style={{
-                            width: `${
-                              subscriptionData.smsCredits
-                                ? Math.round(
-                                    ((subscriptionData.remainingCredits || 0) /
-                                      subscriptionData.smsCredits) *
-                                      100
-                                  )
-                                : 0
-                            }%`,
-                          }}
-                        ></div>
-                      </div>
+                      <SmsCreditsDisplay subscriptionData={subscriptionData} />
                     </div>
                   </div>
                 ) : (
@@ -803,6 +763,89 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
         )}
       </div>
     </div>
+  );
+};
+
+// SMS Credits display component - shows sent count like Dashboard
+const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
+  subscriptionData,
+}) => {
+  const [sentCount, setSentCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchSentCount = async () => {
+      setLoading(true);
+      try {
+        const companyId =
+          localStorage.getItem("companyId") ||
+          localStorage.getItem("auth_uid");
+        if (!companyId) {
+          setSentCount(0);
+          setLoading(false);
+          return;
+        }
+
+        // Try API endpoint (same as Dashboard)
+        const base = await getSmsServerUrl().catch(() => API_BASE);
+        const url = base
+          ? `${base}/api/dashboard/stats?companyId=${companyId}`
+          : `/api/dashboard/stats?companyId=${companyId}`;
+
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          if (
+            data.success &&
+            data.stats &&
+            typeof data.stats.messageCount === "number"
+          ) {
+            setSentCount(data.stats.messageCount);
+            setLoading(false);
+            return;
+          }
+        }
+        setSentCount(0);
+      } catch {
+        setSentCount(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSentCount();
+  }, []);
+
+  const smsCredits = subscriptionData.smsCredits || 0;
+  const used = sentCount !== null ? sentCount : 0;
+  const available = smsCredits - used;
+  const percent = smsCredits > 0 ? Math.round((used / smsCredits) * 100) : 0;
+
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-3xl font-bold text-gray-900">
+            {loading ? "..." : `${used} / ${smsCredits}`}
+          </p>
+          <p className="text-sm text-gray-600 mt-1">
+            {loading ? "Loading..." : `${available} credits remaining`}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-semibold text-blue-600">
+            {loading ? "..." : `${percent}% Available`}
+          </p>
+        </div>
+      </div>
+      {/* Progress bar */}
+      <div className="w-full bg-gray-200 rounded-full h-3 mt-4">
+        <div
+          className="bg-gradient-to-r from-blue-500 to-cyan-500 h-3 rounded-full transition-all duration-500"
+          style={{ width: `${percent}%` }}
+        ></div>
+      </div>
+    </>
   );
 };
 
