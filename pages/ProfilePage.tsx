@@ -408,7 +408,22 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                   {user.email}
                 </div>
                 <span className="text-xs text-indigo-700 font-semibold bg-indigo-100 border border-indigo-200 px-4 py-1 rounded-full mb-2">
-                  Subscription: {user.subscription}
+                  Subscription:{" "}
+                  {(() => {
+                    try {
+                      // Prefer server subscriptionData -> local snapshot -> user prop
+                      if (subscriptionData?.planName)
+                        return subscriptionData.planName;
+                      const snap = localStorage.getItem("subscriptionSnapshot");
+                      if (snap) {
+                        const parsed = JSON.parse(snap);
+                        if (parsed?.planName) return parsed.planName;
+                      }
+                    } catch (e) {
+                      /* ignore */
+                    }
+                    return user.subscription || "Free";
+                  })()}
                 </span>
               </div>
               <div className="w-full border-t border-gray-200 my-6"></div>
@@ -778,8 +793,7 @@ const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
       setLoading(true);
       try {
         const companyId =
-          localStorage.getItem("companyId") ||
-          localStorage.getItem("auth_uid");
+          localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
         if (!companyId) {
           setSentCount(0);
           setLoading(false);
