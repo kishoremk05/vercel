@@ -77,35 +77,47 @@ service cloud.firestore {
       allow delete: if isAdmin();
       
       // Subcollections (profile, dashboard, messages, feedback, messenger, subscription)
-      // Allow read/write if auth_uid matches clientId (document ID)
+      // Allow read/write if auth_uid matches clientId OR if user has auth_uid matching parent document
       match /dashboard/{document=**} {
         allow read, write: if isAuthenticated() && 
-                             (request.auth.uid == clientId || isAdmin());
+                             (request.auth.uid == clientId || 
+                              request.auth.uid == get(/databases/$(database)/documents/clients/$(clientId)).data.auth_uid ||
+                              isAdmin());
       }
       
       match /feedback/{document=**} {
         allow read, write: if isAuthenticated() && 
-                             (request.auth.uid == clientId || isAdmin());
+                             (request.auth.uid == clientId || 
+                              request.auth.uid == get(/databases/$(database)/documents/clients/$(clientId)).data.auth_uid ||
+                              isAdmin());
       }
       
       match /profile/{document=**} {
         allow read, write: if isAuthenticated() && 
-                             (request.auth.uid == clientId || isAdmin());
+                             (request.auth.uid == clientId || 
+                              request.auth.uid == get(/databases/$(database)/documents/clients/$(clientId)).data.auth_uid ||
+                              isAdmin());
       }
       
       match /messages/{document=**} {
         allow read, write: if isAuthenticated() && 
-                             (request.auth.uid == clientId || isAdmin());
+                             (request.auth.uid == clientId || 
+                              request.auth.uid == get(/databases/$(database)/documents/clients/$(clientId)).data.auth_uid ||
+                              isAdmin());
       }
       
       match /messenger/{document=**} {
         allow read, write: if isAuthenticated() && 
-                             (request.auth.uid == clientId || isAdmin());
+                             (request.auth.uid == clientId || 
+                              request.auth.uid == get(/databases/$(database)/documents/clients/$(clientId)).data.auth_uid ||
+                              isAdmin());
       }
       
       match /subscription/{document=**} {
         allow read, write: if isAuthenticated() && 
-                             (request.auth.uid == clientId || isAdmin());
+                             (request.auth.uid == clientId || 
+                              request.auth.uid == get(/databases/$(database)/documents/clients/$(clientId)).data.auth_uid ||
+                              isAdmin());
       }
     }
     
