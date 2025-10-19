@@ -16,6 +16,7 @@ let auth: any = null;
 let db: any = null;
 
 export function initializeFirebase() {
+  console.log('[firebase] initializeFirebase called');
   if (!getApps().length) {
     app = initializeApp(firebaseConfig);
     auth = getAuth();
@@ -28,6 +29,7 @@ export function initializeFirebase() {
       }
     }).catch(()=>{});
     db = getFirestore(app);
+    console.log('[firebase] Firebase initialized (new app)');
   } else {
     app = getApps()[0];
     auth = getAuth();
@@ -39,6 +41,7 @@ export function initializeFirebase() {
       }
     }).catch(()=>{});
     db = getFirestore(app);
+    console.log('[firebase] Firebase initialized (existing app)');
   }
   return { app, auth, db };
 }
