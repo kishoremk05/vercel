@@ -117,7 +117,7 @@ const App: React.FC = () => {
     // Dynamic import to avoid initialization issues
     import("./lib/firebaseAuth")
       .then((authModule) => {
-        const unsubscribe = authModule.onAuthChange(async (user) => {
+  const unsubscribe = authModule.onAuthChange(async (user) => {
           console.log("[App] Auth state changed:", {
             user: user?.email || null,
           });
@@ -169,6 +169,54 @@ const App: React.FC = () => {
 
                 // Dispatch event so other components know auth is ready
                 window.dispatchEvent(new Event("auth:ready"));
+
+                // Attempt to upload any pending subscription saved by the
+                // PaymentSuccessPage while the browser/redirect lost auth.
+                (async function attemptPendingSubscriptionUpload() {
+                  try {
+                    const pendingRaw = localStorage.getItem("pendingSubscription");
+                    if (!pendingRaw) return;
+                    const pending = JSON.parse(pendingRaw);
+                    if (!pending || !pending.planId) return;
+                    const apiBase = await getSmsServerUrl().catch(() => API_BASE);
+                    const companyId = clientId || localStorage.getItem("companyId");
+                    const userEmail = user.email || localStorage.getItem("userEmail");
+                    if (!companyId && !userEmail) return;
+                    const body = {
+                      companyId,
+                      planId: pending.planId,
+                      smsCredits: pending.smsCredits,
+                      durationMonths: pending.durationMonths,
+                      status: pending.status,
+                      userEmail,
+                    };
+                    console.log("[App] Attempting pending subscription upload:", body);
+                    const res = await fetch(`${apiBase}/api/subscription`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(body),
+                    });
+                    const json = await res.json().catch(() => ({}));
+                    if (json && json.success) {
+                      console.log("[App] Pending subscription uploaded successfully");
+                      localStorage.removeItem("pendingSubscription");
+                      localStorage.setItem("hasPaid", "true");
+                      // Optionally set subscriptionSnapshot if returned
+                      if (json.subscription) {
+                        try {
+                          localStorage.setItem(
+                            "subscriptionSnapshot",
+                            JSON.stringify(json.subscription)
+                          );
+                        } catch {}
+                      }
+                    } else {
+                      console.warn("[App] Pending subscription upload failed:", json);
+                    }
+                  } catch (err) {
+                    console.warn("[App] Pending subscription upload error:", err);
+                  }
+                })();
 
                 // If on auth/login/signup page, redirect to dashboard
                 const path = stripBase(window.location.pathname).toLowerCase();
