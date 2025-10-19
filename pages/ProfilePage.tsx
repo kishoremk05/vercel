@@ -42,31 +42,16 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
 
-  // Load profile photo from Firebase/localStorage on mount
+  // Load profile photo from localStorage on mount (Firebase upload handled separately)
   useEffect(() => {
-    const loadProfilePhoto = async () => {
-      try {
-        const companyId = localStorage.getItem("companyId");
-        if (!companyId) return;
-
-        const base = await getSmsServerUrl().catch(() => API_BASE);
-        const url = base
-          ? `${base}/api/company/profile`
-          : `${API_BASE}/api/company/profile`;
-
-        const response = await fetch(`${url}?companyId=${companyId}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.profile?.photoURL) {
-            setProfilePhoto(data.profile.photoURL);
-          }
-        }
-      } catch (error) {
-        console.error("Error loading profile photo:", error);
+    try {
+      const savedPhoto = localStorage.getItem("profilePhoto");
+      if (savedPhoto) {
+        setProfilePhoto(savedPhoto);
       }
-    };
-
-    loadProfilePhoto();
+    } catch (error) {
+      console.error("Error loading profile photo from localStorage:", error);
+    }
   }, []);
 
   // Load subscription data from Firebase Firestore (cross-device) - PRIMARY SOURCE
@@ -113,7 +98,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           }
 
           // Firebase document doesn't exist, try localStorage fallback
-          console.log("No Firebase subscription document found, checking localStorage");
+          console.log(
+            "No Firebase subscription document found, checking localStorage"
+          );
           const snap = localStorage.getItem("subscriptionSnapshot");
           if (snap) {
             const parsed = JSON.parse(snap);
@@ -121,14 +108,20 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
             setSubscriptionData(parsed);
           }
         } catch (firebaseError) {
-          console.warn("Firebase fetch error, checking localStorage:", firebaseError);
-          
+          console.warn(
+            "Firebase fetch error, checking localStorage:",
+            firebaseError
+          );
+
           // Fallback to localStorage snapshot
           try {
             const snap = localStorage.getItem("subscriptionSnapshot");
             if (snap) {
               const parsed = JSON.parse(snap);
-              console.log("✅ Using localStorage snapshot as fallback:", parsed);
+              console.log(
+                "✅ Using localStorage snapshot as fallback:",
+                parsed
+              );
               setSubscriptionData(parsed);
             }
           } catch (e) {
@@ -169,45 +162,21 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     setError("");
 
     try {
-      const companyId = localStorage.getItem("companyId");
-      if (!companyId) {
-        setError("No company ID found. Please log in again.");
-        return;
-      }
-
       // Convert to base64
       const reader = new FileReader();
       reader.onloadend = async () => {
         try {
           const base64Image = reader.result as string;
 
-          const base = await getSmsServerUrl().catch(() => API_BASE);
-          const url = base
-            ? `${base}/api/company/profile`
-            : `${API_BASE}/api/company/profile`;
-
-          const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              companyId,
-              photoURL: base64Image,
-            }),
-          });
-
-          const data = await response.json();
-          if (data.success) {
-            setProfilePhoto(base64Image);
-            setProfileSaved(true);
-            setTimeout(() => setProfileSaved(false), 2500);
-          } else {
-            setError(data.error || "Failed to upload photo");
-            setShowError(true);
-            setTimeout(() => setShowError(false), 3000);
-          }
+          // Save to localStorage (no API call needed)
+          localStorage.setItem("profilePhoto", base64Image);
+          setProfilePhoto(base64Image);
+          setProfileSaved(true);
+          setTimeout(() => setProfileSaved(false), 2500);
+          console.log("✅ Profile photo saved to localStorage");
         } catch (e: any) {
           console.error("[photo:upload:error]", e);
-          setError("Failed to upload photo. Please try again.");
+          setError("Failed to save photo. Please try again.");
           setShowError(true);
           setTimeout(() => setShowError(false), 3000);
         } finally {
@@ -836,13 +805,22 @@ const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
         // Try to get message count from Firebase Firestore dashboard
         try {
           const db = getFirebaseDb();
-          const dashboardRef = doc(db, "clients", companyId, "dashboard", "current");
+          const dashboardRef = doc(
+            db,
+            "clients",
+            companyId,
+            "dashboard",
+            "current"
+          );
           const dashboardSnap = await getDoc(dashboardRef);
-          
+
           if (dashboardSnap.exists()) {
             const data = dashboardSnap.data();
             setSentCount(data.message_count || 0);
-            console.log("✅ Got message count from Firebase:", data.message_count);
+            console.log(
+              "✅ Got message count from Firebase:",
+              data.message_count
+            );
             setLoading(false);
             return;
           }
@@ -859,10 +837,10 @@ const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
 
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 3000);
-          
+
           const response = await fetch(url, { signal: controller.signal });
           clearTimeout(timeoutId);
-          
+
           if (response.ok) {
             const data = await response.json();
             if (
@@ -871,7 +849,10 @@ const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
               typeof data.stats.messageCount === "number"
             ) {
               setSentCount(data.stats.messageCount);
-              console.log("✅ Got message count from API:", data.stats.messageCount);
+              console.log(
+                "✅ Got message count from API:",
+                data.stats.messageCount
+              );
               setLoading(false);
               return;
             }
