@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { ActivityLog } from "../types";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
+import { getFirebaseDb } from "../lib/firebaseClient";
+import { doc, getDoc } from "firebase/firestore";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -67,7 +69,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     loadProfilePhoto();
   }, []);
 
-  // Load subscription data
+  // Load subscription data from Firebase Firestore (cross-device)
   useEffect(() => {
     const loadSubscriptionData = async () => {
       try {
@@ -77,6 +79,46 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           return;
         }
 
+        // First, try to load from Firebase Firestore
+        try {
+          const db = getFirebaseDb();
+          const subscriptionRef = doc(
+            db,
+            "clients",
+            companyId,
+            "subscription",
+            "active"
+          );
+          const subscriptionSnap = await getDoc(subscriptionRef);
+
+          if (subscriptionSnap.exists()) {
+            const firebaseData = subscriptionSnap.data();
+            console.log("✅ Loaded subscription from Firebase:", firebaseData);
+
+            // Convert Firebase data to the format expected by the UI
+            const formattedData = {
+              planId: firebaseData.planId,
+              planName: firebaseData.planName,
+              smsCredits: firebaseData.smsCredits,
+              status: firebaseData.status,
+              startDate: firebaseData.activatedAt,
+              expiryDate: firebaseData.expiryAt,
+              remainingCredits:
+                firebaseData.remainingCredits || firebaseData.smsCredits,
+            };
+
+            setSubscriptionData(formattedData);
+            setLoadingSubscription(false);
+            return;
+          }
+        } catch (firebaseError) {
+          console.warn(
+            "Firebase subscription fetch failed, trying API:",
+            firebaseError
+          );
+        }
+
+        // Fallback to API endpoint
         const base = await getSmsServerUrl().catch(() => API_BASE);
         const url = base
           ? `${base}/api/subscription?companyId=${companyId}`
@@ -87,20 +129,21 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           const data = await response.json();
           if (data.success && data.subscription) {
             setSubscriptionData(data.subscription);
+            setLoadingSubscription(false);
+            return;
           }
         }
-        // If server returns no subscription yet (webhook delay), fall back to
-        // a local snapshot stored after a successful checkout redirect.
-        if (!subscriptionData) {
-          try {
-            const snap = localStorage.getItem("subscriptionSnapshot");
-            if (snap) {
-              const parsed = JSON.parse(snap);
-              setSubscriptionData(parsed);
-            }
-          } catch (e) {
-            console.warn("Failed to read subscription snapshot", e);
+
+        // Last fallback: localStorage snapshot
+        try {
+          const snap = localStorage.getItem("subscriptionSnapshot");
+          if (snap) {
+            const parsed = JSON.parse(snap);
+            console.log("Using localStorage snapshot:", parsed);
+            setSubscriptionData(parsed);
           }
+        } catch (e) {
+          console.warn("Failed to read subscription snapshot", e);
         }
       } catch (error) {
         console.error("Error loading subscription data:", error);

@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
+import { getFirebaseDb } from "../lib/firebaseClient";
+import { doc, setDoc, Timestamp } from "firebase/firestore";
 
 const PaymentSuccessPage: React.FC = () => {
   const [countdown, setCountdown] = useState(5);
@@ -69,11 +71,35 @@ const PaymentSuccessPage: React.FC = () => {
           console.error("Error posting subscription to server:", e);
         }
 
-        // Persist a local subscription snapshot with activation and expiry dates
+        // Save subscription to Firebase Firestore for cross-device persistence
         try {
+          const db = getFirebaseDb();
           const activatedAt = Date.now();
           // Calculate expiry date based on plan duration
           const expiryAt = activatedAt + plan.months * 30 * 24 * 60 * 60 * 1000;
+
+          const subscriptionData = {
+            planId,
+            planName: plan.name,
+            smsCredits: plan.sms,
+            status: "active",
+            activatedAt: new Date(activatedAt),
+            expiryAt: new Date(expiryAt),
+            savedAt: Timestamp.now(),
+          };
+
+          // Save to Firebase under clients/{companyId}/subscription
+          const subscriptionRef = doc(
+            db,
+            "clients",
+            companyId,
+            "subscription",
+            "active"
+          );
+          await setDoc(subscriptionRef, subscriptionData, { merge: true });
+          console.log("✅ Subscription saved to Firebase");
+
+          // Also keep local snapshot for immediate fallback
           const snapshot = {
             planId,
             planName: plan.name,
@@ -89,7 +115,7 @@ const PaymentSuccessPage: React.FC = () => {
           localStorage.setItem("hasPaid", "true");
           localStorage.removeItem("pendingPlan");
         } catch (e) {
-          console.warn("Failed to persist local subscription snapshot", e);
+          console.warn("Failed to persist subscription", e);
         }
       } catch (error) {
         console.error("Error saving subscription:", error);
