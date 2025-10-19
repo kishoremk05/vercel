@@ -86,6 +86,7 @@ const PaymentSuccessPage: React.FC = () => {
             "subscriptionSnapshot",
             JSON.stringify(snapshot)
           );
+          localStorage.setItem("hasPaid", "true");
           localStorage.removeItem("pendingPlan");
         } catch (e) {
           console.warn("Failed to persist local subscription snapshot", e);

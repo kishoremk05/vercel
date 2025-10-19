@@ -608,12 +608,33 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-600">
-                    <p className="text-lg">No subscription data available</p>
-                    <p className="text-sm mt-2">
-                      Please purchase a plan to get started
-                    </p>
-                  </div>
+                  (() => {
+                    // Check if payment has been made
+                    const hasPaid = localStorage.getItem("hasPaid") === "true";
+                    if (hasPaid) {
+                      return (
+                        <div className="text-center py-8 text-gray-600">
+                          <p className="text-lg">
+                            Your payment was successful.
+                          </p>
+                          <p className="text-sm mt-2">
+                            Subscription is active. If you do not see your plan,
+                            please refresh or contact support.
+                          </p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="text-center py-8 text-gray-600">
+                        <p className="text-lg">
+                          No subscription data available
+                        </p>
+                        <p className="text-sm mt-2">
+                          Please purchase a plan to get started
+                        </p>
+                      </div>
+                    );
+                  })()
                 )}
               </div>
 
