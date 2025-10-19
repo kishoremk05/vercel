@@ -76,7 +76,7 @@ service cloud.firestore {
       // Only admins can delete clients
       allow delete: if isAdmin();
       
-      // Subcollections (profile, dashboard, messages, feedback, messenger)
+      // Subcollections (profile, dashboard, messages, feedback, messenger, subscription)
       // Allow read/write if auth_uid matches clientId (document ID)
       match /dashboard/{document=**} {
         allow read, write: if isAuthenticated() && 
@@ -99,6 +99,11 @@ service cloud.firestore {
       }
       
       match /messenger/{document=**} {
+        allow read, write: if isAuthenticated() && 
+                             (request.auth.uid == clientId || isAdmin());
+      }
+      
+      match /subscription/{document=**} {
         allow read, write: if isAuthenticated() && 
                              (request.auth.uid == clientId || isAdmin());
       }
