@@ -3,6 +3,7 @@
 ## ⚡ Do This NOW (5 Minutes)
 
 ### Step 1: Check Render Server (IMMEDIATE)
+
 ```
 1. Open: https://dashboard.render.com
 2. Find service: "server-cibp" (or your server name)
@@ -10,6 +11,7 @@
 ```
 
 **If Status = "Deploy Failed" or "Build Failed":**
+
 ```
 → Click "Manual Deploy" → "Deploy latest commit"
 → Wait 5-10 minutes
@@ -17,13 +19,15 @@
 ```
 
 **If Status = "Suspended":**
+
 ```
-→ Click "Resume Service"  
+→ Click "Resume Service"
 → Wait 2-3 minutes
 → Skip to Step 4
 ```
 
 **If Status = "Live":**
+
 ```
 → Continue to Step 2
 ```
@@ -31,6 +35,7 @@
 ---
 
 ### Step 2: Check Render Logs
+
 ```
 1. Click "Logs" tab on your Render service
 2. Look for recent errors (last 5 minutes)
@@ -38,22 +43,24 @@
 
 **Common errors & fixes:**
 
-| Error | Fix |
-|-------|-----|
-| "Port already in use" | Wait 2 mins, auto-restarts |
-| "Out of memory" | Upgrade Render plan OR restart service |
-| "Module not found" | Click "Manual Deploy" → "Clear build cache & deploy" |
-| "Firebase" errors | Check FIREBASE_ADMIN_JSON environment variable |
-| No recent logs | Service might be sleeping (free tier) - click a route to wake it |
+| Error                 | Fix                                                              |
+| --------------------- | ---------------------------------------------------------------- |
+| "Port already in use" | Wait 2 mins, auto-restarts                                       |
+| "Out of memory"       | Upgrade Render plan OR restart service                           |
+| "Module not found"    | Click "Manual Deploy" → "Clear build cache & deploy"             |
+| "Firebase" errors     | Check FIREBASE_ADMIN_JSON environment variable                   |
+| No recent logs        | Service might be sleeping (free tier) - click a route to wake it |
 
 ---
 
 ### Step 3: Wake Up the Server (If Free Tier)
+
 ```
 Open in new tab: https://server-cibp.onrender.com/health
 ```
 
 **Expected:**
+
 - ✅ Shows JSON response = Server is awake
 - ❌ Shows "This site can't be reached" = Server is down (go back to Step 1)
 - ⏳ Takes 30+ seconds to respond = Server was sleeping (wait for it)
@@ -61,6 +68,7 @@ Open in new tab: https://server-cibp.onrender.com/health
 ---
 
 ### Step 4: Set Environment Variable
+
 ```
 1. On Render Dashboard → Your Service → "Environment" tab
 2. Add or update this variable:
@@ -75,6 +83,7 @@ Open in new tab: https://server-cibp.onrender.com/health
 ---
 
 ### Step 5: Test Your App
+
 ```
 1. Go to: https://vercel-swart-chi-29.vercel.app/profile
 2. Open Browser Console (F12)
@@ -83,6 +92,7 @@ Open in new tab: https://server-cibp.onrender.com/health
 ```
 
 **If still getting errors:**
+
 - Wait another 2-3 minutes (Render might still be deploying)
 - Check Render dashboard shows "Live" status
 - Try clearing browser cache (Ctrl+Shift+R)
@@ -118,13 +128,16 @@ You'll know it's fixed when:
 **Most likely causes:**
 
 1. **Render Free Tier Limitations**
+
    - Solution: Upgrade to Starter ($7/month) - No sleeping, better reliability
 
 2. **Firebase Credentials Missing**
+
    - Solution: Add `FIREBASE_ADMIN_JSON` environment variable
    - Get it from: Firebase Console → Project Settings → Service Accounts
 
 3. **Render Build Failed**
+
    - Solution: Check logs for specific error
    - Usually missing dependencies or syntax errors
 
@@ -137,15 +150,18 @@ You'll know it's fixed when:
 ## 🎯 What Changed
 
 ### Files Updated:
+
 - `sms-server.js` - Added `https://*.vercel.app` to CORS whitelist
 - `CORS_502_TROUBLESHOOTING.md` - Full troubleshooting guide (for reference)
 
 ### What This Fixes:
+
 - ✅ CORS errors for all Vercel subdomains
 - ✅ Better wildcard matching
 - ✅ More reliable cross-origin requests
 
 ### What You Still Need To Do:
+
 1. ✅ Ensure Render server is running
 2. ✅ Set CORS_ORIGINS environment variable
 3. ✅ Wait for Render auto-deploy to complete
