@@ -1081,8 +1081,38 @@ app.post("/api/subscription", async (req, res) => {
     if (!firestoreEnabled) {
       return res.status(503).json({ error: "Database not configured" });
     }
-    const { companyId, planId, smsCredits, durationMonths, status } =
+    let { companyId, planId, smsCredits, durationMonths, status, userEmail } =
       req.body || {};
+    // Accept companyId from various places (body, headers, query)
+    companyId =
+      companyId ||
+      req.headers["x-company-id"] ||
+      req.headers["x-client-id"] ||
+      req.query.companyId ||
+      null;
+
+    // If companyId is missing but client provided an email, try to find the
+    // corresponding client document by email (admin-side lookup). This helps
+    // the flow when the browser lost localStorage/companyId across a redirect.
+    if (!companyId && userEmail) {
+      try {
+        const clientsRef = firestore.collection("clients");
+        const q = clientsRef.where("email", "==", String(userEmail)).limit(1);
+        const searchSnap = await q.get();
+        if (!searchSnap.empty) {
+          companyId = searchSnap.docs[0].id;
+          console.log(
+            `[api:subscription] Derived companyId ${companyId} from userEmail ${userEmail}`
+          );
+        }
+      } catch (e) {
+        console.warn(
+          "[api:subscription] Failed to derive companyId from userEmail:",
+          e
+        );
+      }
+    }
+
     if (!companyId || !planId) {
       return res.status(400).json({ error: "companyId & planId required" });
     }
@@ -1105,6 +1135,45 @@ app.post("/api/subscription", async (req, res) => {
       updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
     };
     await ref.set(payload, { merge: true });
+
+    // Also persist subscription into the client's profile/main document so
+    // the frontend (ProfilePage) can read subscription data from a single
+    // canonical location. Use admin SDK timestamps to match client expectations.
+    try {
+      const profileRef = firestore
+        .collection("clients")
+        .doc(String(companyId))
+        .collection("profile")
+        .doc("main");
+
+      const activatedAtTs = firebaseAdmin.firestore.Timestamp.now();
+      const expiryAtTs = firebaseAdmin.firestore.Timestamp.fromMillis(
+        Date.now() + totalMs
+      );
+
+      const profilePayload = {
+        planId: payload.planId,
+        planName: payload.planName || payload.planId,
+        smsCredits: payload.smsCredits,
+        remainingCredits: payload.remainingCredits,
+        status: payload.status || "active",
+        activatedAt: activatedAtTs,
+        expiryAt: expiryAtTs,
+        updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      await profileRef.set(profilePayload, { merge: true });
+      console.log(
+        `[api:subscription] ✅ Saved subscription to clients/${companyId}/profile/main`
+      );
+    } catch (profileErr) {
+      console.error(
+        "[api:subscription] Failed to save subscription to profile/main:",
+        profileErr
+      );
+      // Continue - primary billing doc is already saved
+    }
+
     return res.json({ success: true, subscription: payload });
   } catch (e) {
     return res
