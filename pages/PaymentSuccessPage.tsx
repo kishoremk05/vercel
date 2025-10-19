@@ -93,10 +93,13 @@ const PaymentSuccessPage: React.FC = () => {
 
         setPlanInfo({ planName: plan.name, smsCredits: plan.sms });
 
-        // Save subscription to database (server) and keep a local copy so
-        // ProfilePage can show the active subscription immediately.
+        // Save subscription to server; server should persist to Firestore
+        // (admin write) so other browsers/devices can read it without client
+        // authentication. We'll POST then GET the saved subscription to build
+        // a reliable local snapshot.
+        const base = await getSmsServerUrl().catch(() => "");
+        if (!base) console.warn("[PaymentSuccess] No API base available");
         try {
-          const base = await getSmsServerUrl();
           const response = await fetch(`${base}/api/subscription`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -109,18 +112,63 @@ const PaymentSuccessPage: React.FC = () => {
             }),
           });
 
-          const data = await response.json();
-          if (data.success) {
-            console.log("✅ Subscription saved successfully");
+          const data = await response.json().catch(() => ({}));
+          if (data && data.success) {
+            console.log("✅ Subscription saved on server (billing)");
+
+            // Try to read back the subscription from the server (billing doc
+            // or profile doc) so we can set a canonical local snapshot.
+            try {
+              const getResp = await fetch(
+                `${base}/api/subscription?companyId=${encodeURIComponent(
+                  companyId
+                )}`
+              );
+              const getJson = await getResp.json().catch(() => ({}));
+              if (getJson && getJson.success && getJson.subscription) {
+                const s = getJson.subscription;
+                console.log("[PaymentSuccess] Server subscription:", s);
+
+                // Normalize subscription data into snapshot shape
+                const snap = {
+                  planId: s.planId || planId,
+                  planName: s.planName || plan.name,
+                  smsCredits: Number(s.smsCredits || s.remainingCredits || plan.sms),
+                  remainingCredits: Number(s.remainingCredits || s.smsCredits || plan.sms),
+                  status: s.status || "active",
+                  // handle various date formats: ISO string or Firestore timestamp
+                  activatedAt: s.startDate
+                    ? new Date(s.startDate).getTime()
+                    : s.activatedAt && s.activatedAt._seconds
+                    ? s.activatedAt._seconds * 1000
+                    : Date.now(),
+                  expiryAt: s.endDate
+                    ? new Date(s.endDate).getTime()
+                    : s.expiryAt && s.expiryAt._seconds
+                    ? s.expiryAt._seconds * 1000
+                    : Date.now() + plan.months * 30 * 24 * 60 * 60 * 1000,
+                };
+                localStorage.setItem("subscriptionSnapshot", JSON.stringify(snap));
+                localStorage.setItem("hasPaid", "true");
+                localStorage.removeItem("pendingPlan");
+                console.log("✅ Local snapshot saved from server response");
+              } else {
+                console.warn("[PaymentSuccess] No subscription returned from server GET");
+              }
+            } catch (getErr) {
+              console.warn("[PaymentSuccess] Failed to GET subscription from server:", getErr);
+            }
           } else {
-            console.error("Failed to save subscription:", data.error);
+            console.error("Failed to save subscription on server:", data.error || data);
           }
         } catch (e) {
           console.error("Error posting subscription to server:", e);
         }
 
         // Save subscription to Firebase Firestore for cross-device persistence
-        console.log("[PaymentSuccess] Attempting to save to Firebase...", {
+        // (Client-side write). Only attempt if the user is authenticated in
+        // this browser; otherwise rely on the server-admin write done earlier.
+        console.log("[PaymentSuccess] Client-side Firebase save attempt...", {
           companyId,
           planId,
         });
@@ -128,10 +176,11 @@ const PaymentSuccessPage: React.FC = () => {
           const db = getFirebaseDb();
           const auth = getFirebaseAuth();
           const currentUser = auth.currentUser;
-
           if (!currentUser) {
-            throw new Error("User not authenticated - cannot save to Firebase");
-          }
+            console.warn(
+              "[PaymentSuccess] Skipping client-side Firestore write, user not authenticated in this browser"
+            );
+          } else {
 
           // First, ensure the client document has auth_uid set
           const clientRef = doc(db, "clients", companyId);
@@ -240,6 +289,7 @@ const PaymentSuccessPage: React.FC = () => {
           localStorage.setItem("hasPaid", "true");
           localStorage.removeItem("pendingPlan");
           console.log("✅ localStorage snapshot saved");
+        }
         } catch (e: any) {
           console.error(
             "❌❌❌ CRITICAL: Failed to save subscription to Firebase:",
