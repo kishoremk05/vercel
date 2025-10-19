@@ -64,43 +64,49 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           return;
         }
 
-        // Load from Firebase Firestore - PRIMARY SOURCE (reliable cross-device)
+        // Load from Firebase Firestore profile/main - PRIMARY SOURCE (reliable cross-device)
         try {
           const db = getFirebaseDb();
-          const subscriptionRef = doc(
-            db,
-            "clients",
-            companyId,
-            "subscription",
-            "active"
-          );
-          const subscriptionSnap = await getDoc(subscriptionRef);
+          const profileRef = doc(db, "clients", companyId, "profile", "main");
+          const profileSnap = await getDoc(profileRef);
 
-          if (subscriptionSnap.exists()) {
-            const firebaseData = subscriptionSnap.data();
-            console.log("✅ Loaded subscription from Firebase:", firebaseData);
+          if (profileSnap.exists()) {
+            const firebaseData = profileSnap.data();
+            console.log(
+              "✅ Loaded business profile from Firebase:",
+              firebaseData
+            );
 
-            // Convert Firebase data to the format expected by the UI
-            const formattedData = {
-              planId: firebaseData.planId,
-              planName: firebaseData.planName,
-              smsCredits: firebaseData.smsCredits,
-              status: firebaseData.status,
-              startDate: firebaseData.activatedAt,
-              expiryDate: firebaseData.expiryAt,
-              remainingCredits:
-                firebaseData.remainingCredits || firebaseData.smsCredits,
-            };
+            // Check if subscription data exists in profile
+            if (firebaseData.planId && firebaseData.status) {
+              // Convert Firebase data to the format expected by the UI
+              const formattedData = {
+                planId: firebaseData.planId,
+                planName: firebaseData.planName,
+                smsCredits: firebaseData.smsCredits,
+                status: firebaseData.status,
+                price: firebaseData.price,
+                startDate: firebaseData.activatedAt,
+                expiryDate: firebaseData.expiryAt,
+                remainingCredits:
+                  firebaseData.remainingCredits || firebaseData.smsCredits,
+              };
 
-            setSubscriptionData(formattedData);
-            setLoadingSubscription(false);
-            return;
+              setSubscriptionData(formattedData);
+              setLoadingSubscription(false);
+              return;
+            } else {
+              console.log(
+                "No subscription data found in Firebase profile, checking localStorage"
+              );
+            }
+          } else {
+            console.log(
+              "No Firebase subscription document found, checking localStorage"
+            );
           }
 
-          // Firebase document doesn't exist, try localStorage fallback
-          console.log(
-            "No Firebase subscription document found, checking localStorage"
-          );
+          // Fallback to localStorage snapshot
           const snap = localStorage.getItem("subscriptionSnapshot");
           if (snap) {
             const parsed = JSON.parse(snap);
@@ -443,6 +449,60 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                 ) : subscriptionData ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Current Plan and Status containers removed as requested */}
+
+                    {/* Plan Name & Price */}
+                    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-lg border border-indigo-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="w-5 h-5 text-indigo-600"
+                        >
+                          <path d="M10.464 8.746c.227-.18.497-.311.786-.394v2.795a2.252 2.252 0 01-.786-.393c-.394-.313-.546-.681-.546-1.004 0-.323.152-.691.546-1.004zM12.75 15.662v-2.824c.347.085.664.228.921.421.427.32.579.686.579.991 0 .305-.152.671-.579.991a2.534 2.534 0 01-.921.42z" />
+                          <path
+                            fillRule="evenodd"
+                            d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v.816a3.836 3.836 0 00-1.72.756c-.712.566-1.112 1.35-1.112 2.178 0 .829.4 1.612 1.113 2.178.502.4 1.102.647 1.719.756v2.978a2.536 2.536 0 01-.921-.421l-.879-.66a.75.75 0 00-.9 1.2l.879.66c.533.4 1.169.645 1.821.75V18a.75.75 0 001.5 0v-.81a4.124 4.124 0 001.821-.749c.745-.559 1.179-1.344 1.179-2.191 0-.847-.434-1.632-1.179-2.191a4.122 4.122 0 00-1.821-.75V8.354c.29.082.559.213.786.393l.415.33a.75.75 0 00.933-1.175l-.415-.33a3.836 3.836 0 00-1.719-.755V6z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-semibold text-gray-700">
+                          Current Plan
+                        </span>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {subscriptionData.planName || "N/A"}
+                      </p>
+                      {subscriptionData.price && (
+                        <p className="text-lg font-semibold text-indigo-600 mt-1">
+                          ${subscriptionData.price}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Status */}
+                    <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="w-5 h-5 text-green-600"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-semibold text-gray-700">
+                          Status
+                        </span>
+                      </div>
+                      <p className="text-2xl font-bold text-green-600 capitalize">
+                        {subscriptionData.status || "N/A"}
+                      </p>
+                    </div>
 
                     {/* Start Date */}
                     <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">

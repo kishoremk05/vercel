@@ -18,11 +18,11 @@ const PaymentSuccessPage: React.FC = () => {
         // Wait for auth to be ready
         const auth = getAuth();
         const currentUser = auth.currentUser;
-        
-        console.log("[PaymentSuccess] Auth state:", { 
+
+        console.log("[PaymentSuccess] Auth state:", {
           authenticated: !!currentUser,
           uid: currentUser?.uid,
-          email: currentUser?.email 
+          email: currentUser?.email,
         });
 
         if (!currentUser) {
@@ -49,10 +49,15 @@ const PaymentSuccessPage: React.FC = () => {
           urlParams.get("plan") || localStorage.getItem("pendingPlan");
         const companyId = localStorage.getItem("companyId");
 
-        console.log("[PaymentSuccess] Starting subscription save:", { planId, companyId });
+        console.log("[PaymentSuccess] Starting subscription save:", {
+          planId,
+          companyId,
+        });
 
         if (!planId || !companyId) {
-          console.error("❌ Missing plan or companyId, skipping subscription save");
+          console.error(
+            "❌ Missing plan or companyId, skipping subscription save"
+          );
           return;
         }
 
@@ -104,7 +109,10 @@ const PaymentSuccessPage: React.FC = () => {
         }
 
         // Save subscription to Firebase Firestore for cross-device persistence
-        console.log("[PaymentSuccess] Attempting to save to Firebase...", { companyId, planId });
+        console.log("[PaymentSuccess] Attempting to save to Firebase...", {
+          companyId,
+          planId,
+        });
         try {
           const db = getFirebaseDb();
           const auth = getAuth();
@@ -120,16 +128,27 @@ const PaymentSuccessPage: React.FC = () => {
             const clientDoc = await getDoc(clientRef);
             if (clientDoc.exists()) {
               const clientData = clientDoc.data();
-              console.log("[PaymentSuccess] Client document exists:", clientData);
-              
+              console.log(
+                "[PaymentSuccess] Client document exists:",
+                clientData
+              );
+
               // Update auth_uid if missing or different
-              if (!clientData.auth_uid || clientData.auth_uid !== currentUser.uid) {
-                console.log("[PaymentSuccess] Updating client auth_uid:", currentUser.uid);
+              if (
+                !clientData.auth_uid ||
+                clientData.auth_uid !== currentUser.uid
+              ) {
+                console.log(
+                  "[PaymentSuccess] Updating client auth_uid:",
+                  currentUser.uid
+                );
                 await updateDoc(clientRef, { auth_uid: currentUser.uid });
                 console.log("✅ Client auth_uid updated");
               }
             } else {
-              console.log("[PaymentSuccess] Client document doesn't exist, creating it");
+              console.log(
+                "[PaymentSuccess] Client document doesn't exist, creating it"
+              );
               await setDoc(clientRef, {
                 auth_uid: currentUser.uid,
                 email: currentUser.email,
@@ -154,26 +173,30 @@ const PaymentSuccessPage: React.FC = () => {
             status: "active",
             activatedAt: Timestamp.fromMillis(activatedAt),
             expiryAt: Timestamp.fromMillis(expiryAt),
+            price:
+              plan.name === "Starter" ? 30 : plan.name === "Growth" ? 75 : 100,
             savedAt: Timestamp.now(),
             userId: currentUser.uid,
             userEmail: currentUser.email,
           };
 
-          // Save to Firebase under clients/{companyId}/subscription/active
-          const subscriptionRef = doc(
-            db,
-            "clients",
-            companyId,
-            "subscription",
-            "active"
+          // Save to Firebase under clients/{companyId}/profile/main (NEW PATH)
+          const profileRef = doc(db, "clients", companyId, "profile", "main");
+
+          console.log(
+            "[PaymentSuccess] Saving to path:",
+            `clients/${companyId}/profile/main`
           );
-          
-          console.log("[PaymentSuccess] Saving to path:", `clients/${companyId}/subscription/active`);
           console.log("[PaymentSuccess] Data to save:", subscriptionData);
-          console.log("[PaymentSuccess] Current user:", { uid: currentUser.uid, email: currentUser.email });
-          
-          await setDoc(subscriptionRef, subscriptionData, { merge: true });
-          console.log("✅✅✅ Subscription saved to Firebase successfully!");
+          console.log("[PaymentSuccess] Current user:", {
+            uid: currentUser.uid,
+            email: currentUser.email,
+          });
+
+          await updateDoc(profileRef, subscriptionData);
+          console.log(
+            "✅✅✅ Subscription saved to Firebase profile/main successfully!"
+          );
 
           // Also keep local snapshot for immediate fallback
           const snapshot = {
@@ -193,17 +216,21 @@ const PaymentSuccessPage: React.FC = () => {
           localStorage.removeItem("pendingPlan");
           console.log("✅ localStorage snapshot saved");
         } catch (e: any) {
-          console.error("❌❌❌ CRITICAL: Failed to save subscription to Firebase:", e);
+          console.error(
+            "❌❌❌ CRITICAL: Failed to save subscription to Firebase:",
+            e
+          );
           console.error("Error details:", {
             message: e.message,
             code: e.code,
-            stack: e.stack
+            stack: e.stack,
           });
-          
+
           // Still save to localStorage as fallback
           try {
             const activatedAt = Date.now();
-            const expiryAt = activatedAt + plan.months * 30 * 24 * 60 * 60 * 1000;
+            const expiryAt =
+              activatedAt + plan.months * 30 * 24 * 60 * 60 * 1000;
             const snapshot = {
               planId,
               planName: plan.name,
@@ -213,10 +240,15 @@ const PaymentSuccessPage: React.FC = () => {
               activatedAt,
               expiryAt,
             };
-            localStorage.setItem("subscriptionSnapshot", JSON.stringify(snapshot));
+            localStorage.setItem(
+              "subscriptionSnapshot",
+              JSON.stringify(snapshot)
+            );
             localStorage.setItem("hasPaid", "true");
             localStorage.removeItem("pendingPlan");
-            console.log("✅ Fallback: localStorage snapshot saved despite Firebase error");
+            console.log(
+              "✅ Fallback: localStorage snapshot saved despite Firebase error"
+            );
           } catch (localError) {
             console.error("❌ Even localStorage save failed:", localError);
           }
