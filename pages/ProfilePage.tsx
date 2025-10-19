@@ -69,7 +69,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     loadProfilePhoto();
   }, []);
 
-  // Load subscription data from Firebase Firestore (cross-device)
+  // Load subscription data from Firebase Firestore (cross-device) - PRIMARY SOURCE
   useEffect(() => {
     const loadSubscriptionData = async () => {
       try {
@@ -79,7 +79,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           return;
         }
 
-        // First, try to load from Firebase Firestore
+        // Load from Firebase Firestore - PRIMARY SOURCE (reliable cross-device)
         try {
           const db = getFirebaseDb();
           const subscriptionRef = doc(
@@ -111,39 +111,29 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
             setLoadingSubscription(false);
             return;
           }
-        } catch (firebaseError) {
-          console.warn(
-            "Firebase subscription fetch failed, trying API:",
-            firebaseError
-          );
-        }
 
-        // Fallback to API endpoint
-        const base = await getSmsServerUrl().catch(() => API_BASE);
-        const url = base
-          ? `${base}/api/subscription?companyId=${companyId}`
-          : `${API_BASE}/api/subscription?companyId=${companyId}`;
-
-        const response = await fetch(url);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.subscription) {
-            setSubscriptionData(data.subscription);
-            setLoadingSubscription(false);
-            return;
-          }
-        }
-
-        // Last fallback: localStorage snapshot
-        try {
+          // Firebase document doesn't exist, try localStorage fallback
+          console.log("No Firebase subscription document found, checking localStorage");
           const snap = localStorage.getItem("subscriptionSnapshot");
           if (snap) {
             const parsed = JSON.parse(snap);
-            console.log("Using localStorage snapshot:", parsed);
+            console.log("✅ Using localStorage snapshot:", parsed);
             setSubscriptionData(parsed);
           }
-        } catch (e) {
-          console.warn("Failed to read subscription snapshot", e);
+        } catch (firebaseError) {
+          console.warn("Firebase fetch error, checking localStorage:", firebaseError);
+          
+          // Fallback to localStorage snapshot
+          try {
+            const snap = localStorage.getItem("subscriptionSnapshot");
+            if (snap) {
+              const parsed = JSON.parse(snap);
+              console.log("✅ Using localStorage snapshot as fallback:", parsed);
+              setSubscriptionData(parsed);
+            }
+          } catch (e) {
+            console.warn("Failed to read subscription snapshot", e);
+          }
         }
       } catch (error) {
         console.error("Error loading subscription data:", error);
@@ -843,27 +833,57 @@ const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
           return;
         }
 
-        // Try API endpoint (same as Dashboard)
-        const base = await getSmsServerUrl().catch(() => API_BASE);
-        const url = base
-          ? `${base}/api/dashboard/stats?companyId=${companyId}`
-          : `/api/dashboard/stats?companyId=${companyId}`;
-
-        const response = await fetch(url);
-        if (response.ok) {
-          const data = await response.json();
-          if (
-            data.success &&
-            data.stats &&
-            typeof data.stats.messageCount === "number"
-          ) {
-            setSentCount(data.stats.messageCount);
+        // Try to get message count from Firebase Firestore dashboard
+        try {
+          const db = getFirebaseDb();
+          const dashboardRef = doc(db, "clients", companyId, "dashboard", "current");
+          const dashboardSnap = await getDoc(dashboardRef);
+          
+          if (dashboardSnap.exists()) {
+            const data = dashboardSnap.data();
+            setSentCount(data.message_count || 0);
+            console.log("✅ Got message count from Firebase:", data.message_count);
             setLoading(false);
             return;
           }
+        } catch (firebaseError) {
+          console.warn("Firebase dashboard fetch failed:", firebaseError);
         }
+
+        // Fallback: Try API endpoint as secondary option
+        try {
+          const base = await getSmsServerUrl().catch(() => API_BASE);
+          const url = base
+            ? `${base}/api/dashboard/stats?companyId=${companyId}`
+            : `/api/dashboard/stats?companyId=${companyId}`;
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          
+          const response = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (
+              data.success &&
+              data.stats &&
+              typeof data.stats.messageCount === "number"
+            ) {
+              setSentCount(data.stats.messageCount);
+              console.log("✅ Got message count from API:", data.stats.messageCount);
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (apiError) {
+          console.warn("API fetch also failed, using default:", apiError);
+        }
+
+        // Default to 0 if all sources fail
         setSentCount(0);
-      } catch {
+      } catch (error) {
+        console.error("Error fetching sent count:", error);
         setSentCount(0);
       } finally {
         setLoading(false);
