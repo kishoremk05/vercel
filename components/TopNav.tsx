@@ -8,6 +8,8 @@ import {
   MessageIcon,
 } from "./icons";
 import { logout } from "../lib/firebaseAuth";
+import { getFirebaseDb } from "../lib/firebaseClient";
+import { doc, onSnapshot, getDoc } from "firebase/firestore";
 
 interface TopNavProps {
   currentPage: Page;
@@ -555,63 +557,69 @@ const CurrentPlanBadge: React.FC = () => {
 
 // Lightweight inline component to display SMS remaining (format: "SMS Left: 120/250")
 const SubscriptionStatusBadge: React.FC = () => {
-  const [sub, setSub] = React.useState<any>(() => {
-    try {
-      const raw = localStorage.getItem("subscription");
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    return null;
-  });
+  const [sub, setSub] = React.useState<any>(null);
 
   useEffect(() => {
-    const fetchSubscription = async () => {
+    let unsub: (() => void) | null = null;
+
+    const startFirestoreListener = () => {
       try {
         const companyId = localStorage.getItem("companyId");
-        if (!companyId) return;
+        if (!companyId) return false;
+        const db = getFirebaseDb();
+        const profileRef = doc(db, "clients", companyId, "profile", "main");
+        unsub = onSnapshot(
+          profileRef,
+          (snap) => {
+            if (snap.exists()) {
+              setSub(snap.data());
+            } else {
+              setSub(null);
+            }
+          },
+          (err) => {
+            console.warn(
+              "[SubscriptionStatusBadge] Firestore snapshot error:",
+              err
+            );
+          }
+        );
+        return true;
+      } catch (e) {
+        console.warn("[SubscriptionStatusBadge] Firestore listener failed:", e);
+        return false;
+      }
+    };
 
+    const startApiFetchFallback = async () => {
+      try {
+        const companyId = localStorage.getItem("companyId");
         const smsServerUrl = localStorage.getItem("smsServerUrl");
-        if (!smsServerUrl) return;
-
+        if (!companyId || !smsServerUrl) return;
         const response = await fetch(
           `${smsServerUrl}/api/subscription?companyId=${companyId}`
         );
-        const data = await response.json();
-
+        const data = await response.json().catch(() => ({}));
         if (data.success && data.subscription) {
           setSub(data.subscription);
-          localStorage.setItem(
-            "subscription",
-            JSON.stringify(data.subscription)
-          );
         }
       } catch (error) {
-        console.error(
-          "[SubscriptionStatusBadge] Error fetching subscription:",
+        console.warn(
+          "[SubscriptionStatusBadge] Error fetching subscription from API:",
           error
         );
       }
     };
 
-    // Initial fetch
-    fetchSubscription();
+    // Try Firestore listener first; fall back to API fetch if not possible
+    const ok = startFirestoreListener();
+    if (!ok) startApiFetchFallback();
 
-    // Listen for storage changes
-    const handler = () => {
-      try {
-        const raw = localStorage.getItem("subscription");
-        if (raw) setSub(JSON.parse(raw));
-      } catch {}
-    };
-
-    window.addEventListener("storage", handler);
-    window.addEventListener("subscription:updated", fetchSubscription);
-
-    // Refresh every 30 seconds
-    const id = setInterval(fetchSubscription, 30000);
+    // Also refresh from API periodically in case Firestore listener is not available
+    const id = setInterval(startApiFetchFallback, 30000);
 
     return () => {
-      window.removeEventListener("storage", handler);
-      window.removeEventListener("subscription:updated", fetchSubscription);
+      if (unsub) unsub();
       clearInterval(id);
     };
   }, []);

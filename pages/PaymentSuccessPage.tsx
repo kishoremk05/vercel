@@ -73,8 +73,111 @@ const PaymentSuccessPage: React.FC = () => {
         });
 
         if (!planId) {
-          console.error("❌ Missing planId, skipping subscription save");
-          return;
+          console.warn(
+            "[PaymentSuccess] No planId in return URL. Will attempt to fetch canonical subscription from Firestore / API."
+          );
+
+          const getCompanyId = async () => {
+            // Prefer a client-side stored companyId when available
+            try {
+              const stored = localStorage.getItem("companyId");
+              if (stored) return stored;
+            } catch {}
+
+            // If user is authenticated, ask server for companyId via /auth/me
+            if (currentUser) {
+              try {
+                const baseLocal = await getSmsServerUrl().catch(() => "");
+                const idToken = await currentUser.getIdToken();
+                if (!baseLocal) return null;
+                const meResp = await fetch(`${baseLocal}/auth/me`, {
+                  headers: { Authorization: `Bearer ${idToken}` },
+                });
+                if (!meResp.ok) return null;
+                const meJson = await meResp.json().catch(() => ({}));
+                return meJson.companyId || null;
+              } catch (e) {
+                console.warn(
+                  "[PaymentSuccess] Failed to derive companyId from /auth/me:",
+                  e
+                );
+                return null;
+              }
+            }
+            return null;
+          };
+
+          const fetchSubscriptionByCompany = async (
+            companyId: string | null
+          ) => {
+            if (!companyId) return null;
+            // First try Firestore (client SDK) if available; this will work
+            // even when the server API is temporarily unreachable.
+            try {
+              const db = getFirebaseDb();
+              const profileRef = doc(
+                db,
+                "clients",
+                companyId,
+                "profile",
+                "main"
+              );
+              const snap = await getDoc(profileRef);
+              if (snap && snap.exists()) return snap.data();
+            } catch (e) {
+              console.warn("[PaymentSuccess] Firestore fetch failed:", e);
+            }
+
+            // Fallback to API GET
+            try {
+              const baseLocal = await getSmsServerUrl().catch(() => "");
+              if (!baseLocal) return null;
+              const res = await fetch(
+                `${baseLocal}/api/subscription?companyId=${companyId}`
+              );
+              const json = await res.json().catch(() => ({}));
+              if (json && json.success && json.subscription)
+                return json.subscription;
+            } catch (e) {
+              console.warn(
+                "[PaymentSuccess] API subscription fetch failed:",
+                e
+              );
+            }
+            return null;
+          };
+
+          // Try a few times (simple retry) to let webhook/admin writes finish
+          let found = null;
+          const companyId = await getCompanyId();
+          for (let i = 0; i < 4; i++) {
+            found = await fetchSubscriptionByCompany(companyId).catch(
+              () => null
+            );
+            if (found) break;
+            // wait before retrying
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+          if (found) {
+            console.log(
+              "[PaymentSuccess] Found canonical subscription:",
+              found
+            );
+            try {
+              setPlanInfo({
+                planName: found.planName || found.planId,
+                smsCredits: found.smsCredits || found.remainingCredits || 0,
+              });
+            } catch {}
+          } else {
+            console.warn(
+              "[PaymentSuccess] No subscription found after retries. The server or webhook may still be processing."
+            );
+          }
+
+          // Continue — the Profile page will receive real-time updates via Firestore
+          // and the server-admin write will make the subscription visible there.
         }
 
         // Map plan to SMS credits and name

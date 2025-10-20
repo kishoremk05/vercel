@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { ActivityLog } from "../types";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 import { getFirebaseDb } from "../lib/firebaseClient";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -64,53 +64,55 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           return;
         }
 
-        // Load from Firebase Firestore profile/main - PRIMARY SOURCE (reliable cross-device)
+        // Subscribe to the canonical Firestore profile document so the
+        // UI updates in real-time when the server/admin writes subscription
+        // data (preferred over polling /api/subscription which can fail
+        // with a 502 if the API is temporarily unreachable).
         try {
           const db = getFirebaseDb();
           const profileRef = doc(db, "clients", companyId, "profile", "main");
-          const profileSnap = await getDoc(profileRef);
 
-          if (profileSnap.exists()) {
-            const firebaseData = profileSnap.data();
-            console.log(
-              "✅ Loaded business profile from Firebase:",
-              firebaseData
-            );
-
-            // Check if subscription data exists in profile
-            if (firebaseData.planId && firebaseData.status) {
-              // Convert Firebase data to the format expected by the UI
-              const formattedData = {
-                planId: firebaseData.planId,
-                planName: firebaseData.planName,
-                smsCredits: firebaseData.smsCredits,
-                status: firebaseData.status,
-                price: firebaseData.price,
-                startDate: firebaseData.activatedAt,
-                expiryDate: firebaseData.expiryAt,
-                remainingCredits:
-                  firebaseData.remainingCredits || firebaseData.smsCredits,
-              };
-
-              setSubscriptionData(formattedData);
+          const unsubscribe = onSnapshot(
+            profileRef,
+            (snap) => {
+              if (snap.exists()) {
+                const firebaseData = snap.data();
+                console.log(
+                  "[Profile] onSnapshot: loaded profile/main:",
+                  firebaseData
+                );
+                if (firebaseData.planId && firebaseData.status) {
+                  const formattedData = {
+                    planId: firebaseData.planId,
+                    planName: firebaseData.planName,
+                    smsCredits: firebaseData.smsCredits,
+                    status: firebaseData.status,
+                    price: firebaseData.price,
+                    startDate: firebaseData.activatedAt,
+                    expiryDate: firebaseData.expiryAt,
+                    remainingCredits:
+                      firebaseData.remainingCredits || firebaseData.smsCredits,
+                  };
+                  setSubscriptionData(formattedData);
+                } else {
+                  setSubscriptionData(null);
+                }
+              } else {
+                setSubscriptionData(null);
+              }
               setLoadingSubscription(false);
-              return;
-            } else {
-              console.log("No subscription data found in Firebase profile");
+            },
+            (err) => {
+              console.warn("[Profile] onSnapshot error:", err);
+              setLoadingSubscription(false);
             }
-          } else {
-            console.log("No Firebase subscription document found");
-          }
-        } catch (firebaseError) {
-          console.warn(
-            "Firebase fetch error, checking localStorage:",
-            firebaseError
           );
 
-          // Do not fall back to localStorage. If Firestore read failed we
-          // leave subscriptionData as null so the UI shows the canonical
-          // "no subscription" state. Rely on server/webhook to populate
-          // the Firestore document when a payment completes.
+          // Keep the listener active; clean up on unmount
+          return () => unsubscribe();
+        } catch (firebaseError) {
+          console.warn("[Profile] Firestore subscribe error:", firebaseError);
+          setLoadingSubscription(false);
         }
       } catch (error) {
         console.error("Error loading subscription data:", error);
