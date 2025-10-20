@@ -7,7 +7,7 @@ import {
   initializeFirebase,
 } from "../lib/firebaseClient";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
-import { getClientByAuthUid } from "../lib/firestoreClient";
+import { getClientByAuthUid, getClientProfile } from "../lib/firestoreClient";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -219,6 +219,38 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         0,
                     };
                     setSubscriptionData(formattedData);
+                  } else {
+                    // Document exists but contains no plan info. Try a
+                    // fallback: derive the client's own document (by auth
+                    // UID) and re-subscribe to that so the UI displays the
+                    // client-side saved subscription.
+                    (async () => {
+                      try {
+                        const auth = getFirebaseAuth();
+                        const current = await waitForAuth(auth, 3000);
+                        if (current) {
+                          const mapped = await getClientByAuthUid(
+                            current.uid
+                          ).catch(() => null);
+                          if (mapped && mapped.id && mapped.id !== cid) {
+                            console.log(
+                              "[Profile] Server profile lacks plan; resubscribing to auth-owned client:",
+                              mapped.id
+                            );
+                            try {
+                              localStorage.setItem("companyId", mapped.id);
+                            } catch {}
+                            subscribeForCompany(mapped.id);
+                            return;
+                          }
+                        }
+                      } catch (e) {
+                        console.warn(
+                          "[Profile] fallback derive companyId during empty profile:",
+                          e
+                        );
+                      }
+                    })();
                   }
                 }
                 setLoadingSubscription(false);
@@ -321,6 +353,67 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
             setLoadingSubscription(false);
           }
         };
+
+        // Before subscribing to the stored/companyId doc, try a direct
+        // read of the authenticated user's profile document. This
+        // prioritizes the client-owned doc (clients/{authUid}/profile/main)
+        // where PaymentSuccess writes the subscription for immediate UI
+        // consistency.
+        try {
+          const auth = getFirebaseAuth();
+          const me = await waitForAuth(auth, 3000);
+          if (me && me.uid) {
+            try {
+              const myProfile = await getClientProfile(me.uid).catch(
+                () => null
+              );
+              if (
+                myProfile &&
+                (myProfile.planId || myProfile.plan || myProfile.planName)
+              ) {
+                console.log(
+                  "[Profile] Found subscription in auth-owned profile, using clients/" +
+                    me.uid +
+                    "/profile/main"
+                );
+                const formattedData = {
+                  planId: myProfile.planId || myProfile.plan || null,
+                  planName:
+                    myProfile.planName ||
+                    myProfile.name ||
+                    myProfile.plan ||
+                    null,
+                  smsCredits:
+                    myProfile.smsCredits || myProfile.remainingCredits || 0,
+                  status: myProfile.status || "active",
+                  price: myProfile.price,
+                  startDate: myProfile.activatedAt || myProfile.startDate,
+                  expiryDate: myProfile.expiryAt || myProfile.endDate,
+                  remainingCredits:
+                    myProfile.remainingCredits || myProfile.smsCredits || 0,
+                };
+                setSubscriptionData(formattedData);
+                try {
+                  localStorage.setItem("companyId", me.uid);
+                } catch {}
+                // Also subscribe to the auth-owned doc for realtime updates
+                subscribeForCompany(me.uid);
+                setLoadingSubscription(false);
+                return;
+              }
+            } catch (readErr) {
+              console.warn(
+                "[Profile] Direct auth-owned profile read failed:",
+                readErr
+              );
+            }
+          }
+        } catch (e) {
+          console.warn(
+            "[Profile] Error during direct auth-owned profile check:",
+            e
+          );
+        }
 
         // Start subscriptions for the companyId we derived earlier
         subscribeForCompany(companyId);
