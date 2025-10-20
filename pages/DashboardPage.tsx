@@ -62,9 +62,325 @@ interface DashboardStats {
   };
 }
 
+const SubscriptionDebugView: React.FC = () => {
+  const [apiData, setApiData] = useState<any>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [fsProfile, setFsProfile] = useState<any>(null);
+  const [fsError, setFsError] = useState<string | null>(null);
+  const [localSub, setLocalSub] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchDebug = useCallback(async () => {
+    setLoading(true);
+    setApiData(null);
+    setApiError(null);
+    setFsProfile(null);
+    setFsError(null);
+    setLocalSub(null);
+    try {
+      const companyId =
+        localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
+
+      // API check
+      if (companyId) {
+        try {
+          const base = await getSmsServerUrl().catch(() => "");
+          const url = base
+            ? `${base}/api/subscription?companyId=${companyId}`
+            : `/api/subscription?companyId=${companyId}`;
+          const res = await fetch(url);
+          let json = null;
+          try {
+            json = await res.json();
+          } catch {}
+          setApiData({ status: res.status, ok: res.ok, body: json });
+        } catch (e) {
+          setApiError(String(e));
+        }
+      } else {
+        setApiError("No companyId found in localStorage");
+      }
+
+      // Firestore profile fallback
+      try {
+        let profile: any = null;
+        if (companyId) {
+          profile = await getClientProfile(companyId).catch(() => null);
+        }
+        if (!profile) {
+          initializeFirebase();
+          const auth = getFirebaseAuth();
+          const user = await new Promise<any>((resolve) => {
+            if (auth.currentUser) return resolve(auth.currentUser);
+            const unsub = auth.onAuthStateChanged((u: any) => {
+              if (u) {
+                try {
+                  unsub();
+                } catch {}
+                return resolve(u);
+              }
+            });
+            setTimeout(() => resolve(auth.currentUser || null), 5000);
+          });
+          if (user && user.uid) {
+            profile = await getClientProfile(user.uid).catch(() => null);
+          }
+        }
+        if (profile) setFsProfile(profile);
+        else setFsError("No profile found or permission denied");
+      } catch (e) {
+        setFsError(String(e));
+      }
+
+      // localStorage subscription
+      try {
+        const raw = localStorage.getItem("subscription");
+        if (raw) setLocalSub(JSON.parse(raw));
+        else setLocalSub(null);
+      } catch (e) {
+        setLocalSub({ error: String(e) });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDebug();
+  }, [fetchDebug]);
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4 shadow-sm text-xs">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-semibold">Subscription Debug</h4>
+        <div className="flex gap-2 items-center">
+          <button
+            onClick={fetchDebug}
+            className="text-xs px-2 py-1 border rounded bg-gray-50 hover:bg-gray-100"
+          >
+            Refresh
+          </button>
+          <button
+            onClick={() => {
+              try {
+                localStorage.removeItem("subscription");
+                setLocalSub(null);
+                alert("Cleared local subscription");
+              } catch {}
+            }}
+            className="text-xs px-2 py-1 border rounded bg-red-50 text-red-700"
+          >
+            Clear local
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <div className="text-[11px] font-medium mb-1">API</div>
+          {loading ? (
+            <div>Loading...</div>
+          ) : apiError ? (
+            <pre className="text-red-600">{apiError}</pre>
+          ) : (
+            <pre className="whitespace-pre-wrap max-h-48 overflow-auto">
+              {JSON.stringify(apiData, null, 2)}
+            </pre>
+          )}
+        </div>
+        <div>
+          <div className="text-[11px] font-medium mb-1">Firestore Profile</div>
+          {loading ? (
+            <div>Loading...</div>
+          ) : fsError ? (
+            <pre className="text-red-600">{fsError}</pre>
+          ) : (
+            <pre className="whitespace-pre-wrap max-h-48 overflow-auto">
+              {JSON.stringify(fsProfile, null, 2)}
+            </pre>
+          )}
+        </div>
+        <div>
+          <div className="text-[11px] font-medium mb-1">
+            localStorage.subscription
+          </div>
+          <pre className="whitespace-pre-wrap max-h-48 overflow-auto">
+            {JSON.stringify(localSub, null, 2)}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Inline lock component for customer list
-// SubscriptionCustomerLock removed — payment concept disabled
-const SubscriptionCustomerLock: React.FC = () => null;
+// Prefer Firestore profile data (clients/{companyId}/profile/main or
+// clients/{authUid}/profile/main) before falling back to the API and
+// finally legacy localStorage. This ensures payment data written by the
+// hosted checkout is honored immediately after redirect.
+const SubscriptionCustomerLock: React.FC = () => {
+  const [locked, setLocked] = React.useState<boolean>(true);
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    const waitForAuth = (authObj: any, timeoutMs = 5000) =>
+      new Promise<any>((resolve) => {
+        if (authObj.currentUser) return resolve(authObj.currentUser);
+        const unsub = authObj.onAuthStateChanged((user: any) => {
+          if (user) {
+            try {
+              unsub();
+            } catch {}
+            return resolve(user);
+          }
+        });
+        setTimeout(() => resolve(authObj.currentUser || null), timeoutMs);
+      });
+
+    const evalLock = async () => {
+      try {
+        const companyId =
+          localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
+        if (!companyId) {
+          if (mounted) setLocked(true);
+          return;
+        }
+
+        // 1) Firestore-first check
+        try {
+          initializeFirebase();
+          const auth = getFirebaseAuth();
+          let profile: any = null;
+          try {
+            profile = await getClientProfile(companyId).catch(() => null);
+          } catch {}
+          if (!profile) {
+            const user = await waitForAuth(auth).catch(() => null);
+            if (user && user.uid) {
+              profile = await getClientProfile(user.uid).catch(() => null);
+            }
+          }
+
+          if (profile) {
+            const hasPlan = Boolean(
+              profile.planId || profile.plan || profile.planName
+            );
+            const remainingRaw =
+              profile.remainingCredits ??
+              profile.smsCredits ??
+              profile.remaining ??
+              null;
+            const remaining =
+              remainingRaw === null ? null : Number(remainingRaw || 0);
+
+            if (hasPlan) {
+              // If remaining is unknown, treat as allowed per UX request
+              if (remaining === null || remaining > 0) {
+                if (mounted) setLocked(false);
+                return;
+              }
+              if (mounted) setLocked(true);
+              return;
+            }
+          }
+        } catch (fsErr) {
+          console.debug(
+            "[SubscriptionCustomerLock] Firestore check failed:",
+            fsErr
+          );
+        }
+
+        // 2) API check (fallback)
+        try {
+          const base = await getSmsServerUrl().catch(() => "");
+          const url = base
+            ? `${base}/api/subscription?companyId=${companyId}`
+            : `/api/subscription?companyId=${companyId}`;
+          const resp = await fetch(url);
+          const data = await resp.json().catch(() => ({}));
+          if (data && data.success && data.subscription) {
+            const s = data.subscription;
+            const status = String(s.status || "").toLowerCase();
+            const active =
+              status === "active" || status === "paid" || status === "trialing";
+            const remaining = Number(s.remainingCredits ?? s.smsCredits ?? 0);
+            const isLocked = !(active && remaining > 0);
+            if (mounted) setLocked(Boolean(isLocked));
+            return;
+          }
+        } catch (apiErr) {
+          console.debug("[SubscriptionCustomerLock] API check failed:", apiErr);
+        }
+
+        // 3) Final fallback: localStorage (legacy behavior)
+        try {
+          const raw = localStorage.getItem("subscription");
+          if (!raw) {
+            if (mounted) setLocked(true);
+            return;
+          }
+          const sub = JSON.parse(raw);
+          const active =
+            sub.status === "active" &&
+            sub.endDate &&
+            new Date(sub.endDate).getTime() > Date.now();
+          const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
+          if (mounted) setLocked(!(active && creditsOk));
+          return;
+        } catch (e2) {
+          if (mounted) setLocked(true);
+          return;
+        }
+      } catch (outer) {
+        console.warn("[SubscriptionCustomerLock] unexpected error:", outer);
+        if (mounted) setLocked(true);
+      }
+    };
+
+    evalLock();
+    const id = setInterval(evalLock, 5000);
+
+    const onSubUpdated = () => evalLock();
+    window.addEventListener("subscription:updated", onSubUpdated);
+    window.addEventListener("storage", onSubUpdated);
+
+    return () => {
+      mounted = false;
+      clearInterval(id);
+      window.removeEventListener("subscription:updated", onSubUpdated);
+      window.removeEventListener("storage", onSubUpdated);
+    };
+  }, []);
+
+  if (!locked) return null;
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/85 backdrop-blur-sm border-2 border-dashed border-indigo-300">
+      <div className="text-center px-6 py-8">
+        <h4 className="text-xl font-bold text-gray-900 mb-2">
+          Activate Your Plan
+        </h4>
+        <p className="text-gray-600 mb-4 max-w-xs">
+          Subscribe to unlock customer import and bulk SMS sending.
+        </p>
+        <button
+          onClick={() => {
+            try {
+              localStorage.setItem("pendingPlan", "growth_3m");
+            } catch {}
+            try {
+              alert(
+                "Payments are currently disabled in this build. Contact the admin to enable subscription plans."
+              );
+            } catch {}
+          }}
+          className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-500"
+        >
+          Choose a Plan
+        </button>
+      </div>
+    </div>
+  );
+};
 
 // Custom hook to fetch dashboard stats from Firebase
 const useDashboardStats = () => {
@@ -1862,6 +2178,9 @@ const CustomerTable: React.FC<CustomerTableProps> = ({
   onUploadCustomers,
   onOpenAddCustomer,
 }) => {
+  // Local toggle for showing the temporary subscription debug panel
+  const [showSubscriptionDebug, setShowSubscriptionDebug] =
+    useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -2047,7 +2366,16 @@ const CustomerTable: React.FC<CustomerTableProps> = ({
             </span>
           </h3>
           {/* Inline subscription lock overlay (reads from localStorage) */}
+          <div className="flex items-center justify-end gap-3 mb-3">
+            <button
+              onClick={() => setShowSubscriptionDebug((v) => !v)}
+              className="text-xs px-2 py-1 rounded-md border bg-gray-50 hover:bg-gray-100"
+            >
+              {showSubscriptionDebug ? "Hide" : "Show"} Subscription Debug
+            </button>
+          </div>
           <SubscriptionCustomerLock />
+          {showSubscriptionDebug && <SubscriptionDebugView />}
           <div className="flex flex-col gap-3">
             <div className="w-full flex flex-col sm:flex-row items-center gap-2">
               <div className="relative w-full sm:flex-1">
@@ -2415,6 +2743,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const [sendMessagesSelectedCount, setSendMessagesSelectedCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sendBanner, setSendBanner] = useState<string | null>(null);
+
   // Signal the SendMessagesCard to select all after an upload completes
   const [selectAllSignal, setSelectAllSignal] = useState(0);
   // If an upload just happened, wait for customers prop to update and trigger selection again

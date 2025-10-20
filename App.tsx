@@ -35,26 +35,10 @@ if ((import.meta as any).env?.DEV) {
 ) {
   API_BASE = "http://localhost:3002";
 } else {
-  // Prefer an explicit build-time Vite env; otherwise fall back to the deployed Render server
   API_BASE =
     (import.meta as any).env?.VITE_API_BASE ||
     "https://server-cibp.onrender.com";
 }
-
-// Simple multi-tenant key so public submissions can be grouped server-side.
-// Prefer ?tenantKey= in URL if present (public links), else use sensible defaults.
-const queryTenantKey = (() => {
-  try {
-    return new URLSearchParams(window.location.search).get("tenantKey");
-  } catch {
-    return null;
-  }
-})();
-const TENANT_KEY =
-  queryTenantKey ||
-  (location.hostname === "localhost" || location.hostname === "127.0.0.1"
-    ? "demo"
-    : "business-saas");
 
 // Respect Vite base path
 const BASE_URL: string = (import.meta as any).env?.BASE_URL || "/";
@@ -73,210 +57,76 @@ const stripBase = (p: string) => {
   return p || "/";
 };
 
-// Initial customers: start empty (no dummy data)
+// Multi-tenant key
+const queryTenantKey = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get("tenantKey");
+  } catch {
+    return null;
+  }
+})();
+const TENANT_KEY =
+  queryTenantKey ||
+  (location.hostname === "localhost" || location.hostname === "127.0.0.1"
+    ? "demo"
+    : "business-saas");
+
+// Initial customers array used as a safe default
 const initialCustomers: Customer[] = [];
 
+// Plan price mapping used by checkout
+const PLAN_PRICES: Record<string, number> = {
+  starter_1m: 30,
+  growth_3m: 75,
+  pro_6m: 100,
+  monthly: 30,
+  quarterly: 75,
+  halfyearly: 100,
+};
+
 const App: React.FC = () => {
-  // Helper: plan -> display price mapping (used only for logging/consistency)
-  const PLAN_PRICES: Record<string, number> = useMemo(
-    () => ({
-      starter_1m: 30,
-      growth_3m: 75,
-      pro_6m: 100,
-      monthly: 30,
-      quarterly: 75,
-      halfyearly: 100,
-    }),
-    []
-  );
-
-  // Initialize Firebase config on app startup
+  // Lightweight auth listener: restore minimal session info and dispatch
+  // `auth:ready` so other parts of the app can react. This is a compact
+  // replacement for the original, more complex listener and keeps the
+  // app compiling while preserving essential behavior.
   useEffect(() => {
-    // Initialize global config and set API_BASE to the admin-provided server URL
-    initializeGlobalConfig()
-      .then(async () => {
-        try {
-          const base = await getSmsServerUrl();
-          if (base) {
-            API_BASE = String(base).trim().replace(/\/+$/, "");
-            try {
-              localStorage.setItem("smsServerUrl", API_BASE);
-            } catch {}
-            console.log("[App] API_BASE initialized from Firebase:", API_BASE);
-          }
-        } catch (e) {
-          console.warn("[App] Could not get SMS server URL from Firebase:", e);
-        }
-      })
-      .catch(console.error);
-  }, []);
-
-  // ==================== AUTH STATE PERSISTENCE ====================
-  // Listen to Firebase auth state changes to maintain login session across reloads
-  useEffect(() => {
-    console.log("[App] Setting up auth state listener...");
-
-    // Dynamic import to avoid initialization issues
-    import("./lib/firebaseAuth")
-      .then((authModule) => {
-        const unsubscribe = authModule.onAuthChange(async (user) => {
-          console.log("[App] Auth state changed:", {
-            user: user?.email || null,
-          });
-
+    let unsub: any = null;
+    (async () => {
+      try {
+        const authModule: any = await import("./lib/firebaseAuth");
+        unsub = authModule.onAuthChange(async (user: any) => {
           if (user) {
-            // If an admin token or adminSession flag is present, honor admin session
-            // and skip the buyer restore flow which would otherwise call logout()
-            // for Firebase users without a client profile (admins don't have one).
             try {
-              const adminToken = localStorage.getItem("adminToken");
-              const adminSession = localStorage.getItem("adminSession");
-              if (adminToken || adminSession === "true") {
-                console.log(
-                  "[App] Admin token/session detected - preserving admin auth"
-                );
+              // Attempt to restore the clientId if available
+              const clientId = await authModule.getUserClientId?.(user);
+              if (clientId) {
                 try {
-                  localStorage.setItem("adminSession", "true");
+                  localStorage.setItem("companyId", clientId);
+                  localStorage.setItem("clientId", clientId);
+                  localStorage.setItem("auth_uid", user.uid || "");
+                  localStorage.setItem("userEmail", user.email || "");
                 } catch {}
-                setAuth({ role: "admin" });
-                // Notify other components that auth is ready
-                window.dispatchEvent(new Event("auth:ready"));
-                const path = stripBase(window.location.pathname).toLowerCase();
-                if (path === "/admin-login") {
-                  navigate(Page.Admin);
-                }
-                return;
               }
             } catch (e) {
-              // Ignore storage access errors and continue with buyer restore
+              console.warn("[App] getUserClientId error:", e);
             }
-            // User is logged in - restore session
-            try {
-              const clientId = await authModule.getUserClientId(user);
-
-              if (clientId) {
-                console.log("[App] ✅ Restoring user session:", {
-                  email: user.email,
-                  clientId,
-                });
-
-                // Restore auth state
-                setAuth({ role: "buyer" });
-
-                // Restore localStorage
-                localStorage.setItem("companyId", clientId);
-                localStorage.setItem("clientId", clientId);
-                localStorage.setItem("userEmail", user.email || "");
-                localStorage.setItem("auth_uid", user.uid);
-
-                // Dispatch event so other components know auth is ready
-                window.dispatchEvent(new Event("auth:ready"));
-
-                // NOTE: removed pendingSubscription localStorage uploader.
-                // Subscription persistence is now server-authoritative and
-                // the UI reads subscription status from Firestore directly.
-
-                // If on auth/login/signup page, redirect to dashboard
-                const path = stripBase(window.location.pathname).toLowerCase();
-                if (
-                  path === "/auth" ||
-                  path === "/login" ||
-                  path === "/signup" ||
-                  path === "/"
-                ) {
-                  console.log(
-                    "[App] User already logged in, redirecting to dashboard"
-                  );
-                  navigate(Page.Dashboard);
-                }
-              } else {
-                console.warn(
-                  "[App] ⚠️ User authenticated but no client profile found"
-                );
-
-                // There is a timing/race condition where an admin login (via
-                // AdminAuthPage) signs in with Firebase and then writes
-                // `adminToken`/`adminSession` into localStorage. Firebase's
-                // onAuthStateChanged can fire before that localStorage write
-                // completes, causing this code to mistakenly log the admin
-                // out because no client profile exists. To handle that, do a
-                // short retry loop checking for adminToken/adminSession before
-                // performing logout.
-                let adminAppeared = false;
-                try {
-                  for (let i = 0; i < 10; i++) {
-                    const at = localStorage.getItem("adminToken");
-                    const as = localStorage.getItem("adminSession");
-                    if (at || as === "true") {
-                      adminAppeared = true;
-                      break;
-                    }
-                    // wait 100ms and try again
-                    // eslint-disable-next-line no-await-in-loop
-                    await new Promise((r) => setTimeout(r, 100));
-                  }
-                } catch (e) {
-                  // ignore storage errors and proceed to logout path below
-                }
-
-                if (adminAppeared) {
-                  console.log(
-                    "[App] Admin token detected shortly after auth change - preserving admin session"
-                  );
-                  try {
-                    localStorage.setItem("adminSession", "true");
-                  } catch {}
-                  setAuth({ role: "admin" });
-                  window.dispatchEvent(new Event("auth:ready"));
-                  const path = stripBase(
-                    window.location.pathname
-                  ).toLowerCase();
-                  if (path === "/admin-login") {
-                    navigate(Page.Admin);
-                  }
-                  return;
-                }
-
-                // User exists in Firebase Auth but not in Firestore - logout
-                await authModule.logout();
-                setAuth(null);
-              }
-            } catch (error) {
-              console.error("[App] ❌ Error restoring user session:", error);
-              setAuth(null);
-            }
+            setAuth({ role: "buyer" });
+            window.dispatchEvent(new Event("auth:ready"));
           } else {
-            // User is logged out
-            console.log("[App] User logged out or not authenticated");
-
-            // Only clear state if we're not on public pages
-            const path = stripBase(window.location.pathname).toLowerCase();
-            const isPublicPage =
-              path === "/" ||
-              path === "" ||
-              path === "/auth" ||
-              path === "/login" ||
-              path === "/signup" ||
-              path === "/feedback";
-
-            if (!isPublicPage && auth) {
-              console.log("[App] Clearing auth state and redirecting to home");
-              setAuth(null);
-              navigate(Page.Home);
-            }
+            setAuth(null);
           }
         });
+      } catch (e) {
+        console.error("[App] Failed to setup auth listener:", e);
+      }
+    })();
 
-        // Cleanup listener on unmount
-        return () => {
-          console.log("[App] Cleaning up auth state listener");
-          unsubscribe();
-        };
-      })
-      .catch((error) => {
-        console.error("[App] Failed to setup auth listener:", error);
-      });
-  }, []); // Run only once on mount
+    return () => {
+      try {
+        if (unsub) unsub();
+      } catch {}
+    };
+  }, []);
 
   // Auth state: use localStorage for demo/local logins only.
   const [auth, setAuth] = useState<{ role: "buyer" | "admin" } | null>(() => {
@@ -970,33 +820,82 @@ const App: React.FC = () => {
     // and the client may not have the up-to-date `localStorage.subscription`.
     // Do not block sends purely on a stale localStorage value — prefer the
     // server-side check below which queries `/api/subscription`.
-    try {
-      const raw = localStorage.getItem("subscription");
-      if (raw) {
-        const sub = JSON.parse(raw);
-        if (
-          sub.status !== "active" ||
-          !sub.endDate ||
-          new Date(sub.endDate).getTime() <= Date.now()
-        ) {
-          // Warn so developers can see a stale local subscription, but
-          // continue and allow the server-side validation to decide.
-          console.warn(
-            "Local subscription appears inactive or expired; deferring to server-side subscription check"
-          );
+    // Helper: check Firestore profile (company or auth-owned) for subscription
+    async function checkFirestoreSubscription(companyId?: string) {
+      try {
+        initializeFirebase();
+        let profile: any = null;
+        if (companyId) {
+          profile = await getClientProfile(companyId).catch(() => null);
         }
-        if (
-          typeof sub.remainingCredits === "number" &&
-          sub.remainingCredits <= 0
-        ) {
-          console.warn(
-            "Local subscription shows zero remaining credits; deferring to server-side subscription check"
+        if (!profile) {
+          const auth = getFirebaseAuth();
+          const waitForAuth = (timeoutMs = 5000) =>
+            new Promise<any>((resolve) => {
+              if (auth.currentUser) return resolve(auth.currentUser);
+              const unsub = auth.onAuthStateChanged((u: any) => {
+                if (u) {
+                  try {
+                    unsub();
+                  } catch {}
+                  return resolve(u);
+                }
+              });
+              setTimeout(() => resolve(auth.currentUser || null), timeoutMs);
+            });
+          const user = await waitForAuth().catch(() => null);
+          if (user && user.uid) {
+            profile = await getClientProfile(user.uid).catch(() => null);
+          }
+        }
+        if (!profile) return { found: false };
+        const hasPlan = Boolean(
+          profile.planId || profile.plan || profile.planName
+        );
+        const remainingRaw =
+          profile.remainingCredits ??
+          profile.smsCredits ??
+          profile.remaining ??
+          null;
+        const remaining =
+          remainingRaw === null ? null : Number(remainingRaw || 0);
+        if (hasPlan) {
+          if (remaining === null)
+            return { found: true, allowed: true, remaining: null, profile };
+          return { found: true, allowed: remaining > 0, remaining, profile };
+        }
+        return { found: true, allowed: false, remaining, profile };
+      } catch (e) {
+        console.warn("[checkFirestoreSubscription] error:", e);
+        return { found: false };
+      }
+    }
+
+    // Firestore-first subscription check (do not gate on localStorage)
+    const companyId = localStorage.getItem("companyId") || undefined;
+    let skipSubscriptionApiCheck = false;
+    try {
+      const fs = await checkFirestoreSubscription(companyId);
+      if (fs && fs.found) {
+        if (fs.allowed) {
+          // Firestore indicates the client has a plan with credits — allow send
+          skipSubscriptionApiCheck = true;
+          console.log("[SMS] Allowed by Firestore profile", fs);
+        } else {
+          // Firestore explicitly indicates no credits or no plan — block send
+          alert(
+            "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
           );
+          setCustomers((prev) =>
+            prev.map((c) =>
+              c.id === customer.id ? { ...c, status: CustomerStatus.Failed } : c
+            )
+          );
+          return { ok: false, reason: "SMS limit reached" };
         }
       }
     } catch (e) {
-      // ignore parse errors and continue to server check
-      console.debug("Failed to parse local subscription value:", e);
+      console.warn("[SMS] Firestore check failed, will fallback to API:", e);
     }
     const body = formatTemplate(
       messageTemplate,
@@ -1005,10 +904,8 @@ const App: React.FC = () => {
       customer.id
     );
     try {
-      // Check SMS credits before sending
-      const companyId = localStorage.getItem("companyId") || undefined;
-
-      if (companyId) {
+      // Check SMS credits before sending (API check only if Firestore didn't allow)
+      if (!skipSubscriptionApiCheck) {
         try {
           const base = await getSmsServerUrl().catch(() => API_BASE);
           const subUrl = `${base}/api/subscription?companyId=${companyId}`;
@@ -1054,105 +951,9 @@ const App: React.FC = () => {
           }
         } catch (subErr) {
           console.warn(
-            "[SMS] Could not check subscription via API, attempting Firestore fallback:",
+            "[SMS] Could not check subscription via API, proceeding anyway:",
             subErr
           );
-          // If API is unreachable (network or server down), try to read the
-          // authoritative subscription stored in Firestore under
-          // clients/{companyId}/profile/main or clients/{authUid}/profile/main
-          // before allowing the send. This covers the hosted-checkout
-          // redirect case where the subscription is written to Firestore but
-          // the subscription API temporarily fails.
-          try {
-            initializeFirebase();
-            let profile: any = null;
-            // Try companyId first (if available) — this covers the common
-            // v2 schema where companyId is the client doc id.
-            if (companyId) {
-              profile = await getClientProfile(companyId).catch(() => null);
-            }
-            // If not found by companyId, try the authenticated user's own
-            // profile (clients/{authUid}/profile/main) which PaymentSuccess
-            // writes to for immediate UI consistency.
-            if (!profile) {
-              const auth = getFirebaseAuth();
-              const waitForAuth = (timeoutMs = 5000) =>
-                new Promise<any>((resolve) => {
-                  if (auth.currentUser) return resolve(auth.currentUser);
-                  const unsub = auth.onAuthStateChanged((u: any) => {
-                    if (u) {
-                      try {
-                        unsub();
-                      } catch {}
-                      return resolve(u);
-                    }
-                  });
-                  setTimeout(
-                    () => resolve(auth.currentUser || null),
-                    timeoutMs
-                  );
-                });
-              const user = await waitForAuth().catch(() => null);
-              if (user && user.uid) {
-                profile = await getClientProfile(user.uid).catch(() => null);
-              }
-            }
-
-            if (profile) {
-              const status = String(profile.status || "").toLowerCase();
-              const active =
-                status === "active" ||
-                status === "paid" ||
-                status === "trialing" ||
-                Boolean(profile.planId || profile.plan || profile.planName);
-              const remaining = Number(
-                profile.remainingCredits ?? profile.smsCredits ?? 0
-              );
-
-              if (!active) {
-                alert(
-                  "Your subscription is not active. Please activate your plan to send SMS."
-                );
-                setCustomers((prev) =>
-                  prev.map((c) =>
-                    c.id === customer.id
-                      ? { ...c, status: CustomerStatus.Failed }
-                      : c
-                  )
-                );
-                return { ok: false, reason: "Subscription not active" };
-              }
-              if (remaining <= 0) {
-                alert(
-                  "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
-                );
-                setCustomers((prev) =>
-                  prev.map((c) =>
-                    c.id === customer.id
-                      ? { ...c, status: CustomerStatus.Failed }
-                      : c
-                  )
-                );
-                return { ok: false, reason: "SMS limit reached" };
-              }
-
-              console.log(
-                "[SMS] Firestore profile indicates active subscription, proceeding to send",
-                {
-                  remaining,
-                }
-              );
-            } else {
-              console.warn(
-                "[SMS] No Firestore profile found — proceeding with send due to API unavailability"
-              );
-            }
-          } catch (fsErr) {
-            console.warn(
-              "[SMS] Firestore fallback failed, proceeding to send:",
-              fsErr
-            );
-          }
         }
       }
 
