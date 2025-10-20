@@ -399,31 +399,88 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
 
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const SubscriptionCustomerLock: React.FC = () => {
-    const [locked, setLocked] = React.useState(false);
+    const [locked, setLocked] = React.useState<boolean>(true);
+
     React.useEffect(() => {
-      const evalLock = () => {
+      let mounted = true;
+
+      const evalLock = async () => {
         try {
-          const raw = localStorage.getItem("subscription");
-          if (!raw) return setLocked(true);
-          const sub = JSON.parse(raw);
-          const active =
-            sub.status === "active" &&
-            sub.endDate &&
-            new Date(sub.endDate).getTime() > Date.now();
-          const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
-          setLocked(!(active && creditsOk));
-        } catch {
-          setLocked(true);
+          const companyId =
+            localStorage.getItem("companyId") ||
+            localStorage.getItem("auth_uid");
+          if (!companyId) {
+            if (mounted) setLocked(true);
+            return;
+          }
+
+          // Prefer server-side subscription (Firestore via API)
+          try {
+            const base = await getSmsServerUrl().catch(() => "");
+            const url = base
+              ? `${base}/api/subscription?companyId=${companyId}`
+              : `/api/subscription?companyId=${companyId}`;
+            const resp = await fetch(url);
+            const data = await resp.json().catch(() => ({}));
+            if (data && data.success && data.subscription) {
+              const s = data.subscription;
+              const status = String(s.status || "").toLowerCase();
+              const active =
+                status === "active" ||
+                status === "paid" ||
+                status === "trialing";
+              const remaining = Number(s.remainingCredits ?? s.smsCredits ?? 0);
+              const isLocked = !(active && remaining > 0);
+              if (mounted) setLocked(Boolean(isLocked));
+              return;
+            }
+          } catch (e) {
+            // swallow and fall back to localStorage below
+            console.debug("[SubscriptionCustomerLock] API check failed:", e);
+          }
+
+          // Fallback: localStorage (legacy behavior)
+          try {
+            const raw = localStorage.getItem("subscription");
+            if (!raw) {
+              if (mounted) setLocked(true);
+              return;
+            }
+            const sub = JSON.parse(raw);
+            const active =
+              sub.status === "active" &&
+              sub.endDate &&
+              new Date(sub.endDate).getTime() > Date.now();
+            const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
+            if (mounted) setLocked(!(active && creditsOk));
+            return;
+          } catch (e) {
+            if (mounted) setLocked(true);
+            return;
+          }
+        } catch (outer) {
+          console.warn("[SubscriptionCustomerLock] unexpected error:", outer);
+          if (mounted) setLocked(true);
         }
       };
+
+      // initial check
       evalLock();
       const id = setInterval(evalLock, 5000);
-      window.addEventListener("storage", evalLock);
+
+      // Refresh when subscription updates are dispatched or storage changes
+      const onSubUpdated = () => evalLock();
+      window.addEventListener("subscription:updated", onSubUpdated);
+      window.addEventListener("storage", onSubUpdated);
+
       return () => {
+        mounted = false;
         clearInterval(id);
-        window.removeEventListener("storage", evalLock);
+        window.removeEventListener("subscription:updated", onSubUpdated);
+        window.removeEventListener("storage", onSubUpdated);
       };
     }, []);
+
     if (!locked) return null;
     return (
       <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/85 backdrop-blur-sm border-2 border-dashed border-indigo-300">

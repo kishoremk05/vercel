@@ -964,6 +964,10 @@ const App: React.FC = () => {
       return { ok: false, reason: "Missing phone" };
     }
     // Local subscription credit guard (UI) - server still authoritative
+    // NOTE: some flows write the subscription to Firestore (ProfilePage)
+    // and the client may not have the up-to-date `localStorage.subscription`.
+    // Do not block sends purely on a stale localStorage value — prefer the
+    // server-side check below which queries `/api/subscription`.
     try {
       const raw = localStorage.getItem("subscription");
       if (raw) {
@@ -973,18 +977,25 @@ const App: React.FC = () => {
           !sub.endDate ||
           new Date(sub.endDate).getTime() <= Date.now()
         ) {
-          logActivity("Blocked: subscription inactive", customer.name);
-          return { ok: false, reason: "inactive-subscription" };
+          // Warn so developers can see a stale local subscription, but
+          // continue and allow the server-side validation to decide.
+          console.warn(
+            "Local subscription appears inactive or expired; deferring to server-side subscription check"
+          );
         }
         if (
           typeof sub.remainingCredits === "number" &&
           sub.remainingCredits <= 0
         ) {
-          logActivity("Blocked: credits exhausted", customer.name);
-          return { ok: false, reason: "no-credits" };
+          console.warn(
+            "Local subscription shows zero remaining credits; deferring to server-side subscription check"
+          );
         }
       }
-    } catch {}
+    } catch (e) {
+      // ignore parse errors and continue to server check
+      console.debug("Failed to parse local subscription value:", e);
+    }
     const body = formatTemplate(
       messageTemplate,
       customer.name,
