@@ -7,7 +7,11 @@ import {
   initializeFirebase,
 } from "../lib/firebaseClient";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
-import { getClientByAuthUid, getClientProfile } from "../lib/firestoreClient";
+import {
+  getClientByAuthUid,
+  getClientProfile,
+  getClientBillingSubscription,
+} from "../lib/firestoreClient";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -160,7 +164,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
         // the provided companyId. If we receive a permission error we
         // attempt to fall back to the authenticated user's client id.
         const db = getFirebaseDb();
-        const subscribeForCompany = (cid: string) => {
+        const subscribeForCompany = async (cid: string) => {
           try {
             const profileRef = doc(db, "clients", cid, "profile", "main");
             const billingRef = doc(
@@ -305,70 +309,113 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
               }
             );
 
-            unsubBilling = onSnapshot(
-              billingRef,
-              (snap) => {
-                if (snap.exists()) {
-                  const b = snap.data();
-                  console.log("[Profile] billing/subscription changed:", b);
-                  const formattedData = {
-                    planId: b.planId || null,
-                    planName: b.planName || null,
-                    smsCredits: b.smsCredits || b.remainingCredits || 0,
-                    status: b.status || "active",
-                    price: b.price,
-                    startDate: b.startDate,
-                    expiryDate: b.endDate,
-                    remainingCredits: b.remainingCredits || b.smsCredits || 0,
-                  };
-                  setSubscriptionData(formattedData);
+            // Attempt an initial read of the billing doc first. If the
+            // initial read fails due to permission-denied we will not
+            // subscribe to the billing onSnapshot so we avoid spamming
+            // the console with repeated permission errors for protected
+            // billing documents. The Profile/main doc remains the
+            // primary source for client-visible subscription info.
+            try {
+              const initialBilling = await getClientBillingSubscription(
+                cid
+              ).catch(() => null);
+              if (initialBilling) {
+                // Set subscription data immediately from billing and
+                // subscribe for realtime updates
+                const formattedData = {
+                  planId: initialBilling.planId || null,
+                  planName: initialBilling.planName || null,
+                  smsCredits:
+                    initialBilling.smsCredits ||
+                    initialBilling.remainingCredits ||
+                    0,
+                  status: initialBilling.status || "active",
+                  price: initialBilling.price,
+                  startDate: initialBilling.startDate,
+                  expiryDate: initialBilling.endDate,
+                  remainingCredits:
+                    initialBilling.remainingCredits ||
+                    initialBilling.smsCredits ||
+                    0,
+                };
+                setSubscriptionData(formattedData);
+                try {
                   try {
-                    try {
-                      localStorage.setItem(
-                        "profile_subscription_present",
-                        JSON.stringify({ companyId: cid, ts: Date.now() })
-                      );
-                    } catch {}
-                    window.dispatchEvent(new Event("subscription:updated"));
-                  } catch {}
-                }
-                setLoadingSubscription(false);
-              },
-              async (err) => {
-                console.warn("[Profile] billing onSnapshot error:", err);
-                if (
-                  err &&
-                  (err.code === "permission-denied" ||
-                    (err.message &&
-                      err.message.includes(
-                        "Missing or insufficient permissions"
-                      )))
-                ) {
-                  try {
-                    const auth = getFirebaseAuth();
-                    const current = await waitForAuth(auth, 10000);
-                    if (current) {
-                      const mapped = await getClientByAuthUid(
-                        current.uid
-                      ).catch(() => null);
-                      if (mapped && mapped.id && mapped.id !== cid) {
-                        try {
-                          localStorage.setItem("companyId", mapped.id);
-                        } catch {}
-                        subscribeForCompany(mapped.id);
-                        return;
-                      }
-                    }
-                  } catch (fallbackErr) {
-                    console.warn(
-                      "[Profile] Fallback derive companyId failed:",
-                      fallbackErr
+                    localStorage.setItem(
+                      "profile_subscription_present",
+                      JSON.stringify({ companyId: cid, ts: Date.now() })
                     );
+                  } catch {}
+                  window.dispatchEvent(new Event("subscription:updated"));
+                } catch {}
+
+                unsubBilling = onSnapshot(
+                  billingRef,
+                  (snap) => {
+                    if (snap.exists()) {
+                      const b = snap.data();
+                      console.log("[Profile] billing/subscription changed:", b);
+                      const formatted = {
+                        planId: b.planId || null,
+                        planName: b.planName || null,
+                        smsCredits: b.smsCredits || b.remainingCredits || 0,
+                        status: b.status || "active",
+                        price: b.price,
+                        startDate: b.startDate,
+                        expiryDate: b.endDate,
+                        remainingCredits:
+                          b.remainingCredits || b.smsCredits || 0,
+                      };
+                      setSubscriptionData(formatted);
+                      try {
+                        try {
+                          localStorage.setItem(
+                            "profile_subscription_present",
+                            JSON.stringify({ companyId: cid, ts: Date.now() })
+                          );
+                        } catch {}
+                        window.dispatchEvent(new Event("subscription:updated"));
+                      } catch {}
+                    }
+                    setLoadingSubscription(false);
+                  },
+                  (err) => {
+                    // If permission denied, treat as benign (billing
+                    // is intentionally restricted) and do not resubscribe
+                    // — log at debug level to reduce noise.
+                    if (
+                      err &&
+                      (err.code === "permission-denied" ||
+                        (err.message &&
+                          err.message.includes(
+                            "Missing or insufficient permissions"
+                          )))
+                    ) {
+                      console.debug(
+                        "[Profile] billing subscription permission denied, skipping realtime listen"
+                      );
+                    } else {
+                      console.warn("[Profile] billing onSnapshot error:", err);
+                    }
+                    setLoadingSubscription(false);
                   }
-                }
+                );
+              } else {
+                // No billing doc accessible — skip realtime billing subscription
+                console.debug(
+                  "[Profile] billing doc not accessible for company",
+                  cid
+                );
                 setLoadingSubscription(false);
               }
-            );
+            } catch (billingErr) {
+              // If any unexpected error occurs, fallback gracefully.
+              console.debug(
+                "[Profile] billing read/subscribe failed (ignored):",
+                billingErr
+              );
+              setLoadingSubscription(false);
+            }
           } catch (firebaseError) {
             console.warn("[Profile] Firestore subscribe error:", firebaseError);
             setLoadingSubscription(false);
