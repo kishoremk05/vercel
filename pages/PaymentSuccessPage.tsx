@@ -53,7 +53,7 @@ const PaymentSuccessPage: React.FC = () => {
           });
 
         await waitForAuth(auth, 10000); // wait up to 10s
-        let currentUser = auth.currentUser;
+        const currentUser = auth.currentUser;
         console.log("[PaymentSuccess] Auth state:", {
           authenticated: !!currentUser,
           uid: currentUser?.uid,
@@ -66,37 +66,14 @@ const PaymentSuccessPage: React.FC = () => {
         }
 
         const urlParams = new URLSearchParams(window.location.search);
-        const planId =
-          urlParams.get("plan") || localStorage.getItem("pendingPlan");
-        let companyId = localStorage.getItem("companyId");
-
-        // Helper: derive companyId by querying clients where auth_uid == uid
-        const deriveCompanyIdFromAuth = async (uid: string) => {
-          try {
-            const db = getFirebaseDb();
-            const q = query(
-              collection(db, "clients"),
-              where("auth_uid", "==", uid)
-            );
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-              return snap.docs[0].id;
-            }
-          } catch (e) {
-            console.warn("[PaymentSuccess] deriveCompanyIdFromAuth failed:", e);
-          }
-          return null;
-        };
+        const planId = urlParams.get("plan") || undefined;
 
         console.log("[PaymentSuccess] Starting subscription save:", {
           planId,
-          companyId,
         });
 
-        if (!planId || !companyId) {
-          console.error(
-            "❌ Missing plan or companyId, skipping subscription save"
-          );
+        if (!planId) {
+          console.error("❌ Missing planId, skipping subscription save");
           return;
         }
 
@@ -123,279 +100,45 @@ const PaymentSuccessPage: React.FC = () => {
 
         // Save subscription to server; server should persist to Firestore
         // (admin write) so other browsers/devices can read it without client
-        // authentication. We'll attempt to POST only when companyId is known.
+        // authentication. We'll POST the subscription with the caller's
+        // Firebase ID token so the server can verify and map the user ->
+        // companyId securely.
         const base = await getSmsServerUrl().catch(() => "");
         if (!base) console.warn("[PaymentSuccess] No API base available");
-        const userEmail =
-          localStorage.getItem("userEmail") || auth?.currentUser?.email || null;
 
-        // If companyId is missing, attempt to derive it from authenticated user
-        if (!companyId && auth && auth.currentUser) {
-          const derived = await deriveCompanyIdFromAuth(auth.currentUser.uid);
-          if (derived) {
-            companyId = derived;
-            try {
-              localStorage.setItem("companyId", companyId);
-            } catch {}
-            console.log("[PaymentSuccess] Derived companyId from auth:", companyId);
-          }
-        }
-
-        const savePendingToLocal = () => {
-          const pending = {
-            planId,
-            planName: plan.name,
-            smsCredits: plan.sms,
-            durationMonths: plan.months,
-            status: "active",
-            userEmail,
-            createdAt: Date.now(),
-          };
-          try {
-            localStorage.setItem("pendingSubscription", JSON.stringify(pending));
-            console.log("[PaymentSuccess] Saved pendingSubscription to localStorage");
-          } catch (err) {
-            console.warn("[PaymentSuccess] Failed to save pendingSubscription:", err);
-          }
-        };
-
-        // If there is no companyId, save pending subscription and skip POST to avoid 400
-        if (!companyId) {
-          console.warn("[PaymentSuccess] No companyId available - saving pending subscription locally");
-          savePendingToLocal();
+        // Require authenticated user for server write
+        if (!currentUser) {
+          console.error(
+            "❌ Cannot save subscription: user not authenticated after redirect. Please log in and try again."
+          );
         } else {
           try {
+            const idToken = await currentUser.getIdToken();
             const response = await fetch(`${base}/api/subscription`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${idToken}`,
+              },
               body: JSON.stringify({
-                companyId,
                 planId,
                 smsCredits: plan.sms,
                 durationMonths: plan.months,
                 status: "active",
-                userEmail,
               }),
             });
 
             const data = await response.json().catch(() => ({}));
             if (data && data.success) {
               console.log("✅ Subscription saved on server (billing)");
-
-              // Attempt to GET the server subscription and persist a local snapshot
-              try {
-                const getResp = await fetch(
-                  `${base}/api/subscription?companyId=${encodeURIComponent(companyId)}`
-                );
-                const getJson = await getResp.json().catch(() => ({}));
-                if (getJson && getJson.success && getJson.subscription) {
-                  const s = getJson.subscription;
-                  console.log("[PaymentSuccess] Server subscription:", s);
-                  const snap = {
-                    planId: s.planId || planId,
-                    planName: s.planName || plan.name,
-                    smsCredits: Number(s.smsCredits || s.remainingCredits || plan.sms),
-                    remainingCredits: Number(s.remainingCredits || s.smsCredits || plan.sms),
-                    status: s.status || "active",
-                    activatedAt: s.startDate
-                      ? new Date(s.startDate).getTime()
-                      : s.activatedAt && s.activatedAt._seconds
-                      ? s.activatedAt._seconds * 1000
-                      : Date.now(),
-                    expiryAt: s.endDate
-                      ? new Date(s.endDate).getTime()
-                      : s.expiryAt && s.expiryAt._seconds
-                      ? s.expiryAt._seconds * 1000
-                      : Date.now() + plan.months * 30 * 24 * 60 * 60 * 1000,
-                  };
-                  localStorage.setItem("subscriptionSnapshot", JSON.stringify(snap));
-                  localStorage.setItem("hasPaid", "true");
-                  localStorage.removeItem("pendingPlan");
-                  console.log("✅ Local snapshot saved from server response");
-                } else {
-                  console.warn("[PaymentSuccess] No subscription returned from server GET");
-                }
-              } catch (getErr) {
-                console.warn("[PaymentSuccess] Failed to GET subscription from server:", getErr);
-              }
             } else {
-              console.error("Failed to save subscription on server:", data.error || data);
+              console.error(
+                "Failed to save subscription on server:",
+                data.error || data
+              );
             }
           } catch (e) {
             console.error("Error posting subscription to server:", e);
-            // If POST fails, keep pending for later retry
-            savePendingToLocal();
-          }
-        }
-
-        // Save subscription to Firebase Firestore for cross-device persistence
-        // (Client-side write). Only attempt if the user is authenticated in
-        // this browser; otherwise rely on the server-admin write done earlier.
-        console.log("[PaymentSuccess] Client-side Firebase save attempt...", {
-          companyId,
-          planId,
-        });
-        try {
-          const db = getFirebaseDb();
-          const auth = getFirebaseAuth();
-          const currentUser = auth.currentUser;
-          if (!currentUser) {
-            console.warn(
-              "[PaymentSuccess] Skipping client-side Firestore write, user not authenticated in this browser"
-            );
-          } else {
-            // First, ensure the client document has auth_uid set
-            const clientRef = doc(db, "clients", companyId);
-            try {
-              const clientDoc = await getDoc(clientRef);
-              if (clientDoc.exists()) {
-                const clientData = clientDoc.data();
-                console.log(
-                  "[PaymentSuccess] Client document exists:",
-                  clientData
-                );
-
-                // Update auth_uid if missing or different
-                if (
-                  !clientData.auth_uid ||
-                  clientData.auth_uid !== currentUser.uid
-                ) {
-                  console.log(
-                    "[PaymentSuccess] Updating client auth_uid:",
-                    currentUser.uid
-                  );
-                  await updateDoc(clientRef, { auth_uid: currentUser.uid });
-                  console.log("✅ Client auth_uid updated");
-                }
-              } else {
-                console.log(
-                  "[PaymentSuccess] Client document doesn't exist, creating it"
-                );
-                await setDoc(clientRef, {
-                  auth_uid: currentUser.uid,
-                  email: currentUser.email,
-                  createdAt: Timestamp.now(),
-                });
-                console.log("✅ Client document created");
-              }
-            } catch (clientError: any) {
-              console.error(
-                "❌ Failed to update client document:",
-                clientError
-              );
-              // Continue anyway - maybe permissions allow subscription write
-            }
-
-            const activatedAt = Date.now();
-            // Calculate expiry date based on plan duration
-            const expiryAt =
-              activatedAt + plan.months * 30 * 24 * 60 * 60 * 1000;
-
-            const subscriptionData = {
-              planId,
-              planName: plan.name,
-              smsCredits: plan.sms,
-              remainingCredits: plan.sms,
-              status: "active",
-              activatedAt: Timestamp.fromMillis(activatedAt),
-              expiryAt: Timestamp.fromMillis(expiryAt),
-              price:
-                plan.name === "Starter"
-                  ? 30
-                  : plan.name === "Growth"
-                  ? 75
-                  : 100,
-              savedAt: Timestamp.now(),
-              userId: currentUser.uid,
-              userEmail: currentUser.email,
-            };
-
-            // Save to Firebase under clients/{companyId}/profile/main (NEW PATH)
-            const profileRef = doc(db, "clients", companyId, "profile", "main");
-
-            console.log(
-              "[PaymentSuccess] Saving to path:",
-              `clients/${companyId}/profile/main`
-            );
-            console.log("[PaymentSuccess] Data to save:", subscriptionData);
-            console.log("[PaymentSuccess] Current user:", {
-              uid: currentUser.uid,
-              email: currentUser.email,
-            });
-
-            try {
-              // Use setDoc with merge so the document is created if it doesn't exist
-              await setDoc(profileRef, subscriptionData, { merge: true });
-              console.log(
-                "✅✅✅ Subscription saved to Firebase profile/main successfully!"
-              );
-            } catch (writeError: any) {
-              console.error(
-                "[PaymentSuccess] Failed to write subscription to Firestore:",
-                writeError
-              );
-              if (writeError?.code === "permission-denied") {
-                console.error(
-                  "[PaymentSuccess] Firestore permission-denied: check security rules and ensure the authenticated user is authorized to write to clients/{companyId}/profile/main"
-                );
-              }
-              throw writeError;
-            }
-
-            // Also keep local snapshot for immediate fallback
-            const snapshot = {
-              planId,
-              planName: plan.name,
-              smsCredits: plan.sms,
-              remainingCredits: plan.sms,
-              status: "active",
-              activatedAt,
-              expiryAt,
-            };
-            localStorage.setItem(
-              "subscriptionSnapshot",
-              JSON.stringify(snapshot)
-            );
-            localStorage.setItem("hasPaid", "true");
-            localStorage.removeItem("pendingPlan");
-            console.log("✅ localStorage snapshot saved");
-          }
-        } catch (e: any) {
-          console.error(
-            "❌❌❌ CRITICAL: Failed to save subscription to Firebase:",
-            e
-          );
-          console.error("Error details:", {
-            message: e.message,
-            code: e.code,
-            stack: e.stack,
-          });
-
-          // Still save to localStorage as fallback
-          try {
-            const activatedAt = Date.now();
-            const expiryAt =
-              activatedAt + plan.months * 30 * 24 * 60 * 60 * 1000;
-            const snapshot = {
-              planId,
-              planName: plan.name,
-              smsCredits: plan.sms,
-              remainingCredits: plan.sms,
-              status: "active",
-              activatedAt,
-              expiryAt,
-            };
-            localStorage.setItem(
-              "subscriptionSnapshot",
-              JSON.stringify(snapshot)
-            );
-            localStorage.setItem("hasPaid", "true");
-            localStorage.removeItem("pendingPlan");
-            console.log(
-              "✅ Fallback: localStorage snapshot saved despite Firebase error"
-            );
-          } catch (localError) {
-            console.error("❌ Even localStorage save failed:", localError);
           }
         }
       } catch (error) {

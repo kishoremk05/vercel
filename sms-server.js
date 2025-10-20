@@ -1053,15 +1053,27 @@ app.get("/api/subscription", async (req, res) => {
       .collection("billing")
       .doc("subscription");
     let snap = await billingRef.get();
+
+    // If there is no billing doc, prefer the profile/main document which
+    // we now populate on successful subscription saves. Fall back to the
+    // legacy profile/subscription document afterward for older records.
     if (!snap.exists) {
-      const legacyRef = firestore
+      const profileMainRef = firestore
         .collection("clients")
         .doc(String(companyId))
         .collection("profile")
-        .doc("subscription");
-      snap = await legacyRef.get();
+        .doc("main");
+      snap = await profileMainRef.get();
       if (!snap.exists) {
-        return res.json({ success: true, subscription: null, empty: true });
+        const legacyRef = firestore
+          .collection("clients")
+          .doc(String(companyId))
+          .collection("profile")
+          .doc("subscription");
+        snap = await legacyRef.get();
+        if (!snap.exists) {
+          return res.json({ success: true, subscription: null, empty: true });
+        }
       }
     }
     return res.json({ success: true, subscription: snap.data() });
@@ -1090,6 +1102,83 @@ app.post("/api/subscription", async (req, res) => {
       req.headers["x-client-id"] ||
       req.query.companyId ||
       null;
+
+    // If caller provided an Authorization: Bearer <Firebase ID token>, verify
+    // it and derive the uid -> company mapping server-side. This enables the
+    // frontend to POST a subscription without relying on client-side
+    // localStorage-provided companyId.
+    try {
+      const authz =
+        req.headers.authorization || req.headers.Authorization || "";
+      if (
+        !companyId &&
+        authz &&
+        String(authz).startsWith("Bearer ") &&
+        firebaseAdmin
+      ) {
+        const idToken = String(authz).slice(7).trim();
+        if (idToken) {
+          try {
+            const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+            const uid = decoded?.uid || decoded?.sub;
+            if (uid) {
+              // Prefer new DB mapping (dbV2.getUserById) when available
+              try {
+                if (dbV2 && typeof dbV2.getUserById === "function") {
+                  const userRec = await dbV2.getUserById(uid);
+                  if (userRec && userRec.companyId) {
+                    companyId = userRec.companyId;
+                    console.log(
+                      `[api:subscription] Derived companyId ${companyId} from idToken (uid=${uid})`
+                    );
+                  }
+                }
+              } catch (e) {
+                console.warn(
+                  "[api:subscription] dbV2.getUserById failed:",
+                  e?.message || e
+                );
+              }
+
+              // Fallback: search legacy clients collection by auth_uid
+              if (!companyId) {
+                try {
+                  const clientsRef = firebaseAdmin
+                    .firestore()
+                    .collection("clients");
+                  const q = clientsRef
+                    .where("auth_uid", "==", String(uid))
+                    .limit(1);
+                  const searchSnap = await q.get();
+                  if (!searchSnap.empty) {
+                    companyId = searchSnap.docs[0].id;
+                    console.log(
+                      `[api:subscription] Derived companyId ${companyId} from auth uid ${uid}`
+                    );
+                  }
+                } catch (e) {
+                  console.warn(
+                    "[api:subscription] Failed to derive companyId from auth uid:",
+                    e?.message || e
+                  );
+                }
+              }
+            }
+          } catch (tokErr) {
+            // Token verification failed - log and continue to other fallbacks
+            console.warn(
+              "[api:subscription] ID token verify failed:",
+              tokErr?.message || tokErr
+            );
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[api:subscription] Error while attempting to derive companyId from Authorization header:",
+        e?.message || e
+      );
+    }
 
     // If companyId is missing but client provided an email, try to find the
     // corresponding client document by email (admin-side lookup). This helps

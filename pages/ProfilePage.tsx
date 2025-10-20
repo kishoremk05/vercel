@@ -96,22 +96,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
               setLoadingSubscription(false);
               return;
             } else {
-              console.log(
-                "No subscription data found in Firebase profile, checking localStorage"
-              );
+              console.log("No subscription data found in Firebase profile");
             }
           } else {
-            console.log(
-              "No Firebase subscription document found, checking localStorage"
-            );
-          }
-
-          // Fallback to localStorage snapshot
-          const snap = localStorage.getItem("subscriptionSnapshot");
-          if (snap) {
-            const parsed = JSON.parse(snap);
-            console.log("✅ Using localStorage snapshot:", parsed);
-            setSubscriptionData(parsed);
+            console.log("No Firebase subscription document found");
           }
         } catch (firebaseError) {
           console.warn(
@@ -119,20 +107,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
             firebaseError
           );
 
-          // Fallback to localStorage snapshot
-          try {
-            const snap = localStorage.getItem("subscriptionSnapshot");
-            if (snap) {
-              const parsed = JSON.parse(snap);
-              console.log(
-                "✅ Using localStorage snapshot as fallback:",
-                parsed
-              );
-              setSubscriptionData(parsed);
-            }
-          } catch (e) {
-            console.warn("Failed to read subscription snapshot", e);
-          }
+          // Do not fall back to localStorage. If Firestore read failed we
+          // leave subscriptionData as null so the UI shows the canonical
+          // "no subscription" state. Rely on server/webhook to populate
+          // the Firestore document when a payment completes.
         }
       } catch (error) {
         console.error("Error loading subscription data:", error);
@@ -417,21 +395,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                 </div>
                 <span className="text-xs text-indigo-700 font-semibold bg-indigo-100 border border-indigo-200 px-4 py-1 rounded-full mb-2">
                   Subscription:{" "}
-                  {(() => {
-                    try {
-                      // Prefer server subscriptionData -> local snapshot -> user prop
-                      if (subscriptionData?.planName)
-                        return subscriptionData.planName;
-                      const snap = localStorage.getItem("subscriptionSnapshot");
-                      if (snap) {
-                        const parsed = JSON.parse(snap);
-                        if (parsed?.planName) return parsed.planName;
-                      }
-                    } catch (e) {
-                      /* ignore */
-                    }
-                    return user.subscription || "Free";
-                  })()}
+                  {subscriptionData?.planName || user.subscription || "Free"}
                 </span>
               </div>
               <div className="w-full border-t border-gray-200 my-6"></div>
@@ -525,24 +489,8 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         </span>
                       </div>
                       <p className="text-lg font-bold text-gray-900">
-                        {/* Show payment date from localStorage if available */}
                         {(() => {
-                          let snapshot;
-                          try {
-                            snapshot = JSON.parse(
-                              localStorage.getItem("subscriptionSnapshot")
-                            );
-                          } catch {}
-                          if (snapshot?.activatedAt) {
-                            return new Date(
-                              snapshot.activatedAt
-                            ).toLocaleDateString("en-US", {
-                              year: "numeric",
-                              month: "long",
-                              day: "numeric",
-                            });
-                          }
-                          if (subscriptionData.startDate?.toDate) {
+                          if (subscriptionData?.startDate?.toDate) {
                             return new Date(
                               subscriptionData.startDate.toDate()
                             ).toLocaleDateString("en-US", {
@@ -551,7 +499,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                               day: "numeric",
                             });
                           }
-                          if (subscriptionData.startDate) {
+                          if (subscriptionData?.startDate?._seconds) {
                             return new Date(
                               subscriptionData.startDate._seconds * 1000
                             ).toLocaleDateString("en-US", {
@@ -585,24 +533,8 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         </span>
                       </div>
                       <p className="text-lg font-bold text-gray-900">
-                        {/* Show expiry date from localStorage if available */}
                         {(() => {
-                          let snapshot;
-                          try {
-                            snapshot = JSON.parse(
-                              localStorage.getItem("subscriptionSnapshot")
-                            );
-                          } catch {}
-                          if (snapshot?.expiryAt) {
-                            return new Date(
-                              snapshot.expiryAt
-                            ).toLocaleDateString("en-US", {
-                              year: "numeric",
-                              month: "long",
-                              day: "numeric",
-                            });
-                          }
-                          if (subscriptionData.expiryDate?.toDate) {
+                          if (subscriptionData?.expiryDate?.toDate) {
                             return new Date(
                               subscriptionData.expiryDate.toDate()
                             ).toLocaleDateString("en-US", {
@@ -611,7 +543,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                               day: "numeric",
                             });
                           }
-                          if (subscriptionData.expiryDate) {
+                          if (subscriptionData?.expiryDate?._seconds) {
                             return new Date(
                               subscriptionData.expiryDate._seconds * 1000
                             ).toLocaleDateString("en-US", {
@@ -624,54 +556,14 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         })()}
                       </p>
                     </div>
-
-                    {/* SMS Usage */}
-                    <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-4 rounded-lg border border-blue-200 md:col-span-2">
-                      <div className="flex items-center gap-2 mb-3">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          className="w-5 h-5 text-blue-600"
-                        >
-                          <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" />
-                          <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" />
-                        </svg>
-                        <span className="text-sm font-semibold text-gray-700">
-                          SMS Credits
-                        </span>
-                      </div>
-                      <SmsCreditsDisplay subscriptionData={subscriptionData} />
-                    </div>
                   </div>
                 ) : (
-                  (() => {
-                    // Check if payment has been made
-                    const hasPaid = localStorage.getItem("hasPaid") === "true";
-                    if (hasPaid) {
-                      return (
-                        <div className="text-center py-8 text-gray-600">
-                          <p className="text-lg">
-                            Your payment was successful.
-                          </p>
-                          <p className="text-sm mt-2">
-                            Subscription is active. If you do not see your plan,
-                            please refresh or contact support.
-                          </p>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="text-center py-8 text-gray-600">
-                        <p className="text-lg">
-                          No subscription data available
-                        </p>
-                        <p className="text-sm mt-2">
-                          Please purchase a plan to get started
-                        </p>
-                      </div>
-                    );
-                  })()
+                  <div className="text-center py-8 text-gray-600">
+                    <p className="text-lg">No subscription data available</p>
+                    <p className="text-sm mt-2">
+                      Please purchase a plan to get started
+                    </p>
+                  </div>
                 )}
               </div>
 
