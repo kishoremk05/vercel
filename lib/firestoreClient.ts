@@ -138,6 +138,17 @@ export async function getClientProfile(clientId: string): Promise<ClientProfileD
 }
 
 /**
+ * Get billing/subscription document for a client
+ */
+export async function getClientBillingSubscription(clientId: string): Promise<any | null> {
+  const db = getFirebaseDb();
+  const billingRef = doc(db, 'clients', clientId, 'billing', 'subscription');
+  const snap = await getDoc(billingRef);
+  if (!snap.exists()) return null;
+  return snap.data();
+}
+
+/**
  * Update client profile
  */
 export async function updateClientProfile(

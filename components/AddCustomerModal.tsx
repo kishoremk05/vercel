@@ -2,7 +2,11 @@ import React, { useState } from "react";
 import { XIcon } from "./icons";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 import { initializeFirebase, getFirebaseAuth } from "../lib/firebaseClient";
-import { getClientProfile } from "../lib/firestoreClient";
+import {
+  getClientProfile,
+  getClientByAuthUid,
+  getClientBillingSubscription,
+} from "../lib/firestoreClient";
 
 interface AddCustomerModalProps {
   onClose: () => void;
@@ -45,14 +49,22 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       // Get companyId for subscription check and SMS sending
       const companyId = localStorage.getItem("companyId") || "";
 
-      // Check Firestore profile first (preferred) then API subscription.
+      // Prefer Firestore (profile -> billing) and auth mapping before API
+      let skipSubscriptionApiCheck = false;
       try {
         initializeFirebase();
         let profile: any = null;
+        let billing: any = null;
         if (companyId) {
           profile = await getClientProfile(companyId).catch(() => null);
+          if (!profile) {
+            billing = await getClientBillingSubscription(companyId).catch(
+              () => null
+            );
+          }
         }
-        if (!profile) {
+
+        if (!profile && !billing) {
           const auth = getFirebaseAuth();
           const waitForAuth = (timeoutMs = 3000) =>
             new Promise<any>((resolve) => {
@@ -68,64 +80,117 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               setTimeout(() => resolve(auth.currentUser || null), timeoutMs);
             });
           const user = await waitForAuth().catch(() => null);
-          if (user && user.uid)
+          if (user && user.uid) {
             profile = await getClientProfile(user.uid).catch(() => null);
-        }
-        if (profile) {
-          const hasPlan = Boolean(
-            profile.planId || profile.plan || profile.planName
-          );
-          if (hasPlan) {
-            // Firestore indicates active plan — allow send without further checks
-            console.log(
-              "[AddCustomerModal] Allowed by Firestore profile",
-              profile
-            );
-          } else {
-            // Fall through to API check below
+            if (!profile) {
+              const mapped = await getClientByAuthUid(user.uid).catch(
+                () => null
+              );
+              if (mapped && mapped.id) {
+                profile = await getClientProfile(mapped.id).catch(() => null);
+                if (!profile) {
+                  billing = await getClientBillingSubscription(mapped.id).catch(
+                    () => null
+                  );
+                } else {
+                  try {
+                    localStorage.setItem("companyId", mapped.id);
+                  } catch {}
+                }
+              }
+            } else {
+              try {
+                localStorage.setItem("companyId", user.uid);
+              } catch {}
+            }
           }
         }
+
+        const hasPlan = Boolean(
+          (profile && (profile.planId || profile.plan || profile.planName)) ||
+            (billing && (billing.planId || billing.plan || billing.planName))
+        );
+        const remaining =
+          (billing && (billing.remainingCredits ?? billing.smsCredits)) ??
+          (profile &&
+            (profile.remainingCredits ??
+              profile.smsCredits ??
+              profile.remaining)) ??
+          null;
+        if (hasPlan || (remaining !== null && Number(remaining) > 0)) {
+          skipSubscriptionApiCheck = true;
+          console.log(
+            "[AddCustomerModal] Allowed by Firestore profile/billing",
+            {
+              profile,
+              billing,
+            }
+          );
+        }
       } catch (fsErr) {
-        // Firestore check failed — fallback to API check below
         console.debug("[AddCustomerModal] Firestore check failed:", fsErr);
       }
 
-      // Check SMS credits before sending
-      if (companyId) {
+      // Check SMS credits before sending (API only if Firestore didn't allow)
+      if (!skipSubscriptionApiCheck && companyId) {
         try {
           const base = await getSmsServerUrl().catch(() => "");
-          if (base) {
-            const subUrl = `${base}/api/subscription?companyId=${companyId}`;
-            const subRes = await fetch(subUrl);
-            const subData = await subRes.json();
+          const subUrl = base
+            ? `${base}/api/subscription?companyId=${companyId}`
+            : `/api/subscription?companyId=${companyId}`;
+          const subRes = await fetch(subUrl);
+          const subData = await subRes.json();
 
-            if (subData.success && subData.subscription) {
-              const s = subData.subscription;
-              const hasPlan = Boolean(s.planId || s.plan || s.planName);
-              if (hasPlan) {
-                console.log(
-                  "[AddCustomerModal] Allowed by API subscription plan present",
-                  s
+          if (subData.success && subData.subscription) {
+            const s = subData.subscription;
+            const hasPlanApi = Boolean(s.planId || s.plan || s.planName);
+            const hasRemainingApi =
+              typeof s.remainingCredits !== "undefined" ||
+              typeof s.smsCredits !== "undefined";
+            if (hasPlanApi) {
+              skipSubscriptionApiCheck = true;
+            } else if (hasRemainingApi) {
+              const remaining = s.remainingCredits ?? s.smsCredits ?? 0;
+              const status = s.status;
+              if (status !== "active") {
+                setError(
+                  "Your subscription is not active. Please activate your plan to send SMS."
                 );
-              } else {
-                const remaining = s.remainingCredits ?? s.smsCredits ?? 0;
-                const status = s.status;
-
-                if (status !== "active") {
-                  setError(
-                    "Your subscription is not active. Please activate your plan to send SMS."
-                  );
-                  return;
+                return;
+              }
+              if (remaining <= 0) {
+                setError(
+                  "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                );
+                return;
+              }
+              skipSubscriptionApiCheck = true;
+            } else {
+              // API inconclusive — consult Firestore and localStorage
+              try {
+                const p = await getClientProfile(companyId).catch(() => null);
+                if (p && (p.planId || p.plan || p.planName)) {
+                  skipSubscriptionApiCheck = true;
+                } else {
+                  const raw = localStorage.getItem("subscription");
+                  if (raw) {
+                    const localSub = JSON.parse(raw);
+                    const creditsLocal =
+                      localSub.remainingCredits ?? localSub.smsCredits ?? 0;
+                    if (creditsLocal > 0) skipSubscriptionApiCheck = true;
+                    else {
+                      setError(
+                        "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                      );
+                      return;
+                    }
+                  }
                 }
-
-                if (remaining <= 0) {
-                  setError(
-                    "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
-                  );
-                  return;
-                }
-
-                console.log(`[SMS] Credits available: ${remaining}`);
+              } catch (e) {
+                console.debug(
+                  "[AddCustomerModal] API inconclusive -> Firestore/local fallback failed:",
+                  e
+                );
               }
             }
           }

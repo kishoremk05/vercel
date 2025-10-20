@@ -34,7 +34,11 @@ import {
   getFirebaseDb,
 } from "../lib/firebaseClient";
 import { doc, onSnapshot } from "firebase/firestore";
-import { getClientProfile } from "../lib/firestoreClient";
+import {
+  getClientProfile,
+  getClientByAuthUid,
+  getClientBillingSubscription,
+} from "../lib/firestoreClient";
 import {
   PlusIcon,
   MessageIcon,
@@ -384,22 +388,133 @@ const SubscriptionCustomerLock: React.FC = () => {
           const data = await resp.json().catch(() => ({}));
           if (data && data.success && data.subscription) {
             const s = data.subscription;
-            // If the subscription object contains explicit plan information
-            // (planId / plan / planName) treat it as an active plan and
-            // unlock the UI immediately. This aligns with the ProfilePage
-            // behavior which writes plan details to Firestore after checkout.
             const hasPlan = Boolean(s.planId || s.plan || s.planName);
+            const hasRemaining =
+              typeof s.remainingCredits !== "undefined" ||
+              typeof s.smsCredits !== "undefined";
             if (hasPlan) {
               if (mounted) setLocked(false);
               return;
             }
-            const status = String(s.status || "").toLowerCase();
-            const active =
-              status === "active" || status === "paid" || status === "trialing";
-            const remaining = Number(s.remainingCredits ?? s.smsCredits ?? 0);
-            const isLocked = !(active && remaining > 0);
-            if (mounted) setLocked(Boolean(isLocked));
-            return;
+            if (hasRemaining) {
+              const status = String(s.status || "").toLowerCase();
+              const active =
+                status === "active" ||
+                status === "paid" ||
+                status === "trialing";
+              const remaining = Number(s.remainingCredits ?? s.smsCredits ?? 0);
+              const isLocked = !(active && remaining > 0);
+              if (mounted) setLocked(Boolean(isLocked));
+              return;
+            }
+
+            // API returned a subscription but it's inconclusive (no plan
+            // and no remaining fields). Consult Firestore and finally
+            // localStorage before deciding the locked state.
+            try {
+              // Try profile for companyId first
+              try {
+                const p = companyId
+                  ? await getClientProfile(companyId).catch(() => null)
+                  : null;
+                if (p && (p.planId || p.plan || p.planName)) {
+                  if (mounted) setLocked(false);
+                  return;
+                }
+              } catch {}
+
+              // Try auth-derived mapping and auth-owned doc
+              try {
+                initializeFirebase();
+                const auth = getFirebaseAuth();
+                const waitForAuth = (timeoutMs = 3000) =>
+                  new Promise<any>((resolve) => {
+                    if (auth.currentUser) return resolve(auth.currentUser);
+                    const unsub = auth.onAuthStateChanged((u: any) => {
+                      if (u) {
+                        try {
+                          unsub();
+                        } catch {}
+                        return resolve(u);
+                      }
+                    });
+                    setTimeout(
+                      () => resolve(auth.currentUser || null),
+                      timeoutMs
+                    );
+                  });
+                const user = await waitForAuth().catch(() => null);
+                if (user && user.uid) {
+                  try {
+                    const p2 = await getClientProfile(user.uid).catch(
+                      () => null
+                    );
+                    if (p2 && (p2.planId || p2.plan || p2.planName)) {
+                      if (mounted) setLocked(false);
+                      return;
+                    }
+                  } catch {}
+
+                  try {
+                    const mapped = await getClientByAuthUid(user.uid).catch(
+                      () => null
+                    );
+                    if (mapped && mapped.id) {
+                      const p3 = await getClientProfile(mapped.id).catch(
+                        () => null
+                      );
+                      if (p3 && (p3.planId || p3.plan || p3.planName)) {
+                        try {
+                          localStorage.setItem("companyId", mapped.id);
+                        } catch {}
+                        if (mounted) setLocked(false);
+                        return;
+                      }
+                      const b3 = await getClientBillingSubscription(
+                        mapped.id
+                      ).catch(() => null);
+                      if (b3 && (b3.planId || b3.plan || b3.planName)) {
+                        if (mounted) setLocked(false);
+                        return;
+                      }
+                    }
+                  } catch {}
+                }
+              } catch (e) {
+                console.debug(
+                  "[SubscriptionCustomerLock] Firestore inconclusive fallback failed:",
+                  e
+                );
+              }
+
+              // Final fallback: localStorage
+              try {
+                const raw = localStorage.getItem("subscription");
+                if (!raw) {
+                  if (mounted) setLocked(true);
+                  return;
+                }
+                const sub = JSON.parse(raw);
+                const hasPlanLocal = Boolean(
+                  sub.planId || sub.plan || sub.planName
+                );
+                const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
+                if (hasPlanLocal || creditsOk) {
+                  if (mounted) setLocked(false);
+                  return;
+                }
+                if (mounted) setLocked(true);
+                return;
+              } catch (e2) {
+                if (mounted) setLocked(true);
+                return;
+              }
+            } catch (apiToFsErr) {
+              console.debug(
+                "[SubscriptionCustomerLock] API inconclusive -> Firestore check failed:",
+                apiToFsErr
+              );
+            }
           }
         } catch (apiErr) {
           console.debug("[SubscriptionCustomerLock] API check failed:", apiErr);
@@ -843,19 +958,126 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
             if (data && data.success && data.subscription) {
               const s = data.subscription;
               const hasPlan = Boolean(s.planId || s.plan || s.planName);
+              const hasRemaining =
+                typeof s.remainingCredits !== "undefined" ||
+                typeof s.smsCredits !== "undefined";
               if (hasPlan) {
                 if (mounted) setLocked(false);
                 return;
               }
-              const status = String(s.status || "").toLowerCase();
-              const active =
-                status === "active" ||
-                status === "paid" ||
-                status === "trialing";
-              const remaining = Number(s.remainingCredits ?? s.smsCredits ?? 0);
-              const isLocked = !(active && remaining > 0);
-              if (mounted) setLocked(Boolean(isLocked));
-              return;
+              if (hasRemaining) {
+                const status = String(s.status || "").toLowerCase();
+                const active =
+                  status === "active" ||
+                  status === "paid" ||
+                  status === "trialing";
+                const remaining = Number(
+                  s.remainingCredits ?? s.smsCredits ?? 0
+                );
+                const isLocked = !(active && remaining > 0);
+                if (mounted) setLocked(Boolean(isLocked));
+                return;
+              }
+
+              // Inconclusive API response: consult Firestore and localStorage
+              try {
+                try {
+                  const p = companyId
+                    ? await getClientProfile(companyId).catch(() => null)
+                    : null;
+                  if (p && (p.planId || p.plan || p.planName)) {
+                    if (mounted) setLocked(false);
+                    return;
+                  }
+                } catch {}
+
+                try {
+                  initializeFirebase();
+                  const auth = getFirebaseAuth();
+                  const waitForAuth = (timeoutMs = 3000) =>
+                    new Promise<any>((resolve) => {
+                      if (auth.currentUser) return resolve(auth.currentUser);
+                      const unsub = auth.onAuthStateChanged((u: any) => {
+                        if (u) {
+                          try {
+                            unsub();
+                          } catch {}
+                          return resolve(u);
+                        }
+                      });
+                      setTimeout(
+                        () => resolve(auth.currentUser || null),
+                        timeoutMs
+                      );
+                    });
+                  const user = await waitForAuth().catch(() => null);
+                  if (user && user.uid) {
+                    const p2 = await getClientProfile(user.uid).catch(
+                      () => null
+                    );
+                    if (p2 && (p2.planId || p2.plan || p2.planName)) {
+                      if (mounted) setLocked(false);
+                      return;
+                    }
+                    const mapped = await getClientByAuthUid(user.uid).catch(
+                      () => null
+                    );
+                    if (mapped && mapped.id) {
+                      const p3 = await getClientProfile(mapped.id).catch(
+                        () => null
+                      );
+                      if (p3 && (p3.planId || p3.plan || p3.planName)) {
+                        try {
+                          localStorage.setItem("companyId", mapped.id);
+                        } catch {}
+                        if (mounted) setLocked(false);
+                        return;
+                      }
+                      const b3 = await getClientBillingSubscription(
+                        mapped.id
+                      ).catch(() => null);
+                      if (b3 && (b3.planId || b3.plan || b3.planName)) {
+                        if (mounted) setLocked(false);
+                        return;
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.debug(
+                    "[SubscriptionCustomerLock] Firestore inconclusive fallback failed:",
+                    e
+                  );
+                }
+
+                // Final fallback: localStorage
+                try {
+                  const raw = localStorage.getItem("subscription");
+                  if (!raw) {
+                    if (mounted) setLocked(true);
+                    return;
+                  }
+                  const sub = JSON.parse(raw);
+                  const hasPlanLocal = Boolean(
+                    sub.planId || sub.plan || sub.planName
+                  );
+                  const creditsOk =
+                    (sub.remainingCredits ?? sub.smsCredits) > 0;
+                  if (hasPlanLocal || creditsOk) {
+                    if (mounted) setLocked(false);
+                    return;
+                  }
+                  if (mounted) setLocked(true);
+                  return;
+                } catch (e2) {
+                  if (mounted) setLocked(true);
+                  return;
+                }
+              } catch (err) {
+                console.debug(
+                  "[SubscriptionCustomerLock] API inconclusive -> fallback error:",
+                  err
+                );
+              }
             }
           } catch (e) {
             // API failed — try Firestore (auth-owned profile) before falling

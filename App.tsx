@@ -18,7 +18,11 @@ import PaymentSuccessPage from "./pages/PaymentSuccessPage";
 import PaymentCancelPage from "./pages/PaymentCancelPage";
 import { initializeGlobalConfig, getSmsServerUrl } from "./lib/firebaseConfig";
 import { initializeFirebase, getFirebaseAuth } from "./lib/firebaseClient";
-import { getClientProfile } from "./lib/firestoreClient";
+import {
+  getClientProfile,
+  getClientByAuthUid,
+  getClientBillingSubscription,
+} from "./lib/firestoreClient";
 // import { EnvelopeIcon } from "./components/icons";
 
 // Determine API base at runtime.
@@ -825,10 +829,21 @@ const App: React.FC = () => {
       try {
         initializeFirebase();
         let profile: any = null;
-        if (companyId) {
-          profile = await getClientProfile(companyId).catch(() => null);
+        let billing: any = null;
+        let derivedId: string | null = companyId || null;
+
+        // Try explicit companyId if provided
+        if (derivedId) {
+          profile = await getClientProfile(derivedId).catch(() => null);
+          if (!profile) {
+            billing = await getClientBillingSubscription(derivedId).catch(
+              () => null
+            );
+          }
         }
-        if (!profile) {
+
+        // If nothing found yet, try auth-derived ids
+        if (!profile && !billing) {
           const auth = getFirebaseAuth();
           const waitForAuth = (timeoutMs = 5000) =>
             new Promise<any>((resolve) => {
@@ -845,29 +860,67 @@ const App: React.FC = () => {
             });
           const user = await waitForAuth().catch(() => null);
           if (user && user.uid) {
+            // try the auth-owned profile first
             profile = await getClientProfile(user.uid).catch(() => null);
+            if (!profile) {
+              // try mapping from authUid -> clientId
+              const mapped = await getClientByAuthUid(user.uid).catch(
+                () => null
+              );
+              if (mapped && mapped.id) {
+                derivedId = mapped.id;
+                profile = await getClientProfile(mapped.id).catch(() => null);
+                if (!profile) {
+                  billing = await getClientBillingSubscription(mapped.id).catch(
+                    () => null
+                  );
+                }
+              }
+            }
           }
         }
-        if (!profile) return { found: false };
-        const hasPlan = Boolean(
-          profile.planId || profile.plan || profile.planName
+
+        // If we have a profile but it lacks plan info, try billing
+        if (profile && !(profile.planId || profile.plan || profile.planName)) {
+          billing = await getClientBillingSubscription(derivedId || "").catch(
+            () => null
+          );
+        }
+
+        const hasPlanProfile = Boolean(
+          profile && (profile.planId || profile.plan || profile.planName)
         );
+        const hasPlanBilling = Boolean(
+          billing && (billing.planId || billing.plan || billing.planName)
+        );
+
         const remainingRaw =
-          profile.remainingCredits ??
-          profile.smsCredits ??
-          profile.remaining ??
+          (billing && (billing.remainingCredits ?? billing.smsCredits)) ??
+          (profile &&
+            (profile.remainingCredits ??
+              profile.smsCredits ??
+              profile.remaining)) ??
           null;
         const remaining =
           remainingRaw === null ? null : Number(remainingRaw || 0);
-        if (hasPlan) {
-          // Aggressive behavior: if the Firestore profile contains any plan
-          // information (planId / plan / planName), consider the client
-          // subscribed and allow sending immediately. This ensures the
-          // dashboard unlocks right after hosted-checkout writes the
-          // profile doc, even before remainingCredits are populated.
-          return { found: true, allowed: true, remaining, profile };
+
+        if (hasPlanProfile || hasPlanBilling) {
+          // treat plan presence as sufficient to allow sends immediately
+          return {
+            found: true,
+            allowed: true,
+            remaining,
+            profile: profile || billing,
+            billing: billing || null,
+          };
         }
-        return { found: true, allowed: false, remaining, profile };
+
+        if (profile || billing) {
+          // we have data but no plan info
+          return { found: true, allowed: remaining > 0, remaining, profile };
+        }
+
+        return { found: false };
       } catch (e) {
         console.warn("[checkFirestoreSubscription] error:", e);
         return { found: false };
@@ -918,12 +971,15 @@ const App: React.FC = () => {
           if (subData.success && subData.subscription) {
             const s = subData.subscription;
             const hasPlan = Boolean(s.planId || s.plan || s.planName);
+            const hasRemaining =
+              typeof s.remainingCredits !== "undefined" ||
+              typeof s.smsCredits !== "undefined";
+
             if (hasPlan) {
-              // API reports a plan — allow send immediately. Server remains
-              // authoritative but we prefer the presence of a plan to avoid
-              // blocking sends on stale local storage.
+              // API reports a plan — allow send immediately.
+              skipSubscriptionApiCheck = true;
               console.log("[SMS] Allowed by API subscription plan present", s);
-            } else {
+            } else if (hasRemaining) {
               const remaining = s.remainingCredits ?? s.smsCredits ?? 0;
               const status = s.status;
 
@@ -955,7 +1011,112 @@ const App: React.FC = () => {
                 return { ok: false, reason: "SMS limit reached" };
               }
 
+              // API explicitly reports remaining credits > 0
+              skipSubscriptionApiCheck = true;
               console.log(`[SMS] Credits available: ${remaining}`);
+            } else {
+              // API returned a subscription object but it does not contain
+              // plan or remaining information. Treat this as inconclusive
+              // and consult Firestore (and finally legacy localStorage).
+              try {
+                const fsCheck = await checkFirestoreSubscription(companyId);
+                if (fsCheck && fsCheck.found && fsCheck.allowed) {
+                  skipSubscriptionApiCheck = true;
+                  console.log(
+                    "[SMS] Allowed by Firestore after inconclusive API",
+                    fsCheck
+                  );
+                } else {
+                  // Final fallback: localStorage subscription
+                  try {
+                    const raw = localStorage.getItem("subscription");
+                    if (raw) {
+                      const localSub = JSON.parse(raw);
+                      const hasPlanLocal = Boolean(
+                        localSub.planId || localSub.plan || localSub.planName
+                      );
+                      const remainingLocal =
+                        localSub.remainingCredits ?? localSub.smsCredits ?? 0;
+                      if (hasPlanLocal || remainingLocal > 0) {
+                        skipSubscriptionApiCheck = true;
+                        console.log(
+                          "[SMS] Allowed by localStorage fallback after inconclusive API",
+                          localSub
+                        );
+                      } else {
+                        alert(
+                          "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                        );
+                        setCustomers((prev) =>
+                          prev.map((c) =>
+                            c.id === customer.id
+                              ? { ...c, status: CustomerStatus.Failed }
+                              : c
+                          )
+                        );
+                        return { ok: false, reason: "SMS limit reached" };
+                      }
+                    } else {
+                      alert(
+                        "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                      );
+                      setCustomers((prev) =>
+                        prev.map((c) =>
+                          c.id === customer.id
+                            ? { ...c, status: CustomerStatus.Failed }
+                            : c
+                        )
+                      );
+                      return { ok: false, reason: "SMS limit reached" };
+                    }
+                  } catch (localErr) {
+                    console.warn(
+                      "[SMS] localStorage fallback failed after inconclusive API:",
+                      localErr
+                    );
+                    return { ok: false, reason: "inconclusive" };
+                  }
+                }
+              } catch (fsErr) {
+                console.warn(
+                  "[SMS] Firestore fallback failed after inconclusive API:",
+                  fsErr
+                );
+                // As a last resort try localStorage
+                try {
+                  const raw = localStorage.getItem("subscription");
+                  if (raw) {
+                    const localSub = JSON.parse(raw);
+                    const remainingLocal =
+                      localSub.remainingCredits ?? localSub.smsCredits ?? 0;
+                    if (remainingLocal > 0) {
+                      skipSubscriptionApiCheck = true;
+                      console.log(
+                        "[SMS] Allowed by localStorage after Firestore failure",
+                        localSub
+                      );
+                    } else {
+                      alert(
+                        "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                      );
+                      setCustomers((prev) =>
+                        prev.map((c) =>
+                          c.id === customer.id
+                            ? { ...c, status: CustomerStatus.Failed }
+                            : c
+                        )
+                      );
+                      return { ok: false, reason: "SMS limit reached" };
+                    }
+                  }
+                } catch (localErr) {
+                  console.warn(
+                    "[SMS] localStorage fallback also failed:",
+                    localErr
+                  );
+                  return { ok: false, reason: "inconclusive" };
+                }
+              }
             }
           }
         } catch (subErr) {
