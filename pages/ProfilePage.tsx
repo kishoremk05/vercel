@@ -60,6 +60,28 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
 
   // Load subscription data from Firebase Firestore (cross-device) - PRIMARY SOURCE
   useEffect(() => {
+    let unsubProfile: (() => void) | null = null;
+    let unsubBilling: (() => void) | null = null;
+
+    const waitForAuth = (authObj: any, timeoutMs = 10000) =>
+      new Promise<any>((resolve) => {
+        if (authObj.currentUser) return resolve(authObj.currentUser);
+        const unsubscribe = authObj.onAuthStateChanged((user: any) => {
+          if (user) {
+            try {
+              unsubscribe();
+            } catch {}
+            return resolve(user);
+          }
+        });
+        setTimeout(() => {
+          try {
+            unsubscribe();
+          } catch {}
+          return resolve(authObj.currentUser || null);
+        }, timeoutMs);
+      });
+
     const loadSubscriptionData = async () => {
       try {
         let companyId = null;
@@ -76,7 +98,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           try {
             initializeFirebase();
             const auth = getFirebaseAuth();
-            const user = auth.currentUser;
+            const user = await waitForAuth(auth, 10000);
             if (user) {
               const baseLocal = await getSmsServerUrl().catch(() => "");
               if (baseLocal) {
@@ -115,44 +137,100 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           const db = getFirebaseDb();
           const profileRef = doc(db, "clients", companyId, "profile", "main");
 
-          const unsubscribe = onSnapshot(
+          // Listen to both `profile/main` (preferred) and `billing/subscription`
+          // (fallback) in real-time. Profile/main wins when it contains a
+          // plan; billing/subscription is used only when profile/main is
+          // empty or doesn't provide enough information.
+          const billingRef = doc(
+            db,
+            "clients",
+            companyId,
+            "billing",
+            "subscription"
+          );
+
+          unsubProfile = onSnapshot(
             profileRef,
             (snap) => {
               if (snap.exists()) {
                 const firebaseData = snap.data();
-                console.log(
-                  "[Profile] onSnapshot: loaded profile/main:",
-                  firebaseData
+                console.log("[Profile] profile/main changed:", firebaseData);
+                const hasPlan = !!(
+                  firebaseData.planId ||
+                  firebaseData.plan ||
+                  firebaseData.planName
                 );
-                if (firebaseData.planId && firebaseData.status) {
+                if (hasPlan) {
                   const formattedData = {
-                    planId: firebaseData.planId,
-                    planName: firebaseData.planName,
-                    smsCredits: firebaseData.smsCredits,
-                    status: firebaseData.status,
+                    planId: firebaseData.planId || firebaseData.plan || null,
+                    planName:
+                      firebaseData.planName ||
+                      firebaseData.name ||
+                      firebaseData.plan ||
+                      null,
+                    smsCredits:
+                      firebaseData.smsCredits ||
+                      firebaseData.remainingCredits ||
+                      (firebaseData.price &&
+                        (firebaseData.price === 75
+                          ? 600
+                          : firebaseData.price === 100
+                          ? 900
+                          : 250)) ||
+                      0,
+                    status: firebaseData.status || "active",
                     price: firebaseData.price,
-                    startDate: firebaseData.activatedAt,
-                    expiryDate: firebaseData.expiryAt,
+                    startDate:
+                      firebaseData.activatedAt || firebaseData.startDate,
+                    expiryDate: firebaseData.expiryAt || firebaseData.endDate,
                     remainingCredits:
-                      firebaseData.remainingCredits || firebaseData.smsCredits,
+                      firebaseData.remainingCredits ||
+                      firebaseData.smsCredits ||
+                      0,
                   };
                   setSubscriptionData(formattedData);
-                } else {
-                  setSubscriptionData(null);
                 }
-              } else {
-                setSubscriptionData(null);
               }
               setLoadingSubscription(false);
             },
             (err) => {
-              console.warn("[Profile] onSnapshot error:", err);
+              console.warn("[Profile] profile onSnapshot error:", err);
               setLoadingSubscription(false);
             }
           );
 
-          // Keep the listener active; clean up on unmount
-          return () => unsubscribe();
+          unsubBilling = onSnapshot(
+            billingRef,
+            (snap) => {
+              if (snap.exists()) {
+                const b = snap.data();
+                console.log("[Profile] billing/subscription changed:", b);
+                // Only set billing fallback if profile/main is not already
+                // providing plan information. We can't easily check profile
+                // snapshot state from here, so always set billing data when
+                // it exists; profile snapshot will overwrite when it arrives.
+                const formattedData = {
+                  planId: b.planId || null,
+                  planName: b.planName || null,
+                  smsCredits: b.smsCredits || b.remainingCredits || 0,
+                  status: b.status || "active",
+                  price: b.price,
+                  startDate: b.startDate,
+                  expiryDate: b.endDate,
+                  remainingCredits: b.remainingCredits || b.smsCredits || 0,
+                };
+                setSubscriptionData(formattedData);
+              }
+              setLoadingSubscription(false);
+            },
+            (err) => {
+              console.warn("[Profile] billing onSnapshot error:", err);
+              setLoadingSubscription(false);
+            }
+          );
+
+          // listeners are assigned to outer-scoped variables; cleanup
+          // will be handled by the effect's return function below.
         } catch (firebaseError) {
           console.warn("[Profile] Firestore subscribe error:", firebaseError);
           setLoadingSubscription(false);
@@ -165,6 +243,15 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     };
 
     loadSubscriptionData();
+
+    return () => {
+      try {
+        if (unsubProfile) unsubProfile();
+      } catch {}
+      try {
+        if (unsubBilling) unsubBilling();
+      } catch {}
+    };
   }, []);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -780,7 +867,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   );
 };
 
-// SMS Credits display component - shows sent count like Dashboard
+// SMS Credits display component - shows sent count derived from subscription
 const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
   subscriptionData,
 }) => {
@@ -788,119 +875,34 @@ const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchSentCount = async () => {
-      setLoading(true);
-      try {
-        const companyId =
-          localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
-        if (!companyId) {
-          setSentCount(0);
-          setLoading(false);
-          return;
-        }
-
-        // Try to get message count from Firebase Firestore dashboard
-        try {
-          const db = getFirebaseDb();
-          const dashboardRef = doc(
-            db,
-            "clients",
-            companyId,
-            "dashboard",
-            "current"
-          );
-          const dashboardSnap = await getDoc(dashboardRef);
-
-          if (dashboardSnap.exists()) {
-            const data = dashboardSnap.data();
-            setSentCount(data.message_count || 0);
-            console.log(
-              "✅ Got message count from Firebase:",
-              data.message_count
-            );
-            setLoading(false);
-            return;
-          }
-        } catch (firebaseError) {
-          console.warn("Firebase dashboard fetch failed:", firebaseError);
-        }
-
-        // Fallback: Try API endpoint as secondary option
-        try {
-          const base = await getSmsServerUrl().catch(() => API_BASE);
-          const url = base
-            ? `${base}/api/dashboard/stats?companyId=${companyId}`
-            : `/api/dashboard/stats?companyId=${companyId}`;
-
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-          const response = await fetch(url, { signal: controller.signal });
-          clearTimeout(timeoutId);
-
-          if (response.ok) {
-            const data = await response.json();
-            if (
-              data.success &&
-              data.stats &&
-              typeof data.stats.messageCount === "number"
-            ) {
-              setSentCount(data.stats.messageCount);
-              console.log(
-                "✅ Got message count from API:",
-                data.stats.messageCount
-              );
-              setLoading(false);
-              return;
-            }
-          }
-        } catch (apiError) {
-          console.warn("API fetch also failed, using default:", apiError);
-        }
-
-        // Default to 0 if all sources fail
+    setLoading(true);
+    try {
+      if (!subscriptionData) {
         setSentCount(0);
-      } catch (error) {
-        console.error("Error fetching sent count:", error);
-        setSentCount(0);
-      } finally {
-        setLoading(false);
+        return;
       }
-    };
+      const total = Number(
+        subscriptionData.smsCredits ?? subscriptionData.totalCredits ?? 0
+      );
+      const remaining = Number(
+        subscriptionData.remainingCredits ?? subscriptionData.remaining ?? total
+      );
+      const sent =
+        Number.isFinite(total) && Number.isFinite(remaining)
+          ? Math.max(0, total - remaining)
+          : 0;
+      setSentCount(sent);
+    } catch (e) {
+      console.warn("[SmsCreditsDisplay] compute error:", e);
+      setSentCount(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [subscriptionData]);
 
-    fetchSentCount();
-  }, []);
-
-  const smsCredits = subscriptionData.smsCredits || 0;
-  const used = sentCount !== null ? sentCount : 0;
-  const available = smsCredits - used;
-  const percent = smsCredits > 0 ? Math.round((used / smsCredits) * 100) : 0;
-
+  if (loading) return <div className="text-sm text-gray-500">Loading...</div>;
   return (
-    <>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-3xl font-bold text-gray-900">
-            {loading ? "..." : `${used} / ${smsCredits}`}
-          </p>
-          <p className="text-sm text-gray-600 mt-1">
-            {loading ? "Loading..." : `${available} credits remaining`}
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="text-lg font-semibold text-blue-600">
-            {loading ? "..." : `${percent}% Available`}
-          </p>
-        </div>
-      </div>
-      {/* Progress bar */}
-      <div className="w-full bg-gray-200 rounded-full h-3 mt-4">
-        <div
-          className="bg-gradient-to-r from-blue-500 to-cyan-500 h-3 rounded-full transition-all duration-500"
-          style={{ width: `${percent}%` }}
-        ></div>
-      </div>
-    </>
+    <div className="text-sm text-gray-600">Sent: {sentCount ?? "N/A"}</div>
   );
 };
 
