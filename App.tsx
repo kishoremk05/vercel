@@ -17,6 +17,8 @@ import PaymentPage from "./pages/PaymentPage";
 import PaymentSuccessPage from "./pages/PaymentSuccessPage";
 import PaymentCancelPage from "./pages/PaymentCancelPage";
 import { initializeGlobalConfig, getSmsServerUrl } from "./lib/firebaseConfig";
+import { initializeFirebase, getFirebaseAuth } from "./lib/firebaseClient";
+import { getClientProfile } from "./lib/firestoreClient";
 // import { EnvelopeIcon } from "./components/icons";
 
 // Determine API base at runtime.
@@ -1052,9 +1054,105 @@ const App: React.FC = () => {
           }
         } catch (subErr) {
           console.warn(
-            "[SMS] Could not check subscription, proceeding anyway:",
+            "[SMS] Could not check subscription via API, attempting Firestore fallback:",
             subErr
           );
+          // If API is unreachable (network or server down), try to read the
+          // authoritative subscription stored in Firestore under
+          // clients/{companyId}/profile/main or clients/{authUid}/profile/main
+          // before allowing the send. This covers the hosted-checkout
+          // redirect case where the subscription is written to Firestore but
+          // the subscription API temporarily fails.
+          try {
+            initializeFirebase();
+            let profile: any = null;
+            // Try companyId first (if available) — this covers the common
+            // v2 schema where companyId is the client doc id.
+            if (companyId) {
+              profile = await getClientProfile(companyId).catch(() => null);
+            }
+            // If not found by companyId, try the authenticated user's own
+            // profile (clients/{authUid}/profile/main) which PaymentSuccess
+            // writes to for immediate UI consistency.
+            if (!profile) {
+              const auth = getFirebaseAuth();
+              const waitForAuth = (timeoutMs = 5000) =>
+                new Promise<any>((resolve) => {
+                  if (auth.currentUser) return resolve(auth.currentUser);
+                  const unsub = auth.onAuthStateChanged((u: any) => {
+                    if (u) {
+                      try {
+                        unsub();
+                      } catch {}
+                      return resolve(u);
+                    }
+                  });
+                  setTimeout(
+                    () => resolve(auth.currentUser || null),
+                    timeoutMs
+                  );
+                });
+              const user = await waitForAuth().catch(() => null);
+              if (user && user.uid) {
+                profile = await getClientProfile(user.uid).catch(() => null);
+              }
+            }
+
+            if (profile) {
+              const status = String(profile.status || "").toLowerCase();
+              const active =
+                status === "active" ||
+                status === "paid" ||
+                status === "trialing" ||
+                Boolean(profile.planId || profile.plan || profile.planName);
+              const remaining = Number(
+                profile.remainingCredits ?? profile.smsCredits ?? 0
+              );
+
+              if (!active) {
+                alert(
+                  "Your subscription is not active. Please activate your plan to send SMS."
+                );
+                setCustomers((prev) =>
+                  prev.map((c) =>
+                    c.id === customer.id
+                      ? { ...c, status: CustomerStatus.Failed }
+                      : c
+                  )
+                );
+                return { ok: false, reason: "Subscription not active" };
+              }
+              if (remaining <= 0) {
+                alert(
+                  "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                );
+                setCustomers((prev) =>
+                  prev.map((c) =>
+                    c.id === customer.id
+                      ? { ...c, status: CustomerStatus.Failed }
+                      : c
+                  )
+                );
+                return { ok: false, reason: "SMS limit reached" };
+              }
+
+              console.log(
+                "[SMS] Firestore profile indicates active subscription, proceeding to send",
+                {
+                  remaining,
+                }
+              );
+            } else {
+              console.warn(
+                "[SMS] No Firestore profile found — proceeding with send due to API unavailability"
+              );
+            }
+          } catch (fsErr) {
+            console.warn(
+              "[SMS] Firestore fallback failed, proceeding to send:",
+              fsErr
+            );
+          }
         }
       }
 

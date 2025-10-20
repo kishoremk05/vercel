@@ -28,6 +28,8 @@ import { Customer, ActivityLog, CustomerStatus } from "../types";
 //   fetchClientProfile,
 // } from "../lib/dashboardFirebase";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
+import { initializeFirebase, getFirebaseAuth } from "../lib/firebaseClient";
+import { getClientProfile } from "../lib/firestoreClient";
 import {
   PlusIcon,
   MessageIcon,
@@ -435,28 +437,80 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
               return;
             }
           } catch (e) {
-            // swallow and fall back to localStorage below
-            console.debug("[SubscriptionCustomerLock] API check failed:", e);
-          }
+            // API failed — try Firestore (auth-owned profile) before falling
+            // back to localStorage. This covers the payment redirect case
+            // where the subscription is written to clients/{authUid}/profile/main
+            console.debug(
+              "[SubscriptionCustomerLock] API check failed, trying Firestore fallback:",
+              e
+            );
+            try {
+              // Ensure Firebase is initialized and wait briefly for auth
+              initializeFirebase();
+              const auth = getFirebaseAuth();
+              const waitForAuth = (timeoutMs = 5000) =>
+                new Promise<any>((resolve) => {
+                  if (auth.currentUser) return resolve(auth.currentUser);
+                  const unsub = auth.onAuthStateChanged((u: any) => {
+                    if (u) {
+                      try {
+                        unsub();
+                      } catch {}
+                      return resolve(u);
+                    }
+                  });
+                  setTimeout(
+                    () => resolve(auth.currentUser || null),
+                    timeoutMs
+                  );
+                });
 
-          // Fallback: localStorage (legacy behavior)
-          try {
-            const raw = localStorage.getItem("subscription");
-            if (!raw) {
+              const user = await waitForAuth().catch(() => null);
+              if (user && user.uid) {
+                const profile = await getClientProfile(user.uid).catch(
+                  () => null
+                );
+                if (profile) {
+                  const status = String(profile.status || "").toLowerCase();
+                  const active =
+                    status === "active" ||
+                    status === "paid" ||
+                    status === "trialing" ||
+                    Boolean(profile.planId || profile.plan || profile.planName);
+                  const remaining = Number(
+                    profile.remainingCredits ?? profile.smsCredits ?? 0
+                  );
+                  const isLocked = !(active && remaining > 0);
+                  if (mounted) setLocked(Boolean(isLocked));
+                  return;
+                }
+              }
+            } catch (fsErr) {
+              console.debug(
+                "[SubscriptionCustomerLock] Firestore fallback failed:",
+                fsErr
+              );
+            }
+
+            // Final fallback: localStorage (legacy behavior)
+            try {
+              const raw = localStorage.getItem("subscription");
+              if (!raw) {
+                if (mounted) setLocked(true);
+                return;
+              }
+              const sub = JSON.parse(raw);
+              const active =
+                sub.status === "active" &&
+                sub.endDate &&
+                new Date(sub.endDate).getTime() > Date.now();
+              const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
+              if (mounted) setLocked(!(active && creditsOk));
+              return;
+            } catch (e2) {
               if (mounted) setLocked(true);
               return;
             }
-            const sub = JSON.parse(raw);
-            const active =
-              sub.status === "active" &&
-              sub.endDate &&
-              new Date(sub.endDate).getTime() > Date.now();
-            const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
-            if (mounted) setLocked(!(active && creditsOk));
-            return;
-          } catch (e) {
-            if (mounted) setLocked(true);
-            return;
           }
         } catch (outer) {
           console.warn("[SubscriptionCustomerLock] unexpected error:", outer);
