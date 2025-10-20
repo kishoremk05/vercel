@@ -16,7 +16,13 @@ import {
   where,
   getDocs,
 } from "firebase/firestore";
-import { updateClientProfile } from "../lib/firestoreClient";
+import {
+  updateClientProfile,
+  getClientProfile,
+  getClientByAuthUid,
+  createClient,
+  updateClient,
+} from "../lib/firestoreClient";
 
 const PaymentSuccessPage: React.FC = () => {
   const [countdown, setCountdown] = useState(5);
@@ -82,6 +88,13 @@ const PaymentSuccessPage: React.FC = () => {
         // Keep companyId available to the rest of the function so we can
         // include it in the server POST payload if needed.
         let companyIdForPayload: string | null = null;
+        // When the webhook/server already created a canonical subscription
+        // we want to avoid POSTing the same payload again. However we
+        // still need to ensure the authenticated user's client-visible
+        // profile document receives the subscription info so the UI can
+        // update immediately. Use this flag to skip the server POST but
+        // continue local client-side writes.
+        let skipServerPost = false;
         // (sessionId is already declared above)
 
         console.log("[PaymentSuccess] Starting subscription save:", {
@@ -209,9 +222,9 @@ const PaymentSuccessPage: React.FC = () => {
               (companyIdForPayload || found.companyId)
             ) {
               console.log(
-                "[PaymentSuccess] Canonical subscription already present; skipping server POST."
+                "[PaymentSuccess] Canonical subscription already present; will skip server POST but still write to client profile (auth uid)."
               );
-              return;
+              skipServerPost = true;
             }
           } else {
             console.warn(
@@ -351,52 +364,182 @@ const PaymentSuccessPage: React.FC = () => {
 
         // Try a client-side Firestore write first (best-effort) so the
         // Profile page can reflect the purchase immediately for this user.
+        // We'll always attempt to write to the authenticated user's
+        // client document (auth UID) because Firestore rules permit that
+        // operation. Also attempt a best-effort write to any server-derived
+        // companyId (may fail due to permission restrictions).
         let firestoreSaved = false;
         try {
+          const authUid = currentUser?.uid || null;
+
+          // Build a canonical profile object to save
+          const profilePayload: any = {
+            planId: payload.planId,
+            planName: payload.planId
+              ? payload.planId
+              : payload.planName || plan.name,
+            smsCredits: payload.smsCredits,
+            remainingCredits: payload.smsCredits,
+            status: payload.status || "active",
+            activatedAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+          };
+          if (payload.durationMonths && Number(payload.durationMonths) > 0) {
+            const months = Number(payload.durationMonths || 1);
+            const expiry = new Date();
+            expiry.setMonth(expiry.getMonth() + months);
+            profilePayload.expiryAt = Timestamp.fromDate(expiry);
+          }
+          if (payload.sessionId)
+            profilePayload.paymentSessionId = payload.sessionId;
+
+          // Ensure an auth-UID-owned client document exists and write the
+          // profile there so the signed-in user can immediately see the
+          // subscription in the Profile page.
+          try {
+            if (authUid) {
+              const existingClient = await getClientByAuthUid(authUid).catch(
+                () => null
+              );
+              if (!existingClient) {
+                try {
+                  await createClient({
+                    name:
+                      currentUser?.displayName ||
+                      currentUser?.email?.split("@")[0] ||
+                      "User",
+                    email: currentUser?.email || undefined,
+                    auth_uid: authUid,
+                    activity_status: "active",
+                  });
+                  console.log(
+                    "[PaymentSuccess] ✅ Created client document for auth uid:",
+                    authUid
+                  );
+                } catch (createErr) {
+                  console.warn(
+                    "[PaymentSuccess] Failed to create client doc for auth uid (non-fatal):",
+                    createErr
+                  );
+                }
+              }
+
+              // Ensure parent client doc contains auth_uid/email for rule
+              // checks and convenience.
+              try {
+                await updateClient(authUid, {
+                  auth_uid: authUid,
+                  email: currentUser?.email,
+                });
+              } catch (uErr) {
+                // Non-fatal - continue
+              }
+
+              try {
+                await updateClientProfile(authUid, profilePayload as any);
+                firestoreSaved = true;
+                console.log(
+                  `[PaymentSuccess] Wrote subscription to Firestore clients/${authUid}/profile/main (client-side)`
+                );
+                try {
+                  localStorage.setItem("companyId", String(authUid));
+                  localStorage.setItem("auth_uid", String(authUid));
+                } catch {}
+
+                // Verification read: ensure the document contains the
+                // expected subscription fields so the UI will pick it up.
+                try {
+                  const verified = await getClientProfile(authUid).catch(
+                    () => null
+                  );
+                  if (verified && (verified.planId || verified.smsCredits)) {
+                    console.log(
+                      `[PaymentSuccess] Verified saved subscription at clients/${authUid}/profile/main`,
+                      verified
+                    );
+                    try {
+                      setPlanInfo({
+                        planName:
+                          verified.planName ||
+                          verified.planId ||
+                          payload.planId ||
+                          plan.name,
+                        smsCredits:
+                          verified.smsCredits ||
+                          verified.remainingCredits ||
+                          payload.smsCredits ||
+                          plan.sms,
+                      });
+                    } catch {}
+                  } else {
+                    console.warn(
+                      `[PaymentSuccess] Verification read returned empty or missing fields for clients/${authUid}/profile/main`,
+                      verified
+                    );
+                  }
+                } catch (verErr) {
+                  console.warn(
+                    "[PaymentSuccess] Verification read failed:",
+                    verErr
+                  );
+                }
+              } catch (fireErr) {
+                console.warn(
+                  "[PaymentSuccess] Client-side Firestore write to auth-UID client failed (will still try server):",
+                  fireErr
+                );
+              }
+            }
+          } catch (e) {
+            console.warn(
+              "[PaymentSuccess] Error ensuring client doc for auth uid:",
+              e
+            );
+          }
+
+          // Also attempt a best-effort write to the server-provided companyId
           const candidateCompanyId =
             payload.companyId ||
             companyIdForPayload ||
-            currentUser?.uid ||
+            (found && found.companyId) ||
             null;
-          if (candidateCompanyId) {
-            // Build a canonical profile object to save
-            const profilePayload: any = {
-              planId: payload.planId,
-              planName: payload.planId
-                ? payload.planId
-                : payload.planName || plan.name,
-              smsCredits: payload.smsCredits,
-              remainingCredits: payload.smsCredits,
-              status: payload.status || "active",
-              activatedAt: Timestamp.now(),
-              updatedAt: Timestamp.now(),
-            };
-            // Compute expiry if durationMonths exists
-            if (payload.durationMonths && Number(payload.durationMonths) > 0) {
-              const months = Number(payload.durationMonths || 1);
-              const expiry = new Date();
-              expiry.setMonth(expiry.getMonth() + months);
-              profilePayload.expiryAt = Timestamp.fromDate(expiry);
-            }
-            if (payload.sessionId)
-              profilePayload.paymentSessionId = payload.sessionId;
-
+          if (
+            candidateCompanyId &&
+            candidateCompanyId !== (currentUser?.uid || null)
+          ) {
             try {
               await updateClientProfile(
                 candidateCompanyId,
                 profilePayload as any
               );
-              firestoreSaved = true;
               console.log(
-                `[PaymentSuccess] Wrote subscription to Firestore clients/${candidateCompanyId}/profile/main (client-side)`
+                `[PaymentSuccess] Also attempted to write canonical subscription to clients/${candidateCompanyId}/profile/main (best-effort)`
               );
               try {
-                localStorage.setItem("companyId", String(candidateCompanyId));
+                localStorage.setItem(
+                  "serverCompanyId",
+                  String(candidateCompanyId)
+                );
               } catch {}
-            } catch (fireErr) {
+
+              // Verification read for server company id (best-effort)
+              try {
+                const serverVerified = await getClientProfile(
+                  candidateCompanyId
+                ).catch(() => null);
+                if (serverVerified) {
+                  console.log(
+                    `[PaymentSuccess] Verified server-side profile at clients/${candidateCompanyId}/profile/main`,
+                    serverVerified
+                  );
+                }
+              } catch (vErr) {
+                // Non-fatal
+              }
+            } catch (e) {
               console.warn(
-                "[PaymentSuccess] Client-side Firestore write failed (will still try server):",
-                fireErr
+                "[PaymentSuccess] Best-effort write to server companyId failed (non-fatal):",
+                e
               );
             }
           }
@@ -404,66 +547,81 @@ const PaymentSuccessPage: React.FC = () => {
           console.warn("[PaymentSuccess] Error preparing Firestore write:", e);
         }
 
-        // Try to save to server; prefer ID token when available
+        // Try to save to server; prefer ID token when available. If a
+        // canonical subscription was already found we may skip the server
+        // POST but continue to ensure the client-visible profile is
+        // populated (above).
         try {
-          const headers: any = { "Content-Type": "application/json" };
-          if (currentUser) {
-            try {
-              const idToken = await currentUser.getIdToken();
-              headers.Authorization = `Bearer ${idToken}`;
-            } catch {}
-          }
-          // Also surface the companyId and planId into headers so the server
-          // can more easily reconcile requests when the request body may be
-          // affected by proxies or other quirks.
-          if (payload.companyId) headers["x-company-id"] = payload.companyId;
-          if (payload.planId) headers["x-plan-id"] = payload.planId;
-          console.log("[PaymentSuccess] Posting subscription to server:", {
-            url: `${base}/api/subscription`,
-            headers,
-            payload,
-          });
-
-          const response = await fetch(`${base}/api/subscription`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(payload),
-          });
-
-          const data = await response.json().catch(() => ({}));
-          if (data && data.success) {
+          if (skipServerPost) {
             console.log(
-              "✅ Subscription saved on server (billing/profile)",
-              data.subscription || data
+              "[PaymentSuccess] Skipping POST to server because canonical subscription already exists on server."
             );
           } else {
-            console.warn("[PaymentSuccess] Server save incomplete:", data);
-            // If server did not accept the payload (e.g., missing companyId),
-            // try claim by session id if sessionId is available
-            if (sessionId) {
+            const headers: any = { "Content-Type": "application/json" };
+            if (currentUser) {
               try {
-                const claimRes = await fetch(`${base}/api/subscription/claim`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    sessionId,
-                    userEmail: currentUser?.email,
-                  }),
-                });
-                const claimJson = await claimRes.json().catch(() => ({}));
-                if (claimJson && claimJson.success) {
-                  console.log(
-                    "✅ Claimed subscription via session endpoint:",
-                    claimJson.subscription
+                const idToken = await currentUser.getIdToken();
+                headers.Authorization = `Bearer ${idToken}`;
+              } catch {}
+            }
+            // Also surface the companyId and planId into headers so the server
+            // can more easily reconcile requests when the request body may be
+            // affected by proxies or other quirks.
+            if (payload.companyId) headers["x-company-id"] = payload.companyId;
+            if (payload.planId) headers["x-plan-id"] = payload.planId;
+            console.log("[PaymentSuccess] Posting subscription to server:", {
+              url: `${base}/api/subscription`,
+              headers,
+              payload,
+            });
+
+            const response = await fetch(`${base}/api/subscription`, {
+              method: "POST",
+              headers,
+              body: JSON.stringify(payload),
+            });
+
+            const data = await response.json().catch(() => ({}));
+            if (data && data.success) {
+              console.log(
+                "✅ Subscription saved on server (billing/profile)",
+                data.subscription || data
+              );
+            } else {
+              console.warn("[PaymentSuccess] Server save incomplete:", data);
+              // If server did not accept the payload (e.g., missing companyId),
+              // try claim by session id if sessionId is available
+              if (sessionId) {
+                try {
+                  const claimRes = await fetch(
+                    `${base}/api/subscription/claim`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        sessionId,
+                        userEmail: currentUser?.email,
+                      }),
+                    }
                   );
-                } else {
+                  const claimJson = await claimRes.json().catch(() => ({}));
+                  if (claimJson && claimJson.success) {
+                    console.log(
+                      "✅ Claimed subscription via session endpoint:",
+                      claimJson.subscription
+                    );
+                  } else {
+                    console.warn(
+                      "[PaymentSuccess] Claim attempt failed:",
+                      claimJson
+                    );
+                  }
+                } catch (claimErr) {
                   console.warn(
-                    "[PaymentSuccess] Claim attempt failed:",
-                    claimJson
+                    "[PaymentSuccess] Claim attempt error:",
+                    claimErr
                   );
                 }
-              } catch (claimErr) {
-                console.warn("[PaymentSuccess] Claim attempt error:", claimErr);
               }
             }
           }

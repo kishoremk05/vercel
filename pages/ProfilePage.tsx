@@ -7,6 +7,7 @@ import {
   initializeFirebase,
 } from "../lib/firebaseClient";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { getClientByAuthUid } from "../lib/firestoreClient";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -125,116 +126,204 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           }
         }
         if (!companyId) {
+          // No companyId stored — try to derive one from the authenticated
+          // user's client mapping so we can subscribe to a doc the user
+          // has permission to read.
+          try {
+            const auth = getFirebaseAuth();
+            const current = await waitForAuth(auth, 10000);
+            if (current) {
+              const mapped = await getClientByAuthUid(current.uid).catch(
+                () => null
+              );
+              if (mapped && mapped.id) {
+                companyId = mapped.id;
+                try {
+                  localStorage.setItem("companyId", companyId);
+                } catch {}
+              }
+            }
+          } catch (e) {
+            console.warn(
+              "[Profile] Failed to derive companyId from auth uid:",
+              e
+            );
+          }
+        }
+
+        if (!companyId) {
           setLoadingSubscription(false);
           return;
         }
 
-        // Subscribe to the canonical Firestore profile document so the
-        // UI updates in real-time when the server/admin writes subscription
-        // data (preferred over polling /api/subscription which can fail
-        // with a 502 if the API is temporarily unreachable).
-        try {
-          const db = getFirebaseDb();
-          const profileRef = doc(db, "clients", companyId, "profile", "main");
+        // Helper: subscribe to profile/main and billing/subscription for
+        // the provided companyId. If we receive a permission error we
+        // attempt to fall back to the authenticated user's client id.
+        const db = getFirebaseDb();
+        const subscribeForCompany = (cid: string) => {
+          try {
+            const profileRef = doc(db, "clients", cid, "profile", "main");
+            const billingRef = doc(
+              db,
+              "clients",
+              cid,
+              "billing",
+              "subscription"
+            );
 
-          // Listen to both `profile/main` (preferred) and `billing/subscription`
-          // (fallback) in real-time. Profile/main wins when it contains a
-          // plan; billing/subscription is used only when profile/main is
-          // empty or doesn't provide enough information.
-          const billingRef = doc(
-            db,
-            "clients",
-            companyId,
-            "billing",
-            "subscription"
-          );
+            // Unsubscribe existing listeners before re-subscribing
+            try {
+              if (unsubProfile) unsubProfile();
+            } catch {}
+            try {
+              if (unsubBilling) unsubBilling();
+            } catch {}
 
-          unsubProfile = onSnapshot(
-            profileRef,
-            (snap) => {
-              if (snap.exists()) {
-                const firebaseData = snap.data();
-                console.log("[Profile] profile/main changed:", firebaseData);
-                const hasPlan = !!(
-                  firebaseData.planId ||
-                  firebaseData.plan ||
-                  firebaseData.planName
-                );
-                if (hasPlan) {
+            unsubProfile = onSnapshot(
+              profileRef,
+              (snap) => {
+                if (snap.exists()) {
+                  const firebaseData = snap.data();
+                  console.log("[Profile] profile/main changed:", firebaseData);
+                  const hasPlan = !!(
+                    firebaseData.planId ||
+                    firebaseData.plan ||
+                    firebaseData.planName
+                  );
+                  if (hasPlan) {
+                    const formattedData = {
+                      planId: firebaseData.planId || firebaseData.plan || null,
+                      planName:
+                        firebaseData.planName ||
+                        firebaseData.name ||
+                        firebaseData.plan ||
+                        null,
+                      smsCredits:
+                        firebaseData.smsCredits ||
+                        firebaseData.remainingCredits ||
+                        (firebaseData.price &&
+                          (firebaseData.price === 75
+                            ? 600
+                            : firebaseData.price === 100
+                            ? 900
+                            : 250)) ||
+                        0,
+                      status: firebaseData.status || "active",
+                      price: firebaseData.price,
+                      startDate:
+                        firebaseData.activatedAt || firebaseData.startDate,
+                      expiryDate: firebaseData.expiryAt || firebaseData.endDate,
+                      remainingCredits:
+                        firebaseData.remainingCredits ||
+                        firebaseData.smsCredits ||
+                        0,
+                    };
+                    setSubscriptionData(formattedData);
+                  }
+                }
+                setLoadingSubscription(false);
+              },
+              async (err) => {
+                console.warn("[Profile] profile onSnapshot error:", err);
+                // If permission denied, try to fall back to the client's
+                // auth-UID-based document which the user should have access to.
+                if (
+                  err &&
+                  (err.code === "permission-denied" ||
+                    (err.message &&
+                      err.message.includes(
+                        "Missing or insufficient permissions"
+                      )))
+                ) {
+                  try {
+                    const auth = getFirebaseAuth();
+                    const current = await waitForAuth(auth, 10000);
+                    if (current) {
+                      const mapped = await getClientByAuthUid(
+                        current.uid
+                      ).catch(() => null);
+                      if (mapped && mapped.id && mapped.id !== cid) {
+                        try {
+                          localStorage.setItem("companyId", mapped.id);
+                        } catch {}
+                        subscribeForCompany(mapped.id);
+                        return;
+                      }
+                    }
+                  } catch (fallbackErr) {
+                    console.warn(
+                      "[Profile] Fallback derive companyId failed:",
+                      fallbackErr
+                    );
+                  }
+                }
+                setLoadingSubscription(false);
+              }
+            );
+
+            unsubBilling = onSnapshot(
+              billingRef,
+              (snap) => {
+                if (snap.exists()) {
+                  const b = snap.data();
+                  console.log("[Profile] billing/subscription changed:", b);
                   const formattedData = {
-                    planId: firebaseData.planId || firebaseData.plan || null,
-                    planName:
-                      firebaseData.planName ||
-                      firebaseData.name ||
-                      firebaseData.plan ||
-                      null,
-                    smsCredits:
-                      firebaseData.smsCredits ||
-                      firebaseData.remainingCredits ||
-                      (firebaseData.price &&
-                        (firebaseData.price === 75
-                          ? 600
-                          : firebaseData.price === 100
-                          ? 900
-                          : 250)) ||
-                      0,
-                    status: firebaseData.status || "active",
-                    price: firebaseData.price,
-                    startDate:
-                      firebaseData.activatedAt || firebaseData.startDate,
-                    expiryDate: firebaseData.expiryAt || firebaseData.endDate,
-                    remainingCredits:
-                      firebaseData.remainingCredits ||
-                      firebaseData.smsCredits ||
-                      0,
+                    planId: b.planId || null,
+                    planName: b.planName || null,
+                    smsCredits: b.smsCredits || b.remainingCredits || 0,
+                    status: b.status || "active",
+                    price: b.price,
+                    startDate: b.startDate,
+                    expiryDate: b.endDate,
+                    remainingCredits: b.remainingCredits || b.smsCredits || 0,
                   };
                   setSubscriptionData(formattedData);
                 }
+                setLoadingSubscription(false);
+              },
+              async (err) => {
+                console.warn("[Profile] billing onSnapshot error:", err);
+                if (
+                  err &&
+                  (err.code === "permission-denied" ||
+                    (err.message &&
+                      err.message.includes(
+                        "Missing or insufficient permissions"
+                      )))
+                ) {
+                  try {
+                    const auth = getFirebaseAuth();
+                    const current = await waitForAuth(auth, 10000);
+                    if (current) {
+                      const mapped = await getClientByAuthUid(
+                        current.uid
+                      ).catch(() => null);
+                      if (mapped && mapped.id && mapped.id !== cid) {
+                        try {
+                          localStorage.setItem("companyId", mapped.id);
+                        } catch {}
+                        subscribeForCompany(mapped.id);
+                        return;
+                      }
+                    }
+                  } catch (fallbackErr) {
+                    console.warn(
+                      "[Profile] Fallback derive companyId failed:",
+                      fallbackErr
+                    );
+                  }
+                }
+                setLoadingSubscription(false);
               }
-              setLoadingSubscription(false);
-            },
-            (err) => {
-              console.warn("[Profile] profile onSnapshot error:", err);
-              setLoadingSubscription(false);
-            }
-          );
+            );
+          } catch (firebaseError) {
+            console.warn("[Profile] Firestore subscribe error:", firebaseError);
+            setLoadingSubscription(false);
+          }
+        };
 
-          unsubBilling = onSnapshot(
-            billingRef,
-            (snap) => {
-              if (snap.exists()) {
-                const b = snap.data();
-                console.log("[Profile] billing/subscription changed:", b);
-                // Only set billing fallback if profile/main is not already
-                // providing plan information. We can't easily check profile
-                // snapshot state from here, so always set billing data when
-                // it exists; profile snapshot will overwrite when it arrives.
-                const formattedData = {
-                  planId: b.planId || null,
-                  planName: b.planName || null,
-                  smsCredits: b.smsCredits || b.remainingCredits || 0,
-                  status: b.status || "active",
-                  price: b.price,
-                  startDate: b.startDate,
-                  expiryDate: b.endDate,
-                  remainingCredits: b.remainingCredits || b.smsCredits || 0,
-                };
-                setSubscriptionData(formattedData);
-              }
-              setLoadingSubscription(false);
-            },
-            (err) => {
-              console.warn("[Profile] billing onSnapshot error:", err);
-              setLoadingSubscription(false);
-            }
-          );
-
-          // listeners are assigned to outer-scoped variables; cleanup
-          // will be handled by the effect's return function below.
-        } catch (firebaseError) {
-          console.warn("[Profile] Firestore subscribe error:", firebaseError);
-          setLoadingSubscription(false);
-        }
+        // Start subscriptions for the companyId we derived earlier
+        subscribeForCompany(companyId);
       } catch (error) {
         console.error("Error loading subscription data:", error);
       } finally {
