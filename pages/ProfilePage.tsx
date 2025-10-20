@@ -219,6 +219,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         0,
                     };
                     setSubscriptionData(formattedData);
+                    try {
+                      window.dispatchEvent(new Event("subscription:updated"));
+                    } catch {}
                   } else {
                     // Document exists but contains no plan info. Try a
                     // fallback: derive the client's own document (by auth
@@ -310,6 +313,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                     remainingCredits: b.remainingCredits || b.smsCredits || 0,
                   };
                   setSubscriptionData(formattedData);
+                  try {
+                    window.dispatchEvent(new Event("subscription:updated"));
+                  } catch {}
                 }
                 setLoadingSubscription(false);
               },
@@ -393,6 +399,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                     myProfile.remainingCredits || myProfile.smsCredits || 0,
                 };
                 setSubscriptionData(formattedData);
+                try {
+                  window.dispatchEvent(new Event("subscription:updated"));
+                } catch {}
                 try {
                   localStorage.setItem("companyId", me.uid);
                 } catch {}

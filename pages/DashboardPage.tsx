@@ -239,11 +239,26 @@ const SubscriptionCustomerLock: React.FC = () => {
 
     const evalLock = async () => {
       try {
-        const companyId =
+        let companyId =
           localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
+
+        // If no companyId in localStorage, try to derive it from Firebase auth
         if (!companyId) {
-          if (mounted) setLocked(true);
-          return;
+          try {
+            initializeFirebase();
+            const auth = getFirebaseAuth();
+            const user = await waitForAuth(auth, 5000).catch(() => null);
+            if (user && user.uid) {
+              companyId = user.uid;
+              try {
+                // Persist so subsequent checks are faster
+                localStorage.setItem("companyId", companyId);
+              } catch {}
+            }
+          } catch (e) {
+            // ignore and fall through to other checks
+            console.debug("[SubscriptionCustomerLock] auth derive failed:", e);
+          }
         }
 
         // 1) Firestore-first check
@@ -343,6 +358,7 @@ const SubscriptionCustomerLock: React.FC = () => {
     const onSubUpdated = () => evalLock();
     window.addEventListener("subscription:updated", onSubUpdated);
     window.addEventListener("storage", onSubUpdated);
+    window.addEventListener("auth:ready", onSubUpdated);
 
     return () => {
       mounted = false;
@@ -848,6 +864,7 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
         clearInterval(id);
         window.removeEventListener("subscription:updated", onSubUpdated);
         window.removeEventListener("storage", onSubUpdated);
+        window.removeEventListener("auth:ready", onSubUpdated);
       };
     }, []);
 
