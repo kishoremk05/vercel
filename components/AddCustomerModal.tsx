@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { XIcon } from "./icons";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
+import { initializeFirebase, getFirebaseAuth } from "../lib/firebaseClient";
+import { getClientProfile } from "../lib/firestoreClient";
 
 interface AddCustomerModalProps {
   onClose: () => void;
@@ -43,6 +45,51 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       // Get companyId for subscription check and SMS sending
       const companyId = localStorage.getItem("companyId") || "";
 
+      // Check Firestore profile first (preferred) then API subscription.
+      try {
+        initializeFirebase();
+        let profile: any = null;
+        if (companyId) {
+          profile = await getClientProfile(companyId).catch(() => null);
+        }
+        if (!profile) {
+          const auth = getFirebaseAuth();
+          const waitForAuth = (timeoutMs = 3000) =>
+            new Promise<any>((resolve) => {
+              if (auth.currentUser) return resolve(auth.currentUser);
+              const unsub = auth.onAuthStateChanged((u: any) => {
+                if (u) {
+                  try {
+                    unsub();
+                  } catch {}
+                  return resolve(u);
+                }
+              });
+              setTimeout(() => resolve(auth.currentUser || null), timeoutMs);
+            });
+          const user = await waitForAuth().catch(() => null);
+          if (user && user.uid)
+            profile = await getClientProfile(user.uid).catch(() => null);
+        }
+        if (profile) {
+          const hasPlan = Boolean(
+            profile.planId || profile.plan || profile.planName
+          );
+          if (hasPlan) {
+            // Firestore indicates active plan — allow send without further checks
+            console.log(
+              "[AddCustomerModal] Allowed by Firestore profile",
+              profile
+            );
+          } else {
+            // Fall through to API check below
+          }
+        }
+      } catch (fsErr) {
+        // Firestore check failed — fallback to API check below
+        console.debug("[AddCustomerModal] Firestore check failed:", fsErr);
+      }
+
       // Check SMS credits before sending
       if (companyId) {
         try {
@@ -53,27 +100,33 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             const subData = await subRes.json();
 
             if (subData.success && subData.subscription) {
-              const remaining =
-                subData.subscription.remainingCredits ??
-                subData.subscription.smsCredits ??
-                0;
-              const status = subData.subscription.status;
-
-              if (status !== "active") {
-                setError(
-                  "Your subscription is not active. Please activate your plan to send SMS."
+              const s = subData.subscription;
+              const hasPlan = Boolean(s.planId || s.plan || s.planName);
+              if (hasPlan) {
+                console.log(
+                  "[AddCustomerModal] Allowed by API subscription plan present",
+                  s
                 );
-                return;
-              }
+              } else {
+                const remaining = s.remainingCredits ?? s.smsCredits ?? 0;
+                const status = s.status;
 
-              if (remaining <= 0) {
-                setError(
-                  "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
-                );
-                return;
-              }
+                if (status !== "active") {
+                  setError(
+                    "Your subscription is not active. Please activate your plan to send SMS."
+                  );
+                  return;
+                }
 
-              console.log(`[SMS] Credits available: ${remaining}`);
+                if (remaining <= 0) {
+                  setError(
+                    "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                  );
+                  return;
+                }
+
+                console.log(`[SMS] Credits available: ${remaining}`);
+              }
             }
           }
         } catch (subErr) {

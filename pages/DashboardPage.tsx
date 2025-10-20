@@ -28,7 +28,12 @@ import { Customer, ActivityLog, CustomerStatus } from "../types";
 //   fetchClientProfile,
 // } from "../lib/dashboardFirebase";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
-import { initializeFirebase, getFirebaseAuth } from "../lib/firebaseClient";
+import {
+  initializeFirebase,
+  getFirebaseAuth,
+  getFirebaseDb,
+} from "../lib/firebaseClient";
+import { doc, onSnapshot } from "firebase/firestore";
 import { getClientProfile } from "../lib/firestoreClient";
 import {
   PlusIcon,
@@ -219,6 +224,7 @@ const SubscriptionDebugView: React.FC = () => {
 // hosted checkout is honored immediately after redirect.
 const SubscriptionCustomerLock: React.FC = () => {
   const [locked, setLocked] = React.useState<boolean>(true);
+  const unsubProfileListenerRef = React.useRef<(() => void) | null>(null);
 
   React.useEffect(() => {
     let mounted = true;
@@ -237,10 +243,30 @@ const SubscriptionCustomerLock: React.FC = () => {
         setTimeout(() => resolve(authObj.currentUser || null), timeoutMs);
       });
 
+    // store unsubscribe callback in ref to ensure cleanup can access it
     const evalLock = async () => {
       try {
         let companyId =
           localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
+
+        // Quick UI shortcut: if ProfilePage recently set a local flag indicating
+        // a Firestore profile had a plan, use that to unlock the UI immediately
+        // (the server/Firestore remains authoritative for actual send).
+        try {
+          const rawFlag = localStorage.getItem("profile_subscription_present");
+          if (rawFlag) {
+            const parsed = JSON.parse(rawFlag || "{}");
+            const age = Date.now() - (parsed.ts || 0);
+            // honor the flag only when it's fresh (e.g., 60s)
+            if (age >= 0 && age < 60 * 1000) {
+              // If companyId is present in flag and differs from current
+              // companyId, still honor it because ProfilePage reflects the
+              // authenticated user's doc
+              if (mounted) setLocked(false);
+              return;
+            }
+          }
+        } catch {}
 
         // If no companyId in localStorage, try to derive it from Firebase auth
         if (!companyId) {
@@ -261,46 +287,89 @@ const SubscriptionCustomerLock: React.FC = () => {
           }
         }
 
-        // 1) Firestore-first check
+        // 1) Auth-owned profile realtime listener (most authoritative for
+        // hosted-checkout flows). If the authenticated user's profile has
+        // plan info, unlock immediately and skip other checks.
         try {
           initializeFirebase();
           const auth = getFirebaseAuth();
-          let profile: any = null;
-          try {
-            profile = await getClientProfile(companyId).catch(() => null);
-          } catch {}
-          if (!profile) {
-            const user = await waitForAuth(auth).catch(() => null);
-            if (user && user.uid) {
-              profile = await getClientProfile(user.uid).catch(() => null);
-            }
-          }
-
-          if (profile) {
-            const hasPlan = Boolean(
-              profile.planId || profile.plan || profile.planName
-            );
-            const remainingRaw =
-              profile.remainingCredits ??
-              profile.smsCredits ??
-              profile.remaining ??
-              null;
-            const remaining =
-              remainingRaw === null ? null : Number(remainingRaw || 0);
-
-            if (hasPlan) {
-              // If remaining is unknown, treat as allowed per UX request
-              if (remaining === null || remaining > 0) {
-                if (mounted) setLocked(false);
-                return;
+          const user = await waitForAuth(auth).catch(() => null);
+          if (user && user.uid) {
+            try {
+              const db = getFirebaseDb();
+              // Try a direct read first so we can unlock immediately if profile exists
+              try {
+                const profileRead = await getClientProfile(user.uid).catch(
+                  () => null
+                );
+                if (profileRead) {
+                  const hasPlanRead = Boolean(
+                    profileRead.planId ||
+                      profileRead.plan ||
+                      profileRead.planName
+                  );
+                  if (hasPlanRead) {
+                    if (mounted) setLocked(false);
+                    return;
+                  }
+                }
+              } catch (readErr) {
+                console.debug(
+                  "[SubscriptionCustomerLock] auth profile direct read failed:",
+                  readErr
+                );
               }
-              if (mounted) setLocked(true);
-              return;
+
+              const profileRef = doc(
+                db,
+                "clients",
+                user.uid,
+                "profile",
+                "main"
+              );
+              const unsubProfile = onSnapshot(
+                profileRef,
+                (snap) => {
+                  if (snap && snap.exists()) {
+                    const profile = snap.data();
+                    const hasPlan = Boolean(
+                      profile.planId || profile.plan || profile.planName
+                    );
+                    if (hasPlan) {
+                      if (mounted) setLocked(false);
+                    }
+                  }
+                },
+                (err) => {
+                  console.debug(
+                    "[SubscriptionCustomerLock] auth profile onSnapshot error:",
+                    err
+                  );
+                }
+              );
+              unsubProfileListenerRef.current = unsubProfile;
+              // If we were able to derive companyId from the auth user, use it
+              if (!companyId) {
+                companyId = user.uid;
+                try {
+                  localStorage.setItem("companyId", companyId);
+                } catch {}
+              }
+              // Ensure we unsubscribe this listener when the component unmounts
+              // by storing it in `unsubProfileListener`.
+              unsubProfileListenerRef.current = unsubProfile;
+              // If profile document exists and has a plan, the onSnapshot
+              // handler will setLocked(false) and we can return early.
+            } catch (authSnapErr) {
+              console.debug(
+                "[SubscriptionCustomerLock] auth profile subscribe failed:",
+                authSnapErr
+              );
             }
           }
         } catch (fsErr) {
           console.debug(
-            "[SubscriptionCustomerLock] Firestore check failed:",
+            "[SubscriptionCustomerLock] Firestore auth listener failed:",
             fsErr
           );
         }
@@ -315,6 +384,15 @@ const SubscriptionCustomerLock: React.FC = () => {
           const data = await resp.json().catch(() => ({}));
           if (data && data.success && data.subscription) {
             const s = data.subscription;
+            // If the subscription object contains explicit plan information
+            // (planId / plan / planName) treat it as an active plan and
+            // unlock the UI immediately. This aligns with the ProfilePage
+            // behavior which writes plan details to Firestore after checkout.
+            const hasPlan = Boolean(s.planId || s.plan || s.planName);
+            if (hasPlan) {
+              if (mounted) setLocked(false);
+              return;
+            }
             const status = String(s.status || "").toLowerCase();
             const active =
               status === "active" || status === "paid" || status === "trialing";
@@ -335,6 +413,11 @@ const SubscriptionCustomerLock: React.FC = () => {
             return;
           }
           const sub = JSON.parse(raw);
+          const hasPlan = Boolean(sub.planId || sub.plan || sub.planName);
+          if (hasPlan) {
+            if (mounted) setLocked(false);
+            return;
+          }
           const active =
             sub.status === "active" &&
             sub.endDate &&
@@ -734,6 +817,7 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const SubscriptionCustomerLock: React.FC = () => {
     const [locked, setLocked] = React.useState<boolean>(true);
+    const unsubProfileListenerRef = React.useRef<(() => void) | null>(null);
 
     React.useEffect(() => {
       let mounted = true;
@@ -758,6 +842,11 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
             const data = await resp.json().catch(() => ({}));
             if (data && data.success && data.subscription) {
               const s = data.subscription;
+              const hasPlan = Boolean(s.planId || s.plan || s.planName);
+              if (hasPlan) {
+                if (mounted) setLocked(false);
+                return;
+              }
               const status = String(s.status || "").toLowerCase();
               const active =
                 status === "active" ||
@@ -803,12 +892,22 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
                   () => null
                 );
                 if (profile) {
+                  // If the Firestore profile contains any plan information,
+                  // unlock the dashboard immediately. This matches the
+                  // behavior used elsewhere that treats a profile-written
+                  // plan as authoritative for the UI.
+                  const hasPlan = Boolean(
+                    profile.planId || profile.plan || profile.planName
+                  );
+                  if (hasPlan) {
+                    if (mounted) setLocked(false);
+                    return;
+                  }
                   const status = String(profile.status || "").toLowerCase();
                   const active =
                     status === "active" ||
                     status === "paid" ||
-                    status === "trialing" ||
-                    Boolean(profile.planId || profile.plan || profile.planName);
+                    status === "trialing";
                   const remaining = Number(
                     profile.remainingCredits ?? profile.smsCredits ?? 0
                   );
@@ -832,6 +931,11 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
                 return;
               }
               const sub = JSON.parse(raw);
+              const hasPlan = Boolean(sub.planId || sub.plan || sub.planName);
+              if (hasPlan) {
+                if (mounted) setLocked(false);
+                return;
+              }
               const active =
                 sub.status === "active" &&
                 sub.endDate &&
@@ -861,6 +965,10 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
 
       return () => {
         mounted = false;
+        try {
+          if (unsubProfileListenerRef.current)
+            unsubProfileListenerRef.current();
+        } catch {}
         clearInterval(id);
         window.removeEventListener("subscription:updated", onSubUpdated);
         window.removeEventListener("storage", onSubUpdated);

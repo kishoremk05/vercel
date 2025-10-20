@@ -860,9 +860,12 @@ const App: React.FC = () => {
         const remaining =
           remainingRaw === null ? null : Number(remainingRaw || 0);
         if (hasPlan) {
-          if (remaining === null)
-            return { found: true, allowed: true, remaining: null, profile };
-          return { found: true, allowed: remaining > 0, remaining, profile };
+          // Aggressive behavior: if the Firestore profile contains any plan
+          // information (planId / plan / planName), consider the client
+          // subscribed and allow sending immediately. This ensures the
+          // dashboard unlocks right after hosted-checkout writes the
+          // profile doc, even before remainingCredits are populated.
+          return { found: true, allowed: true, remaining, profile };
         }
         return { found: true, allowed: false, remaining, profile };
       } catch (e) {
@@ -913,41 +916,47 @@ const App: React.FC = () => {
           const subData = await subRes.json();
 
           if (subData.success && subData.subscription) {
-            const remaining =
-              subData.subscription.remainingCredits ??
-              subData.subscription.smsCredits ??
-              0;
-            const status = subData.subscription.status;
+            const s = subData.subscription;
+            const hasPlan = Boolean(s.planId || s.plan || s.planName);
+            if (hasPlan) {
+              // API reports a plan — allow send immediately. Server remains
+              // authoritative but we prefer the presence of a plan to avoid
+              // blocking sends on stale local storage.
+              console.log("[SMS] Allowed by API subscription plan present", s);
+            } else {
+              const remaining = s.remainingCredits ?? s.smsCredits ?? 0;
+              const status = s.status;
 
-            if (status !== "active") {
-              alert(
-                "Your subscription is not active. Please activate your plan to send SMS."
-              );
-              setCustomers((prev) =>
-                prev.map((c) =>
-                  c.id === customer.id
-                    ? { ...c, status: CustomerStatus.Failed }
-                    : c
-                )
-              );
-              return { ok: false, reason: "Subscription not active" };
+              if (status !== "active") {
+                alert(
+                  "Your subscription is not active. Please activate your plan to send SMS."
+                );
+                setCustomers((prev) =>
+                  prev.map((c) =>
+                    c.id === customer.id
+                      ? { ...c, status: CustomerStatus.Failed }
+                      : c
+                  )
+                );
+                return { ok: false, reason: "Subscription not active" };
+              }
+
+              if (remaining <= 0) {
+                alert(
+                  "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
+                );
+                setCustomers((prev) =>
+                  prev.map((c) =>
+                    c.id === customer.id
+                      ? { ...c, status: CustomerStatus.Failed }
+                      : c
+                  )
+                );
+                return { ok: false, reason: "SMS limit reached" };
+              }
+
+              console.log(`[SMS] Credits available: ${remaining}`);
             }
-
-            if (remaining <= 0) {
-              alert(
-                "SMS limit reached! You have 0 SMS credits remaining. Please upgrade your plan or wait for renewal."
-              );
-              setCustomers((prev) =>
-                prev.map((c) =>
-                  c.id === customer.id
-                    ? { ...c, status: CustomerStatus.Failed }
-                    : c
-                )
-              );
-              return { ok: false, reason: "SMS limit reached" };
-            }
-
-            console.log(`[SMS] Credits available: ${remaining}`);
           }
         } catch (subErr) {
           console.warn(

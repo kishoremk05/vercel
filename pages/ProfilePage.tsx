@@ -220,6 +220,15 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                     };
                     setSubscriptionData(formattedData);
                     try {
+                      // Mark a short-lived local flag so other tabs can
+                      // immediately update their UI while Firestore remains
+                      // the true source of authority for sends.
+                      try {
+                        localStorage.setItem(
+                          "profile_subscription_present",
+                          JSON.stringify({ companyId: cid, ts: Date.now() })
+                        );
+                      } catch {}
                       window.dispatchEvent(new Event("subscription:updated"));
                     } catch {}
                   } else {
@@ -314,6 +323,12 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                   };
                   setSubscriptionData(formattedData);
                   try {
+                    try {
+                      localStorage.setItem(
+                        "profile_subscription_present",
+                        JSON.stringify({ companyId: cid, ts: Date.now() })
+                      );
+                    } catch {}
                     window.dispatchEvent(new Event("subscription:updated"));
                   } catch {}
                 }
@@ -400,6 +415,12 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                 };
                 setSubscriptionData(formattedData);
                 try {
+                  try {
+                    localStorage.setItem(
+                      "profile_subscription_present",
+                      JSON.stringify({ companyId: me.uid, ts: Date.now() })
+                    );
+                  } catch {}
                   window.dispatchEvent(new Event("subscription:updated"));
                 } catch {}
                 try {
