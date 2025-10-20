@@ -1558,58 +1558,110 @@ app.post("/api/payments/webhook", async (req, res) => {
         amount: session.amount_total || session.amount,
       });
 
-      // Update subscription in Firestore
-      if (firestoreEnabled && metadata.companyId) {
+      // Update subscription in Firestore. Prefer clients/{companyId} v2
+      // schema (billing + profile/main) so the frontend can read a
+      // canonical document regardless of whether the event came from
+      // the API POST path or webhook path.
+      if (
+        firestoreEnabled &&
+        metadata.companyId &&
+        metadata.companyId !== "unknown"
+      ) {
         try {
           const firestore = firebaseAdmin.firestore();
-          const companyRef = firestore
-            .collection("companies")
-            .doc(metadata.companyId);
+          const companyId = String(metadata.companyId);
 
-          // Calculate expiry date based on plan
+          // Calculate expiry date & sms credits based on plan
           const now = new Date();
           let expiryDate = new Date(now);
           let smsCredits = 250; // Default for starter
+          let planId = metadata.plan || metadata.planId || null;
+          let planName = planId || null;
 
-          if (metadata.plan === "starter_1m") {
+          if (planId === "starter_1m") {
             expiryDate.setMonth(expiryDate.getMonth() + 1);
             smsCredits = 250;
-          } else if (metadata.plan === "growth_3m") {
+            planName = "Starter";
+          } else if (planId === "growth_3m") {
             expiryDate.setMonth(expiryDate.getMonth() + 3);
             smsCredits = 600;
-          } else if (metadata.plan === "pro_6m") {
+            planName = "Growth";
+          } else if (planId === "pro_6m") {
             expiryDate.setMonth(expiryDate.getMonth() + 6);
             smsCredits = 900;
+            planName = "Professional";
+          } else if (metadata.planName) {
+            planName = metadata.planName;
           }
 
-          await companyRef.set(
-            {
-              subscription: {
-                status: "active",
-                plan: metadata.plan,
-                smsCredits: smsCredits,
-                remainingCredits: smsCredits,
-                startDate: firebaseAdmin.firestore.Timestamp.fromDate(now),
-                expiryDate:
-                  firebaseAdmin.firestore.Timestamp.fromDate(expiryDate),
-                paymentSessionId: session.id || session.subscription_id,
-                lastPaymentDate:
-                  firebaseAdmin.firestore.Timestamp.fromDate(now),
-              },
-              updatedAt: firebaseAdmin.firestore.Timestamp.now(),
-            },
-            { merge: true }
-          );
+          // Billing payload (keeps legacy billing doc in sync)
+          try {
+            const billingRef = firestore
+              .collection("clients")
+              .doc(companyId)
+              .collection("billing")
+              .doc("subscription");
+            const months = Number(metadata.durationMonths) || 1;
+            const totalMs = months * 30 * 24 * 60 * 60 * 1000;
+            const billingPayload = {
+              planId: planId || planName,
+              planName: planName || planId || metadata.plan || null,
+              smsCredits: smsCredits,
+              remainingCredits: smsCredits,
+              startDate: firebaseAdmin.firestore.Timestamp.fromDate(now),
+              endDate: firebaseAdmin.firestore.Timestamp.fromMillis(
+                Date.now() + totalMs
+              ),
+              status: "active",
+              updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
+            };
+            await billingRef.set(billingPayload, { merge: true });
+          } catch (billingErr) {
+            console.warn(
+              "[Dodo Webhook] Failed to write billing doc:",
+              billingErr?.message || billingErr
+            );
+          }
+
+          // Profile (canonical) payload
+          try {
+            const profileRef = firestore
+              .collection("clients")
+              .doc(companyId)
+              .collection("profile")
+              .doc("main");
+
+            const activatedAtTs = firebaseAdmin.firestore.Timestamp.now();
+            const expiryAtTs = firebaseAdmin.firestore.Timestamp.fromMillis(
+              expiryDate.getTime()
+            );
+
+            const profilePayload = {
+              planId: planId || planName || metadata.plan || null,
+              planName: planName || planId || metadata.plan || null,
+              smsCredits: smsCredits,
+              remainingCredits: smsCredits,
+              status: "active",
+              activatedAt: activatedAtTs,
+              expiryAt: expiryAtTs,
+              paymentSessionId: session.id || session.subscription_id,
+              updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
+            };
+
+            await profileRef.set(profilePayload, { merge: true });
+            console.log(
+              `[Dodo Webhook] ✅ Saved subscription to clients/${companyId}/profile/main`
+            );
+          } catch (profileErr) {
+            console.error(
+              "[Dodo Webhook] Failed to save subscription to profile/main:",
+              profileErr?.message || profileErr
+            );
+          }
 
           console.log(
             "[Dodo Webhook] ✅ Subscription activated for company:",
             metadata.companyId
-          );
-          console.log(
-            "[Dodo Webhook] SMS Credits:",
-            smsCredits,
-            "| Expires:",
-            expiryDate.toISOString()
           );
         } catch (dbError) {
           console.error(
@@ -1619,7 +1671,7 @@ app.post("/api/payments/webhook", async (req, res) => {
         }
       } else {
         console.log(
-          "[Dodo Webhook] ⚠️ Skipping database update - Firestore disabled or no companyId"
+          "[Dodo Webhook] ⚠️ Skipping database update - Firestore disabled or no/unknown companyId"
         );
       }
     }

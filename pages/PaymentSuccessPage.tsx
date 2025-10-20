@@ -67,6 +67,18 @@ const PaymentSuccessPage: React.FC = () => {
 
         const urlParams = new URLSearchParams(window.location.search);
         const planId = urlParams.get("plan") || undefined;
+        // Session / subscription id from provider (try many param names)
+        const sessionId =
+          urlParams.get("sessionId") ||
+          urlParams.get("subscription_id") ||
+          urlParams.get("subscriptionId") ||
+          urlParams.get("id") ||
+          urlParams.get("sid") ||
+          urlParams.get("session") ||
+          undefined;
+        // Will be set if we find a canonical subscription while waiting
+        let found: any = null;
+        // (sessionId is already declared above)
 
         console.log("[PaymentSuccess] Starting subscription save:", {
           planId,
@@ -148,7 +160,7 @@ const PaymentSuccessPage: React.FC = () => {
           };
 
           // Try a few times (simple retry) to let webhook/admin writes finish
-          let found = null;
+          found = null;
           const companyId = await getCompanyId();
           for (let i = 0; i < 4; i++) {
             found = await fetchSubscriptionByCompany(companyId).catch(
@@ -180,7 +192,7 @@ const PaymentSuccessPage: React.FC = () => {
           // and the server-admin write will make the subscription visible there.
         }
 
-        // Map plan to SMS credits and name
+        // Map planId -> plan details
         const planMapping: Record<
           string,
           { name: string; sms: number; months: number }
@@ -193,9 +205,46 @@ const PaymentSuccessPage: React.FC = () => {
           halfyearly: { name: "Professional", sms: 900, months: 6 },
         };
 
-        const plan = planMapping[planId];
+        // Derive an effective planId if URL didn't contain one
+        const smsToPlan = (sms?: number) => {
+          if (!sms) return null;
+          if (sms === 250) return "starter_1m";
+          if (sms === 600) return "growth_3m";
+          if (sms === 900) return "pro_6m";
+          return null;
+        };
+
+        let effectivePlanId: string | null = planId || null;
+        if (!effectivePlanId && typeof found === "object" && found) {
+          effectivePlanId =
+            found.planId ||
+            found.plan ||
+            smsToPlan(found.smsCredits || found.remainingCredits || 0) ||
+            null;
+        }
+
+        // Determine plan object either from mapping or from found payload
+        let plan = effectivePlanId ? planMapping[effectivePlanId] : null;
+        if (!plan && typeof found === "object" && found) {
+          plan = {
+            name:
+              found.planName ||
+              found.name ||
+              String(effectivePlanId || "Custom"),
+            sms: found.smsCredits || found.remainingCredits || 0,
+            months: found.months || 1,
+          } as any;
+          // Keep a syntactic planId when we don't have one
+          if (!effectivePlanId && plan.sms) {
+            effectivePlanId = smsToPlan(plan.sms) || null;
+          }
+        }
+
         if (!plan) {
-          console.warn("Unknown plan:", planId);
+          console.warn(
+            "Unknown plan and no canonical subscription to infer it.",
+            { planId, found }
+          );
           return;
         }
 
@@ -209,40 +258,99 @@ const PaymentSuccessPage: React.FC = () => {
         const base = await getSmsServerUrl().catch(() => "");
         if (!base) console.warn("[PaymentSuccess] No API base available");
 
-        // Require authenticated user for server write
-        if (!currentUser) {
-          console.error(
-            "❌ Cannot save subscription: user not authenticated after redirect. Please log in and try again."
-          );
-        } else {
-          try {
-            const idToken = await currentUser.getIdToken();
-            const response = await fetch(`${base}/api/subscription`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${idToken}`,
-              },
-              body: JSON.stringify({
-                planId,
-                smsCredits: plan.sms,
-                durationMonths: plan.months,
-                status: "active",
-              }),
-            });
+        // Build payload for server save
+        const payload: any = {
+          planId: effectivePlanId || plan.name,
+          smsCredits: plan.sms,
+          durationMonths: plan.months,
+          status: "active",
+        };
 
-            const data = await response.json().catch(() => ({}));
-            if (data && data.success) {
-              console.log("✅ Subscription saved on server (billing)");
-            } else {
-              console.error(
-                "Failed to save subscription on server:",
-                data.error || data
-              );
+        // Determine companyId if available or supply userEmail for server-side derivation
+        let derivedCompanyId = null;
+        try {
+          derivedCompanyId = localStorage.getItem("companyId");
+        } catch {}
+        if (!derivedCompanyId && currentUser) {
+          try {
+            const baseLocal = await getSmsServerUrl().catch(() => "");
+            if (baseLocal) {
+              const idToken = await currentUser.getIdToken();
+              const meResp = await fetch(`${baseLocal}/auth/me`, {
+                headers: { Authorization: `Bearer ${idToken}` },
+              });
+              if (meResp.ok) {
+                const meJson = await meResp.json().catch(() => ({}));
+                derivedCompanyId = meJson.companyId || null;
+              }
             }
           } catch (e) {
-            console.error("Error posting subscription to server:", e);
+            console.warn("[PaymentSuccess] getCompanyId (me) failed:", e);
           }
+        }
+
+        if (derivedCompanyId) payload.companyId = derivedCompanyId;
+        if (!payload.companyId && currentUser?.email)
+          payload.userEmail = currentUser.email;
+
+        // If a sessionId is present, include it so the server can reconcile via provider API if needed
+        if (sessionId) payload.sessionId = sessionId;
+
+        // Try to save to server; prefer ID token when available
+        try {
+          const headers: any = { "Content-Type": "application/json" };
+          if (currentUser) {
+            try {
+              const idToken = await currentUser.getIdToken();
+              headers.Authorization = `Bearer ${idToken}`;
+            } catch {}
+          }
+
+          const response = await fetch(`${base}/api/subscription`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload),
+          });
+
+          const data = await response.json().catch(() => ({}));
+          if (data && data.success) {
+            console.log(
+              "✅ Subscription saved on server (billing/profile)",
+              data.subscription || data
+            );
+          } else {
+            console.warn("[PaymentSuccess] Server save incomplete:", data);
+            // If server did not accept the payload (e.g., missing companyId),
+            // try claim by session id if sessionId is available
+            if (sessionId) {
+              try {
+                const claimRes = await fetch(`${base}/api/subscription/claim`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    sessionId,
+                    userEmail: currentUser?.email,
+                  }),
+                });
+                const claimJson = await claimRes.json().catch(() => ({}));
+                if (claimJson && claimJson.success) {
+                  console.log(
+                    "✅ Claimed subscription via session endpoint:",
+                    claimJson.subscription
+                  );
+                } else {
+                  console.warn(
+                    "[PaymentSuccess] Claim attempt failed:",
+                    claimJson
+                  );
+                }
+              } catch (claimErr) {
+                console.warn("[PaymentSuccess] Claim attempt error:", claimErr);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Error posting subscription to server:", e);
         }
       } catch (error) {
         console.error("Error saving subscription:", error);
