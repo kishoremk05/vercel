@@ -16,6 +16,7 @@ import {
   where,
   getDocs,
 } from "firebase/firestore";
+import { updateClientProfile } from "../lib/firestoreClient";
 
 const PaymentSuccessPage: React.FC = () => {
   const [countdown, setCountdown] = useState(5);
@@ -294,11 +295,10 @@ const PaymentSuccessPage: React.FC = () => {
 
         setPlanInfo({ planName: plan.name, smsCredits: plan.sms });
 
-        // Save subscription to server; server should persist to Firestore
-        // (admin write) so other browsers/devices can read it without client
-        // authentication. We'll POST the subscription with the caller's
-        // Firebase ID token so the server can verify and map the user ->
-        // companyId securely.
+        // As a best-effort we will also write the subscription directly to
+        // Firestore from the client so the Profile page immediately shows
+        // the plan details. The server POST (admin write) remains the
+        // authoritative operation and will reconcile/overwrite if needed.
         const base = await getSmsServerUrl().catch(() => "");
         if (!base) console.warn("[PaymentSuccess] No API base available");
 
@@ -348,6 +348,61 @@ const PaymentSuccessPage: React.FC = () => {
 
         // If a sessionId is present, include it so the server can reconcile via provider API if needed
         if (sessionId) payload.sessionId = sessionId;
+
+        // Try a client-side Firestore write first (best-effort) so the
+        // Profile page can reflect the purchase immediately for this user.
+        let firestoreSaved = false;
+        try {
+          const candidateCompanyId =
+            payload.companyId ||
+            companyIdForPayload ||
+            currentUser?.uid ||
+            null;
+          if (candidateCompanyId) {
+            // Build a canonical profile object to save
+            const profilePayload: any = {
+              planId: payload.planId,
+              planName: payload.planId
+                ? payload.planId
+                : payload.planName || plan.name,
+              smsCredits: payload.smsCredits,
+              remainingCredits: payload.smsCredits,
+              status: payload.status || "active",
+              activatedAt: Timestamp.now(),
+              updatedAt: Timestamp.now(),
+            };
+            // Compute expiry if durationMonths exists
+            if (payload.durationMonths && Number(payload.durationMonths) > 0) {
+              const months = Number(payload.durationMonths || 1);
+              const expiry = new Date();
+              expiry.setMonth(expiry.getMonth() + months);
+              profilePayload.expiryAt = Timestamp.fromDate(expiry);
+            }
+            if (payload.sessionId)
+              profilePayload.paymentSessionId = payload.sessionId;
+
+            try {
+              await updateClientProfile(
+                candidateCompanyId,
+                profilePayload as any
+              );
+              firestoreSaved = true;
+              console.log(
+                `[PaymentSuccess] Wrote subscription to Firestore clients/${candidateCompanyId}/profile/main (client-side)`
+              );
+              try {
+                localStorage.setItem("companyId", String(candidateCompanyId));
+              } catch {}
+            } catch (fireErr) {
+              console.warn(
+                "[PaymentSuccess] Client-side Firestore write failed (will still try server):",
+                fireErr
+              );
+            }
+          }
+        } catch (e) {
+          console.warn("[PaymentSuccess] Error preparing Firestore write:", e);
+        }
 
         // Try to save to server; prefer ID token when available
         try {
@@ -420,21 +475,40 @@ const PaymentSuccessPage: React.FC = () => {
       }
     };
 
-    saveSubscription();
+    const savePromise = saveSubscription();
 
-    // Auto-redirect to dashboard after 5 seconds
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          window.location.href = "/dashboard";
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    // Start the redirect countdown once the save completes or after a
+    // short timeout — this improves the chance the profile shows the
+    // new plan on the dashboard immediately after redirect.
+    const MAX_WAIT_MS = 5000;
+    const startRedirectTimer = () => {
+      const timer = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            window.location.href = "/dashboard";
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    };
 
-    return () => clearInterval(timer);
+    let cleanupTimer: (() => void) | null = null;
+    Promise.race([
+      savePromise.catch(() => null),
+      new Promise((r) => setTimeout(r, MAX_WAIT_MS)),
+    ]).then(() => {
+      // Start the visible countdown after save or timeout
+      cleanupTimer = startRedirectTimer();
+    });
+
+    return () => {
+      try {
+        if (cleanupTimer) cleanupTimer();
+      } catch {}
+    };
   }, []);
 
   const handleGoToDashboard = () => {

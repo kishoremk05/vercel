@@ -688,6 +688,34 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         })()}
                       </p>
                     </div>
+                    {/* SMS Credits */}
+                    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-lg border border-indigo-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="w-5 h-5 text-indigo-600"
+                        >
+                          <path d="M3 5a1 1 0 011-1h16a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V5z" />
+                          <path d="M7 9h10v2H7V9z" />
+                        </svg>
+                        <span className="text-sm font-semibold text-gray-700">
+                          SMS Credits
+                        </span>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {subscriptionData.smsCredits ?? "N/A"}
+                      </p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Remaining: {subscriptionData.remainingCredits ?? "N/A"}
+                      </p>
+                      <div className="mt-2">
+                        <SmsCreditsDisplay
+                          subscriptionData={subscriptionData}
+                        />
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="text-center py-8 text-gray-600">
