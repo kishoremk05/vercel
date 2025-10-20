@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { ActivityLog } from "../types";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
-import { getFirebaseDb } from "../lib/firebaseClient";
+import {
+  getFirebaseDb,
+  getFirebaseAuth,
+  initializeFirebase,
+} from "../lib/firebaseClient";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -58,7 +62,46 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   useEffect(() => {
     const loadSubscriptionData = async () => {
       try {
-        const companyId = localStorage.getItem("companyId");
+        let companyId = null;
+        try {
+          companyId = localStorage.getItem("companyId");
+        } catch {}
+
+        // If companyId isn't in localStorage (redirects can clear it), try
+        // to derive it from the server via /auth/me using the current
+        // Firebase ID token. This allows the Profile page to show
+        // subscription data even when localStorage was lost during
+        // hosted-checkout redirects.
+        if (!companyId) {
+          try {
+            initializeFirebase();
+            const auth = getFirebaseAuth();
+            const user = auth.currentUser;
+            if (user) {
+              const baseLocal = await getSmsServerUrl().catch(() => "");
+              if (baseLocal) {
+                const idToken = await user.getIdToken();
+                const meResp = await fetch(`${baseLocal}/auth/me`, {
+                  headers: { Authorization: `Bearer ${idToken}` },
+                });
+                if (meResp.ok) {
+                  const meJson = await meResp.json().catch(() => ({}));
+                  companyId = meJson.companyId || null;
+                  if (companyId) {
+                    try {
+                      localStorage.setItem("companyId", companyId);
+                    } catch {}
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(
+              "[Profile] Failed to derive companyId from auth/me:",
+              e
+            );
+          }
+        }
         if (!companyId) {
           setLoadingSubscription(false);
           return;

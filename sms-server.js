@@ -1093,8 +1093,15 @@ app.post("/api/subscription", async (req, res) => {
     if (!firestoreEnabled) {
       return res.status(503).json({ error: "Database not configured" });
     }
-    let { companyId, planId, smsCredits, durationMonths, status, userEmail } =
-      req.body || {};
+    let {
+      companyId,
+      planId,
+      smsCredits,
+      durationMonths,
+      status,
+      userEmail,
+      sessionId,
+    } = req.body || {};
     // Accept companyId from various places (body, headers, query)
     companyId =
       companyId ||
@@ -1202,6 +1209,39 @@ app.post("/api/subscription", async (req, res) => {
       }
     }
 
+    // Attempt to derive planId from other fields (planName, price, headers)
+    try {
+      const priceToPlan = { 30: "starter_1m", 75: "growth_3m", 100: "pro_6m" };
+      if (!planId) {
+        planId =
+          req.body.plan ||
+          req.body.planId ||
+          req.headers["x-plan-id"] ||
+          req.headers["x-plan"] ||
+          req.query.plan ||
+          null;
+      }
+      if (!planId && req.body.planName) {
+        const pn = String(req.body.planName).toLowerCase();
+        if (pn.includes("growth")) planId = "growth_3m";
+        else if (pn.includes("pro") || pn.includes("professional"))
+          planId = "pro_6m";
+        else if (pn.includes("starter") || pn.includes("monthly"))
+          planId = "starter_1m";
+      }
+      if (!planId && (req.body.price || req.headers["x-price"])) {
+        const priceRaw = req.body.price || req.headers["x-price"];
+        const pnum = typeof priceRaw === "number" ? priceRaw : Number(priceRaw);
+        if (!Number.isNaN(pnum) && priceToPlan[pnum])
+          planId = priceToPlan[pnum];
+      }
+    } catch (e) {
+      console.warn(
+        "[api:subscription] planId derivation failed:",
+        e?.message || e
+      );
+    }
+
     if (!companyId || !planId) {
       return res.status(400).json({ error: "companyId & planId required" });
     }
@@ -1221,6 +1261,7 @@ app.post("/api/subscription", async (req, res) => {
       startDate: new Date().toISOString(),
       endDate: new Date(Date.now() + totalMs).toISOString(),
       status: status || "active",
+      paymentSessionId: sessionId || null,
       updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
     };
     await ref.set(payload, { merge: true });
@@ -1248,6 +1289,7 @@ app.post("/api/subscription", async (req, res) => {
         status: payload.status || "active",
         activatedAt: activatedAtTs,
         expiryAt: expiryAtTs,
+        paymentSessionId: sessionId || null,
         updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
       };
 
@@ -1268,6 +1310,183 @@ app.post("/api/subscription", async (req, res) => {
     return res
       .status(500)
       .json({ error: e.message || "Failed to save subscription" });
+  }
+});
+
+// Claim a previously-created payment session and attach it to a client.
+// Useful when the hosted checkout redirect loses metadata or the client
+// needs to reconcile a sessionId after the webhook has run.
+app.post("/api/subscription/claim", async (req, res) => {
+  try {
+    if (!firestoreEnabled) {
+      return res
+        .status(503)
+        .json({ success: false, error: "firestore-disabled" });
+    }
+    const { sessionId, userEmail } = req.body || {};
+    if (!sessionId && !userEmail) {
+      return res
+        .status(400)
+        .json({ success: false, error: "sessionId or userEmail required" });
+    }
+
+    const firestore = firebaseAdmin.firestore();
+
+    // If we have a sessionId, try to locate a profile document that already
+    // contains that sessionId (collectionGroup search across all clients).
+    if (sessionId) {
+      try {
+        const cg = await firestore
+          .collectionGroup("profile")
+          .where("paymentSessionId", "==", String(sessionId))
+          .limit(1)
+          .get();
+        if (!cg.empty) {
+          const profileSnap = cg.docs[0];
+          const profileData = profileSnap.data();
+          // Derive companyId from the document path: clients/{companyId}/profile/main
+          const pathParts = profileSnap.ref.path.split("/");
+          const companyId = pathParts[1] || null;
+
+          // Attempt to derive planId from common fields
+          let planId =
+            profileData.planId ||
+            profileData.plan ||
+            profileData.planName ||
+            null;
+          const priceToPlan = {
+            30: "starter_1m",
+            75: "growth_3m",
+            100: "pro_6m",
+          };
+          if (!planId && profileData.price) {
+            const p =
+              typeof profileData.price === "number"
+                ? profileData.price
+                : Number(profileData.price);
+            if (!Number.isNaN(p) && priceToPlan[p]) planId = priceToPlan[p];
+          }
+
+          if (!companyId) {
+            return res
+              .status(404)
+              .json({
+                success: false,
+                error: "Could not derive companyId from session",
+              });
+          }
+
+          if (!planId) {
+            return res
+              .status(400)
+              .json({
+                success: false,
+                error: "Could not derive planId from session/profile data",
+              });
+          }
+
+          // Normalize and persist billing + profile as /api/subscription does
+          const months =
+            planId === "growth_3m" ? 3 : planId === "pro_6m" ? 6 : 1;
+          const smsCredits =
+            planId === "growth_3m" ? 600 : planId === "pro_6m" ? 900 : 250;
+          const totalMs = months * 30 * 24 * 60 * 60 * 1000;
+
+          const billingRef = firestore
+            .collection("clients")
+            .doc(String(companyId))
+            .collection("billing")
+            .doc("subscription");
+          const billingPayload = {
+            planId,
+            planName: profileData.planName || planId,
+            smsCredits,
+            remainingCredits: smsCredits,
+            startDate: firebaseAdmin.firestore.Timestamp.now(),
+            endDate: firebaseAdmin.firestore.Timestamp.fromMillis(
+              Date.now() + totalMs
+            ),
+            status: "active",
+            updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
+          };
+          await billingRef.set(billingPayload, { merge: true });
+
+          const profileRef = firestore
+            .collection("clients")
+            .doc(String(companyId))
+            .collection("profile")
+            .doc("main");
+          const profilePayload = {
+            planId: billingPayload.planId,
+            planName: billingPayload.planName,
+            smsCredits: billingPayload.smsCredits,
+            remainingCredits: billingPayload.remainingCredits,
+            status: "active",
+            activatedAt: firebaseAdmin.firestore.Timestamp.now(),
+            expiryAt: firebaseAdmin.firestore.Timestamp.fromMillis(
+              Date.now() + totalMs
+            ),
+            paymentSessionId: String(sessionId),
+            updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
+          };
+          await profileRef.set(profilePayload, { merge: true });
+
+          return res.json({
+            success: true,
+            subscription: profilePayload,
+            companyId,
+          });
+        }
+      } catch (e) {
+        console.warn("[api:subscription:claim] sessionId search failed:", e);
+      }
+    }
+
+    // Fallback: if user provided an email, try to derive companyId from clients
+    if (userEmail) {
+      try {
+        const clientsRef = firestore.collection("clients");
+        const q = await clientsRef
+          .where("email", "==", String(userEmail))
+          .limit(1)
+          .get();
+        if (!q.empty) {
+          const cid = q.docs[0].id;
+          const profileRef = firestore
+            .collection("clients")
+            .doc(cid)
+            .collection("profile")
+            .doc("main");
+          const snap = await profileRef.get();
+          if (snap.exists) {
+            return res.json({
+              success: true,
+              companyId: cid,
+              subscription: snap.data(),
+            });
+          }
+          return res
+            .status(404)
+            .json({
+              success: false,
+              error:
+                "No session found for this email; please re-submit with companyId & planId",
+              companyId: cid,
+            });
+        }
+      } catch (e) {
+        console.warn("[api:subscription:claim] email lookup failed:", e);
+      }
+    }
+
+    return res
+      .status(404)
+      .json({ success: false, error: "No matching session or company found" });
+  } catch (e) {
+    console.error("[api:subscription:claim] error", e);
+    return res
+      .status(500)
+      .json({ success: false, error: e.message || "claim-failed" });
   }
 });
 

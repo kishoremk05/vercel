@@ -78,6 +78,9 @@ const PaymentSuccessPage: React.FC = () => {
           undefined;
         // Will be set if we find a canonical subscription while waiting
         let found: any = null;
+        // Keep companyId available to the rest of the function so we can
+        // include it in the server POST payload if needed.
+        let companyIdForPayload: string | null = null;
         // (sessionId is already declared above)
 
         console.log("[PaymentSuccess] Starting subscription save:", {
@@ -161,9 +164,9 @@ const PaymentSuccessPage: React.FC = () => {
 
           // Try a few times (simple retry) to let webhook/admin writes finish
           found = null;
-          const companyId = await getCompanyId();
+          companyIdForPayload = await getCompanyId();
           for (let i = 0; i < 4; i++) {
-            found = await fetchSubscriptionByCompany(companyId).catch(
+            found = await fetchSubscriptionByCompany(companyIdForPayload).catch(
               () => null
             );
             if (found) break;
@@ -182,6 +185,33 @@ const PaymentSuccessPage: React.FC = () => {
                 smsCredits: found.smsCredits || found.remainingCredits || 0,
               });
             } catch {}
+            // Persist derived companyId in localStorage so other pages (Profile)
+            // can subscribe to the correct Firestore document. Prefer the
+            // companyId we used to fetch the canonical subscription when
+            // available.
+            try {
+              const persistId =
+                companyIdForPayload ||
+                found.companyId ||
+                found.clientId ||
+                null;
+              if (persistId) {
+                localStorage.setItem("companyId", String(persistId));
+              }
+            } catch (e) {}
+            // If the canonical subscription already contains a planId and we
+            // have a companyId, there's nothing further for the client to do:
+            // the server/webhook already wrote the canonical doc and the
+            // Profile page will display it. Skip the POST to avoid 400s.
+            if (
+              (found.planId || found.plan || found.planName) &&
+              (companyIdForPayload || found.companyId)
+            ) {
+              console.log(
+                "[PaymentSuccess] Canonical subscription already present; skipping server POST."
+              );
+              return;
+            }
           } else {
             console.warn(
               "[PaymentSuccess] No subscription found after retries. The server or webhook may still be processing."
@@ -214,12 +244,26 @@ const PaymentSuccessPage: React.FC = () => {
           return null;
         };
 
+        // Price -> plan mapping (keeps parity with App.tsx PLAN_PRICES)
+        const priceToPlan: Record<number, string> = {
+          30: "starter_1m",
+          75: "growth_3m",
+          100: "pro_6m",
+        };
+
         let effectivePlanId: string | null = planId || null;
         if (!effectivePlanId && typeof found === "object" && found) {
           effectivePlanId =
             found.planId ||
             found.plan ||
             smsToPlan(found.smsCredits || found.remainingCredits || 0) ||
+            // Older or alternate docs may store price instead of planId
+            (typeof found.price === "number"
+              ? priceToPlan[found.price]
+              : typeof found.price === "string" &&
+                !Number.isNaN(Number(found.price))
+              ? priceToPlan[Number(found.price)]
+              : null) ||
             null;
         }
 
@@ -290,6 +334,15 @@ const PaymentSuccessPage: React.FC = () => {
         }
 
         if (derivedCompanyId) payload.companyId = derivedCompanyId;
+        // Prefer a companyId we discovered earlier when fetching canonical
+        // subscription (if any). This reduces chances of a server 400.
+        if (!payload.companyId && companyIdForPayload)
+          payload.companyId = companyIdForPayload;
+        // As a last resort, try to use companyId-like values from the found
+        // payload (some variants of the data include clientId/companyId).
+        if (!payload.companyId && typeof found === "object" && found) {
+          payload.companyId = found.companyId || found.clientId || null;
+        }
         if (!payload.companyId && currentUser?.email)
           payload.userEmail = currentUser.email;
 
@@ -305,6 +358,16 @@ const PaymentSuccessPage: React.FC = () => {
               headers.Authorization = `Bearer ${idToken}`;
             } catch {}
           }
+          // Also surface the companyId and planId into headers so the server
+          // can more easily reconcile requests when the request body may be
+          // affected by proxies or other quirks.
+          if (payload.companyId) headers["x-company-id"] = payload.companyId;
+          if (payload.planId) headers["x-plan-id"] = payload.planId;
+          console.log("[PaymentSuccess] Posting subscription to server:", {
+            url: `${base}/api/subscription`,
+            headers,
+            payload,
+          });
 
           const response = await fetch(`${base}/api/subscription`, {
             method: "POST",
