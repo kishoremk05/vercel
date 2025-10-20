@@ -378,12 +378,19 @@ const PaymentSuccessPage: React.FC = () => {
             planName: payload.planId
               ? payload.planId
               : payload.planName || plan.name,
-            smsCredits: payload.smsCredits,
-            remainingCredits: payload.smsCredits,
             status: payload.status || "active",
             activatedAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           };
+          // Only include smsCredits/remainingCredits when we have a positive
+          // value. This prevents the client from writing an explicit 0
+          // (which may be transient) and relies on the server/webhook to
+          // populate canonical credits when appropriate.
+          const smsCreditsNumber = Number(payload.smsCredits || 0);
+          if (Number.isFinite(smsCreditsNumber) && smsCreditsNumber > 0) {
+            profilePayload.smsCredits = smsCreditsNumber;
+            profilePayload.remainingCredits = smsCreditsNumber;
+          }
           if (payload.durationMonths && Number(payload.durationMonths) > 0) {
             const months = Number(payload.durationMonths || 1);
             const expiry = new Date();

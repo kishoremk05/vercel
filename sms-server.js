@@ -1253,11 +1253,25 @@ app.post("/api/subscription", async (req, res) => {
       .doc("subscription");
     const months = Number(durationMonths) || 1;
     const totalMs = months * 30 * 24 * 60 * 60 * 1000;
+    // Map common plans to SMS credits. Unknown plans default to a safe
+    // starter amount so client-side writes don't accidentally persist
+    // zero credits when the payload omits or sets smsCredits=0.
+    const PLAN_CREDITS = { starter_1m: 250, growth_3m: 600, pro_6m: 900 };
+    let smsCreditsNum = Number(smsCredits);
+    if (!Number.isFinite(smsCreditsNum) || smsCreditsNum <= 0) {
+      if (planId && PLAN_CREDITS[planId]) {
+        smsCreditsNum = PLAN_CREDITS[planId];
+      } else {
+        // default fallback for unknown/custom plans
+        smsCreditsNum = 250;
+      }
+    }
+
     const payload = {
       planId,
       planName: planId,
-      smsCredits: Number(smsCredits) || 0,
-      remainingCredits: Number(smsCredits) || 0,
+      smsCredits: smsCreditsNum,
+      remainingCredits: smsCreditsNum,
       startDate: new Date().toISOString(),
       endDate: new Date(Date.now() + totalMs).toISOString(),
       status: status || "active",
@@ -1368,21 +1382,17 @@ app.post("/api/subscription/claim", async (req, res) => {
           }
 
           if (!companyId) {
-            return res
-              .status(404)
-              .json({
-                success: false,
-                error: "Could not derive companyId from session",
-              });
+            return res.status(404).json({
+              success: false,
+              error: "Could not derive companyId from session",
+            });
           }
 
           if (!planId) {
-            return res
-              .status(400)
-              .json({
-                success: false,
-                error: "Could not derive planId from session/profile data",
-              });
+            return res.status(400).json({
+              success: false,
+              error: "Could not derive planId from session/profile data",
+            });
           }
 
           // Normalize and persist billing + profile as /api/subscription does
@@ -1465,14 +1475,12 @@ app.post("/api/subscription/claim", async (req, res) => {
               subscription: snap.data(),
             });
           }
-          return res
-            .status(404)
-            .json({
-              success: false,
-              error:
-                "No session found for this email; please re-submit with companyId & planId",
-              companyId: cid,
-            });
+          return res.status(404).json({
+            success: false,
+            error:
+              "No session found for this email; please re-submit with companyId & planId",
+            companyId: cid,
+          });
         }
       } catch (e) {
         console.warn("[api:subscription:claim] email lookup failed:", e);
