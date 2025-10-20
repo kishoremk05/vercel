@@ -15,6 +15,13 @@ export interface ClientProfileDocument {
   email: string;
   last_login: Timestamp;
   google_auth: boolean;
+  // Optional profile fields used by the frontend/dashboard
+  planId?: string;
+  plan?: string;
+  planName?: string;
+  smsCredits?: number;
+  remainingCredits?: number;
+  status?: string;
 }
 
 export interface ClientDashboardDocument {

@@ -1958,7 +1958,7 @@ const App: React.FC = () => {
     // Always show AuthPage if /auth route or not logged in
     return (
       <AuthPage
-        onAuthSuccess={(role) => {
+        onAuthSuccess={async (role) => {
           if (role === "admin") {
             setAuth({ role: "admin" });
             try {
@@ -1974,29 +1974,99 @@ const App: React.FC = () => {
                 joinBase("admin")
               );
             }
-          } else {
-            // Buyer login: check if user came from a plan selection or wants to see pricing
-            setAuth({ role: "buyer" });
-            let pending: string | null = null;
+            return;
+          }
+
+          // Buyer login: check for pending plan first
+          setAuth({ role: "buyer" });
+          let pending: string | null = null;
+          try {
+            pending = localStorage.getItem("pendingPlan");
+          } catch {}
+
+          if (pending) {
             try {
-              pending = localStorage.getItem("pendingPlan");
+              localStorage.removeItem("pendingPlan");
+            } catch {}
+            startCheckout(pending);
+            return;
+          }
+
+          // No pending plan - check if this user already has a subscription.
+          // If they do, send them to Dashboard; otherwise show Payment page.
+          try {
+            const authModule = await import("./lib/firebaseAuth");
+            const currentUser = authModule.getCurrentUser
+              ? authModule.getCurrentUser()
+              : null;
+
+            let clientId: string | null = null;
+            try {
+              clientId = localStorage.getItem("companyId");
             } catch {}
 
-            if (pending) {
-              // User selected a plan before login -> continue to checkout immediately
-              localStorage.removeItem("pendingPlan");
-              startCheckout(pending);
-            } else {
-              // No pending plan -> show Payment page (pricing) so they can choose a plan
-              // This enables the flow: Homepage → Login → Payment (pricing) → Dashboard
-              setCurrentPage(Page.Payment);
-              const target = joinBase("payment");
-              if (
-                stripBase(window.location.pathname).toLowerCase() !== "/payment"
-              ) {
-                window.history.pushState({ page: "/payment" }, "", target);
+            if (!clientId && currentUser) {
+              clientId = await authModule.getUserClientId(currentUser);
+            }
+
+            if (clientId) {
+              const { getClientProfile } = await import(
+                "./lib/firestoreClient"
+              );
+              const profile = await getClientProfile(clientId);
+
+              const hasPlan =
+                profile &&
+                (profile.planId ||
+                  profile.plan ||
+                  profile.planName ||
+                  profile.smsCredits ||
+                  profile.remainingCredits);
+
+              const status =
+                (profile && (profile.status || "active")) || "active";
+              const isActive = ["active", "trialing", "paid"].includes(
+                String(status).toLowerCase()
+              );
+
+              if (hasPlan && isActive) {
+                try {
+                  localStorage.setItem("companyId", clientId);
+                  localStorage.setItem("clientId", clientId);
+                  if (currentUser?.email)
+                    localStorage.setItem("userEmail", currentUser.email);
+                  if (currentUser?.uid)
+                    localStorage.setItem("auth_uid", currentUser.uid);
+                } catch {}
+
+                // notify other parts of the app that auth is ready
+                window.dispatchEvent(new Event("auth:ready"));
+
+                setCurrentPage(Page.Dashboard);
+                if (
+                  stripBase(window.location.pathname).toLowerCase() !==
+                  "/dashboard"
+                ) {
+                  window.history.pushState(
+                    { page: "/dashboard" },
+                    "",
+                    "/dashboard"
+                  );
+                }
+                return;
               }
             }
+          } catch (e) {
+            console.warn("[App] Subscription check failed during login:", e);
+          }
+
+          // Fallback: show Payment page
+          setCurrentPage(Page.Payment);
+          const target = joinBase("payment");
+          if (
+            stripBase(window.location.pathname).toLowerCase() !== "/payment"
+          ) {
+            window.history.pushState({ page: "/payment" }, "", target);
           }
         }}
       />

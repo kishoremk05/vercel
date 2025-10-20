@@ -67,8 +67,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         })
       );
 
-      // Navigate to dashboard
-      window.history.pushState({ page: "/dashboard" }, "", "/dashboard");
+      // Let the app-level onAuthSuccess handle navigation so it can
+      // check for an existing subscription before deciding where to go.
       onAuthSuccess("client");
     } catch (err: any) {
       setError(err.message || "Login failed. Please try again.");
@@ -114,8 +114,8 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         })
       );
 
-      // Navigate to dashboard
-      window.history.pushState({ page: "/dashboard" }, "", "/dashboard");
+      // Let the app-level onAuthSuccess handle navigation so it can
+      // check for an existing subscription before deciding where to go.
       onAuthSuccess("client");
     } catch (err: any) {
       setError(err.message || "Google login failed. Please try again.");
