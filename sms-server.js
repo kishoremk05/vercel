@@ -1078,7 +1078,120 @@ app.get("/api/subscription", async (req, res) => {
         }
       }
     }
-    return res.json({ success: true, subscription: snap.data() });
+    try {
+      const raw = snap.data() || {};
+
+      // Ensure we always return a subscription object with smsCredits
+      // and remainingCredits populated (useful for debug/verify UI).
+      const priceToPlan = { 30: "starter_1m", 75: "growth_3m", 100: "pro_6m" };
+      const PLAN_CREDITS = { starter_1m: 250, growth_3m: 600, pro_6m: 900 };
+
+      const normalized = { ...raw };
+
+      const planIdGuess =
+        (raw.planId || raw.plan || "") && String(raw.planId || raw.plan || "");
+
+      const deriveCredits = (src) => {
+        // Prefer explicit planId mapping
+        const pid =
+          (src.planId || src.plan || null) &&
+          String(src.planId || src.plan || "");
+        if (pid && PLAN_CREDITS[pid]) return PLAN_CREDITS[pid];
+        // Try price-based inference
+        const priceRaw = src.price || src.amount || src.price_raw || null;
+        const pnum = typeof priceRaw === "number" ? priceRaw : Number(priceRaw);
+        if (
+          !Number.isNaN(pnum) &&
+          priceToPlan[pnum] &&
+          PLAN_CREDITS[priceToPlan[pnum]]
+        )
+          return PLAN_CREDITS[priceToPlan[pnum]];
+        // Try name-based inference
+        const name = src.planName || src.name || "";
+        if (name && typeof name === "string") {
+          const n = name.toLowerCase();
+          if (n.includes("growth") || n.includes("quarter")) return 600;
+          if (
+            n.includes("pro") ||
+            n.includes("professional") ||
+            n.includes("half")
+          )
+            return 900;
+          if (n.includes("starter") || n.includes("monthly")) return 250;
+        }
+        // Default fallback for unknown/custom plans
+        return 250;
+      };
+
+      const hasSms =
+        Number.isFinite(Number(raw.smsCredits)) && Number(raw.smsCredits) > 0;
+      const hasRemaining =
+        Number.isFinite(Number(raw.remainingCredits)) &&
+        Number(raw.remainingCredits) > 0;
+
+      // If missing, compute defaults for response
+      if (!hasSms) {
+        normalized.smsCredits = deriveCredits(raw);
+      }
+      if (!hasRemaining) {
+        // If remaining not present, default to smsCredits (fresh purchase)
+        normalized.remainingCredits = Number(normalized.smsCredits || 0);
+      }
+
+      // Support an explicit repair flag so manual verification can persist
+      // derived credits into Firestore. This prevents accidental writes from
+      // normal read-only requests.
+      const wantRepair =
+        req.query &&
+        (String(req.query.repair) === "1" ||
+          String(req.query.repair) === "true");
+      if (wantRepair) {
+        try {
+          const billingRef = firestore
+            .collection("clients")
+            .doc(String(companyId))
+            .collection("billing")
+            .doc("subscription");
+          const profileRef = firestore
+            .collection("clients")
+            .doc(String(companyId))
+            .collection("profile")
+            .doc("main");
+
+          const updatePayload = {
+            smsCredits: Number(normalized.smsCredits || 0),
+            remainingCredits: Number(normalized.remainingCredits || 0),
+            planId:
+              normalized.planId ||
+              normalized.plan ||
+              normalized.planName ||
+              null,
+            planName: normalized.planName || normalized.name || null,
+            status: normalized.status || "active",
+            updatedAt: firebaseAdmin.firestore.FieldValue.serverTimestamp(),
+          };
+
+          // Merge into billing and profile docs to keep both in sync.
+          await billingRef.set(updatePayload, { merge: true });
+          await profileRef.set(updatePayload, { merge: true });
+          console.log(
+            `[api:subscription:get] Auto-repaired missing credits for company=${companyId} -> smsCredits=${updatePayload.smsCredits}`
+          );
+          normalized._autoRepaired = true;
+        } catch (e) {
+          console.warn(
+            "[api:subscription:get] Auto-repair failed:",
+            e?.message || e
+          );
+          normalized._autoRepaired = false;
+        }
+      }
+
+      return res.json({ success: true, subscription: normalized });
+    } catch (e) {
+      console.error("[api:subscription:get] normalize error", e);
+      return res.json({ success: true, subscription: snap.data() });
+    }
   } catch (e) {
     console.error("[api:subscription:get] error", e);
     return res.json({
@@ -1493,13 +1606,11 @@ app.post("/api/subscription/claim", async (req, res) => {
     }
 
     if (!sessionId && !userEmail && !companyId) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error:
-            "sessionId or userEmail required (or provide x-company-id / Authorization token)",
-        });
+      return res.status(400).json({
+        success: false,
+        error:
+          "sessionId or userEmail required (or provide x-company-id / Authorization token)",
+      });
     }
 
     const firestore = firebaseAdmin.firestore();
