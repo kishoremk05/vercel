@@ -1112,26 +1112,58 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
         return;
       }
 
+      // Get ID token from current user so server can verify ownership
+      let idToken: string | null = null;
+      try {
+        initializeFirebase();
+        const au = getFirebaseAuth().currentUser;
+        if (au) {
+          idToken = await au.getIdToken();
+        }
+      } catch (tokenErr) {
+        console.warn("[profile:delete] Failed to obtain ID token:", tokenErr);
+      }
+
       const base = await getSmsServerUrl().catch(() => API_BASE);
       const url = base
         ? `${base}/api/account/delete`
         : `${API_BASE}/api/account/delete`;
 
+      const headers: any = { "Content-Type": "application/json" };
+      if (idToken) headers.Authorization = `Bearer ${idToken}`;
+
+      // Include email as additional hint for server-side deletion
+      let userEmail: string | null = null;
+      try {
+        const au = getFirebaseAuth().currentUser;
+        userEmail = au?.email || null;
+      } catch {}
+
       const response = await fetch(url, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companyId,
-          auth_uid,
-        }),
+        headers,
+        body: JSON.stringify({ companyId, auth_uid, userEmail }),
       });
 
       const data = await response.json();
 
       if (data.success) {
-        // Clear all localStorage
-        localStorage.clear();
-        sessionStorage.clear();
+        // Clear relevant localStorage keys to avoid resurrecting a deleted
+        // profile from stale client-side state.
+        try {
+          localStorage.removeItem("companyId");
+          localStorage.removeItem("serverCompanyId");
+          localStorage.removeItem("auth_uid");
+          localStorage.removeItem("subscription");
+          localStorage.removeItem("pendingPlan");
+          localStorage.removeItem("profile_subscription_present");
+          localStorage.removeItem("businessName");
+          localStorage.removeItem("businessNameUpdatedAt");
+          localStorage.removeItem("profilePhoto");
+        } catch {}
+        try {
+          sessionStorage.clear();
+        } catch {}
 
         // Redirect to home
         window.location.href = "/";
