@@ -236,8 +236,7 @@ const TopNav: React.FC<TopNavProps> = ({
           </button>
           {/* Right actions */}
           <div className="hidden md:flex items-center gap-2 lg:gap-3">
-            {/* Current Plan */}
-            <CurrentPlanBadge />
+            {/* Current Plan (removed) */}
             <div className="hidden lg:flex items-center relative">
               <button
                 onClick={() => setShowUserMenu((s) => !s)}
@@ -485,71 +484,6 @@ const TopNav: React.FC<TopNavProps> = ({
 
 export default TopNav;
 
-// Current Plan Badge - shows the active subscription plan
-const CurrentPlanBadge: React.FC = () => {
-  const [planName, setPlanName] = React.useState<string>("");
-
-  React.useEffect(() => {
-    const fetchPlanName = async () => {
-      try {
-        const companyId = localStorage.getItem("companyId");
-        if (!companyId) return;
-
-        // Try to get from localStorage first
-        const cached = localStorage.getItem("subscription");
-        if (cached) {
-          const sub = JSON.parse(cached);
-          if (sub && sub.planName) {
-            setPlanName(sub.planName);
-            return;
-          }
-        }
-
-        // Fetch from API
-        const smsServerUrl = localStorage.getItem("smsServerUrl");
-        if (!smsServerUrl) return;
-
-        const response = await fetch(
-          `${smsServerUrl}/api/subscription?companyId=${companyId}`
-        );
-        const data = await response.json();
-
-        if (data.success && data.subscription) {
-          setPlanName(data.subscription.planName || "");
-          // Cache it
-          localStorage.setItem(
-            "subscription",
-            JSON.stringify(data.subscription)
-          );
-        }
-      } catch (error) {
-        console.error("[CurrentPlanBadge] Error fetching plan:", error);
-      }
-    };
-
-    fetchPlanName();
-
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchPlanName, 30000);
-
-    // Listen for subscription updates
-    const handler = () => fetchPlanName();
-    window.addEventListener("subscription:updated", handler);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("subscription:updated", handler);
-    };
-  }, []);
-
-  if (!planName) return null;
-
-  return (
-    <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-green-50 border border-green-200">
-      <span className="h-2 w-2 rounded-full bg-emerald-500 mr-1" />
-      <span className="text-sm font-semibold text-emerald-700">{planName}</span>
-    </div>
-  );
-};
+// CurrentPlanBadge removed per design request.
 
 // SMS status removed from TopNav per design request.
