@@ -8,8 +8,6 @@ import {
   MessageIcon,
 } from "./icons";
 import { logout } from "../lib/firebaseAuth";
-import { getFirebaseDb } from "../lib/firebaseClient";
-import { doc, onSnapshot, getDoc } from "firebase/firestore";
 
 interface TopNavProps {
   currentPage: Page;
@@ -238,8 +236,7 @@ const TopNav: React.FC<TopNavProps> = ({
           </button>
           {/* Right actions */}
           <div className="hidden md:flex items-center gap-2 lg:gap-3">
-            {/* Current Plan + SMS Status */}
-            <SubscriptionStatusBadge />
+            {/* Current Plan */}
             <CurrentPlanBadge />
             <div className="hidden lg:flex items-center relative">
               <button
@@ -555,95 +552,4 @@ const CurrentPlanBadge: React.FC = () => {
   );
 };
 
-// Lightweight inline component to display SMS remaining (format: "SMS Left: 120/250")
-const SubscriptionStatusBadge: React.FC = () => {
-  const [sub, setSub] = React.useState<any>(null);
-
-  useEffect(() => {
-    let unsub: (() => void) | null = null;
-
-    const startFirestoreListener = () => {
-      try {
-        const companyId = localStorage.getItem("companyId");
-        if (!companyId) return false;
-        const db = getFirebaseDb();
-        const profileRef = doc(db, "clients", companyId, "profile", "main");
-        unsub = onSnapshot(
-          profileRef,
-          (snap) => {
-            if (snap.exists()) {
-              setSub(snap.data());
-            } else {
-              setSub(null);
-            }
-          },
-          (err) => {
-            console.warn(
-              "[SubscriptionStatusBadge] Firestore snapshot error:",
-              err
-            );
-          }
-        );
-        return true;
-      } catch (e) {
-        console.warn("[SubscriptionStatusBadge] Firestore listener failed:", e);
-        return false;
-      }
-    };
-
-    const startApiFetchFallback = async () => {
-      try {
-        const companyId = localStorage.getItem("companyId");
-        const smsServerUrl = localStorage.getItem("smsServerUrl");
-        if (!companyId || !smsServerUrl) return;
-        const response = await fetch(
-          `${smsServerUrl}/api/subscription?companyId=${companyId}`
-        );
-        const data = await response.json().catch(() => ({}));
-        if (data.success && data.subscription) {
-          setSub(data.subscription);
-        }
-      } catch (error) {
-        console.warn(
-          "[SubscriptionStatusBadge] Error fetching subscription from API:",
-          error
-        );
-      }
-    };
-
-    // Try Firestore listener first; fall back to API fetch if not possible
-    const ok = startFirestoreListener();
-    if (!ok) startApiFetchFallback();
-
-    // Also refresh from API periodically in case Firestore listener is not available
-    const id = setInterval(startApiFetchFallback, 30000);
-
-    return () => {
-      if (unsub) unsub();
-      clearInterval(id);
-    };
-  }, []);
-
-  if (!sub || sub.status !== "active") return null;
-
-  const remaining = sub.remainingCredits ?? sub.smsCredits ?? 0;
-  const total = sub.smsCredits ?? 0;
-  const sent = total - remaining;
-
-  return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 shadow-sm">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        className="h-4 w-4 text-indigo-600"
-      >
-        <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" />
-        <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" />
-      </svg>
-      <span className="text-xs font-bold text-indigo-700 whitespace-nowrap">
-        {sent}/{total} SMS
-      </span>
-    </div>
-  );
-};
+// SMS status removed from TopNav per design request.
