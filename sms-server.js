@@ -4014,76 +4014,206 @@ app.delete("/api/account/delete", async (req, res) => {
       });
     }
 
-    console.log(
-      `[api:account:delete] Attempting to delete account: ${companyId}`
-    );
+    console.log(`[api:account:delete] Attempting to delete account: ${companyId}`);
 
-    // Delete from Firebase Auth
-    try {
-      await firebaseAdmin.auth().deleteUser(auth_uid);
-      console.log(
-        `[api:account:delete] ✅ Deleted Firebase Auth user: ${auth_uid}`
-      );
-    } catch (authError) {
-      console.error(
-        `[api:account:delete] ⚠️ Failed to delete Auth user (may not exist):`,
-        authError.message
-      );
-      // Continue with Firestore deletion even if Auth deletion fails
+    const firestore = firebaseAdmin.firestore();
+
+    // ---------------------------
+    // Authorization & ownership
+    // ---------------------------
+    const authHeader = req.headers.authorization || req.headers.Authorization || "";
+    let callerUid = null;
+    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+      const idToken = String(authHeader).slice(7).trim();
+      try {
+        const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+        callerUid = decoded?.uid || decoded?.sub || null;
+      } catch (tokErr) {
+        console.warn("[api:account:delete] ID token verify failed:", tokErr?.message || tokErr);
+      }
     }
 
-    // Delete from Firestore
-    const firestore = firebaseAdmin.firestore();
-    const batch = firestore.batch();
+    if (!callerUid) {
+      console.error("[api:account:delete] Missing/invalid Authorization token for delete request");
+      return res.status(401).json({
+        success: false,
+        error: "Missing or invalid Authorization token for account deletion",
+      });
+    }
 
-    // Delete company document
-    const companyRef = firestore.collection("companies").doc(companyId);
-    batch.delete(companyRef);
+    // Attempt to derive the caller's company id (owner) so we can confirm ownership
+    let callerCompanyId = null;
+    try {
+      if (dbV2 && typeof dbV2.getUserById === "function") {
+        const u = await dbV2.getUserById(callerUid).catch(() => null);
+        if (u && u.companyId) callerCompanyId = String(u.companyId);
+      }
+    } catch (e) {
+      console.warn("[api:account:delete] dbV2.getUserById failed:", e?.message || e);
+    }
+    if (!callerCompanyId) {
+      try {
+        const q = firestore
+          .collection("clients")
+          .where("auth_uid", "==", String(callerUid))
+          .limit(1);
+        const snap = await q.get();
+        if (!snap.empty) callerCompanyId = snap.docs[0].id;
+      } catch (e) {
+        console.warn("[api:account:delete] owner company lookup failed:", e?.message || e);
+      }
+    }
 
-    // Delete client document (if exists)
-    const clientRef = firestore.collection("clients").doc(auth_uid);
-    batch.delete(clientRef);
+    // Caller must either be the auth_uid being deleted or map to the same companyId
+    const ownedByCaller =
+      String(callerUid) === String(auth_uid) ||
+      (callerCompanyId && String(callerCompanyId) === String(companyId));
+    if (!ownedByCaller) {
+      console.error("[api:account:delete] Unauthorized delete attempt", {
+        callerUid,
+        callerCompanyId,
+        targetCompanyId: companyId,
+        targetAuthUid: auth_uid,
+      });
+      return res.status(403).json({
+        success: false,
+        error: "Unauthorized: caller does not own this account",
+      });
+    }
 
-    // Delete subscription data (if stored separately)
-    const subscriptionRef = firestore
-      .collection("subscriptions")
-      .doc(companyId);
-    batch.delete(subscriptionRef);
+    // ---------------------------
+    // Helper: recursive delete
+    // ---------------------------
+    async function deleteDocRecursively(docRef) {
+      try {
+        // Prefer server-side recursiveDelete when available (fast, atomic)
+        const maybeRecursive = firestore.recursiveDelete || firestore.recursiveDelete;
+        if (typeof maybeRecursive === "function") {
+          try {
+            await firestore.recursiveDelete(docRef);
+            console.log("[api:account:delete] recursiveDelete used for", docRef.path);
+            return;
+          } catch (e) {
+            console.warn("[api:account:delete] recursiveDelete failed, falling back:", e?.message || e);
+          }
+        }
 
-    // Delete all feedback entries for this company
-    const feedbackSnapshot = await firestore
-      .collection("feedback")
-      .where("companyId", "==", companyId)
-      .get();
+        // Fallback: iterate subcollections and delete documents recursively
+        const subcols = await docRef.listCollections();
+        for (const col of subcols) {
+          let last = null;
+          // Page through documents in the collection to avoid memory spikes
+          while (true) {
+            let q = col.orderBy("__name__").limit(500);
+            if (last) q = q.startAfter(last);
+            const snap = await q.get();
+            if (snap.empty) break;
+            // Delete each document recursively
+            for (const d of snap.docs) {
+              await deleteDocRecursively(d.ref);
+            }
+            if (snap.size < 500) break;
+            last = snap.docs[snap.docs.length - 1];
+          }
+        }
 
-    feedbackSnapshot.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
+        // Finally delete the doc itself (if it exists)
+        try {
+          await docRef.delete();
+          console.log("[api:account:delete] Deleted doc:", docRef.path);
+        } catch (e) {
+          // If delete fails because doc missing, ignore
+          console.warn("[api:account:delete] docRef.delete() error:", docRef.path, e?.message || e);
+        }
+      } catch (e) {
+        console.error("[api:account:delete] recursive delete error for", docRef.path, e?.message || e);
+        // Best-effort: attempt a single delete as last resort
+        try {
+          await docRef.delete();
+        } catch (ignored) {}
+      }
+    }
 
-    // Delete all customer data for this company
-    const customersSnapshot = await firestore
-      .collection("customers")
-      .where("companyId", "==", companyId)
-      .get();
+    // ---------------------------
+    // Perform deletions
+    // ---------------------------
+    // Delete Firebase Auth user (best-effort)
+    try {
+      await firebaseAdmin.auth().deleteUser(String(auth_uid));
+      console.log(`[api:account:delete] ✅ Deleted Firebase Auth user: ${auth_uid}`);
+    } catch (authError) {
+      console.warn(
+        `[api:account:delete] ⚠️ Failed to delete Auth user (may not exist):`,
+        authError?.message || authError
+      );
+    }
 
-    customersSnapshot.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
+    // Delete main client document(s) recursively
+    try {
+      const clientCompanyRef = firestore.collection("clients").doc(String(companyId));
+      await deleteDocRecursively(clientCompanyRef).catch((e) =>
+        console.warn("[api:account:delete] failed to delete clients/{companyId} recursively:", e?.message || e)
+      );
 
-    // Commit the batch
-    await batch.commit();
+      // Also attempt to delete the auth_uid keyed client doc (if different)
+      if (String(auth_uid) !== String(companyId)) {
+        const clientAuthRef = firestore.collection("clients").doc(String(auth_uid));
+        await deleteDocRecursively(clientAuthRef).catch((e) =>
+          console.warn("[api:account:delete] failed to delete clients/{auth_uid} recursively:", e?.message || e)
+        );
+      }
+    } catch (e) {
+      console.warn("[api:account:delete] client recursive delete error:", e?.message || e);
+    }
 
-    console.log(
-      `[api:account:delete] ✅ Successfully deleted account: ${companyId}`
-    );
-    console.log(
-      `[api:account:delete] Deleted ${feedbackSnapshot.size} feedback entries and ${customersSnapshot.size} customer records`
-    );
+    // Delete company document (companies/{companyId})
+    try {
+      const companyRef = firestore.collection("companies").doc(String(companyId));
+      await deleteDocRecursively(companyRef).catch((e) =>
+        console.warn("[api:account:delete] failed to delete companies/{companyId}:", e?.message || e)
+      );
+    } catch (e) {
+      console.warn("[api:account:delete] company doc delete error:", e?.message || e);
+    }
 
-    res.json({
-      success: true,
-      message: "Account deleted successfully",
-    });
+    // Delete subscriptions root doc
+    try {
+      await firestore.collection("subscriptions").doc(String(companyId)).delete().catch(() => null);
+    } catch (e) {
+      console.warn("[api:account:delete] subscriptions doc delete failed:", e?.message || e);
+    }
+
+    // Helper to delete large result sets in batches
+    async function deleteCollectionWhere(collectionName, field, value) {
+      try {
+        const colRef = firestore.collection(collectionName);
+        let q = colRef.where(field, "==", value).orderBy("__name__").limit(500);
+        let totalDeleted = 0;
+        while (true) {
+          const snap = await q.get();
+          if (snap.empty) break;
+          const batch = firestore.batch();
+          snap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+          totalDeleted += snap.size;
+          if (snap.size < 500) break;
+          const last = snap.docs[snap.docs.length - 1];
+          q = colRef.where(field, "==", value).orderBy("__name__").startAfter(last).limit(500);
+        }
+        return totalDeleted;
+      } catch (e) {
+        console.warn(`[api:account:delete] deleteCollectionWhere ${collectionName} failed:`, e?.message || e);
+        return 0;
+      }
+    }
+
+    const feedbackDeleted = await deleteCollectionWhere("feedback", "companyId", String(companyId));
+    const customersDeleted = await deleteCollectionWhere("customers", "companyId", String(companyId));
+
+    console.log(`[api:account:delete] ✅ Successfully deleted account: ${companyId}`);
+    console.log(`[api:account:delete] Deleted feedback entries: ${feedbackDeleted}, customers: ${customersDeleted}`);
+
+    res.json({ success: true, message: "Account deleted successfully" });
   } catch (e) {
     console.error("[api:account:delete:error]", e);
     res.status(500).json({
