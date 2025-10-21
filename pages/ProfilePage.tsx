@@ -15,6 +15,19 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
+// Known plan metadata used to render friendly names and SMS allocation
+const PLAN_METADATA: Record<
+  string,
+  { name: string; smsCredits: number; price?: number }
+> = {
+  starter_1m: { name: "Starter", smsCredits: 250, price: 30 },
+  monthly: { name: "Starter", smsCredits: 250, price: 30 },
+  growth_3m: { name: "Growth", smsCredits: 600, price: 75 },
+  quarterly: { name: "Growth", smsCredits: 600, price: 75 },
+  pro_6m: { name: "Professional", smsCredits: 900, price: 100 },
+  halfyearly: { name: "Professional", smsCredits: 900, price: 100 },
+};
+
 interface ProfilePageProps {
   user: {
     name: string;
@@ -50,6 +63,11 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
+  // Render-time subscription which may merge Firestore data with
+  // client-side pending/legacy local values so the UI shows the
+  // plan the user selected (pendingPlan / local subscription) when
+  // Firestore contains an ambiguous value like "Custom".
+  const [displaySubscription, setDisplaySubscription] = useState<any>(null);
 
   // Load profile photo from localStorage on mount (Firebase upload handled separately)
   useEffect(() => {
@@ -62,6 +80,122 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
       console.error("Error loading profile photo from localStorage:", error);
     }
   }, []);
+
+  // Compute a merged display subscription anytime the authoritative
+  // subscriptionData changes or when relevant localStorage keys are
+  // updated (pendingPlan / subscription). Prefer the user's selected
+  // plan (pendingPlan or localStorage.subscription) when Firestore
+  // reports an ambiguous/custom plan or when local data has non-zero
+  // credits while Firestore shows zero (transient race cases).
+  useEffect(() => {
+    const computeDisplay = () => {
+      try {
+        // Parse legacy/local subscription if present
+        let localSub: any = null;
+        try {
+          const raw = localStorage.getItem("subscription");
+          if (raw) localSub = JSON.parse(raw);
+        } catch (e) {
+          // ignore parse errors
+        }
+
+        // Pending plan stored before redirect (set by PaymentPage)
+        let pendingPlan: string | null = null;
+        try {
+          pendingPlan = localStorage.getItem("pendingPlan");
+        } catch {}
+
+        // Helper to normalise a plan object from various sources
+        const normalise = (src: any) => {
+          if (!src) return null;
+          const planId = src.planId || src.plan || null;
+          const rawName = src.planName || src.name || planId || null;
+          const mapped = planId && PLAN_METADATA[planId];
+          return {
+            planId: planId || rawName,
+            planName: mapped ? mapped.name : rawName,
+            smsCredits:
+              Number(src.smsCredits || src.remainingCredits || 0) || 0,
+            remainingCredits:
+              Number(src.remainingCredits || src.smsCredits || 0) || 0,
+            price: src.price || (mapped && mapped.price) || undefined,
+            startDate: src.startDate || src.activatedAt || src.savedAt,
+            expiryDate: src.expiryDate || src.expiryAt || src.endDate,
+            paymentSessionId: src.paymentSessionId || src.sessionId || src.id,
+            raw: src,
+          };
+        };
+
+        const pendingPlanObj =
+          pendingPlan && PLAN_METADATA[pendingPlan]
+            ? {
+                planId: pendingPlan,
+                planName: PLAN_METADATA[pendingPlan].name,
+                smsCredits: PLAN_METADATA[pendingPlan].smsCredits,
+                remainingCredits: PLAN_METADATA[pendingPlan].smsCredits,
+                price: PLAN_METADATA[pendingPlan].price,
+              }
+            : null;
+
+        const server = normalise(subscriptionData);
+        const local = normalise(localSub);
+
+        // Decision heuristics (in order):
+        // 1. If a pendingPlan exists — the user explicitly selected it
+        //    and we should show that while the server reconciles.
+        // 2. If server has a non-ambiguous plan (not 'Custom') use it.
+        // 3. If server shows zero credits but local has >0 prefer local.
+        // 4. If local exists use it.
+        // 5. Fallback to server (may be null).
+        let chosen = null as any;
+
+        if (pendingPlanObj) {
+          chosen = pendingPlanObj;
+        } else if (server && server.planName && server.planName !== "Custom") {
+          chosen = server;
+        } else if (
+          server &&
+          Number(server.smsCredits) === 0 &&
+          local &&
+          Number(local.smsCredits) > 0
+        ) {
+          chosen = local;
+        } else if (local) {
+          chosen = local;
+        } else if (server) {
+          chosen = server;
+        } else {
+          chosen = null;
+        }
+
+        setDisplaySubscription(chosen);
+      } catch (e) {
+        console.warn("[Profile] compute display subscription failed:", e);
+        setDisplaySubscription(subscriptionData);
+      }
+    };
+
+    computeDisplay();
+
+    const storageHandler = (ev?: StorageEvent) => {
+      if (!ev || ev.key === "subscription" || ev.key === "pendingPlan") {
+        computeDisplay();
+      }
+    };
+
+    const subUpdated = () => computeDisplay();
+    window.addEventListener("storage", storageHandler);
+    window.addEventListener("subscription:updated", subUpdated);
+
+    return () => {
+      try {
+        window.removeEventListener("storage", storageHandler);
+      } catch {}
+      try {
+        window.removeEventListener("subscription:updated", subUpdated);
+      } catch {}
+    };
+  }, [subscriptionData]);
 
   // Load subscription data from Firebase Firestore (cross-device) - PRIMARY SOURCE
   useEffect(() => {
@@ -784,10 +918,19 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                 <div className="text-gray-600 text-base lg:text-lg mb-1 text-center">
                   {user.email}
                 </div>
-                <span className="text-xs text-indigo-700 font-semibold bg-indigo-100 border border-indigo-200 px-4 py-1 rounded-full mb-2">
-                  Subscription:{" "}
-                  {subscriptionData?.planName || user.subscription || "Free"}
-                </span>
+                {/* Prefer the merged displaySubscription which may reflect
+                    the user's selected plan (pending/local) when server
+                    shows an ambiguous value such as 'Custom'. */}
+                {(() => {
+                  const effective =
+                    displaySubscription || subscriptionData || null;
+                  return (
+                    <span className="text-xs text-indigo-700 font-semibold bg-indigo-100 border border-indigo-200 px-4 py-1 rounded-full mb-2">
+                      Subscription:{" "}
+                      {effective?.planName || user.subscription || "Free"}
+                    </span>
+                  );
+                })()}
               </div>
               <div className="w-full border-t border-gray-200 my-6"></div>
 
@@ -801,7 +944,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                   <div className="flex items-center justify-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
                   </div>
-                ) : subscriptionData ? (
+                ) : displaySubscription || subscriptionData ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Current Plan and Status containers removed as requested */}
 
@@ -826,11 +969,15 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         </span>
                       </div>
                       <p className="text-2xl font-bold text-gray-900">
-                        {subscriptionData.planName || "N/A"}
+                        {displaySubscription?.planName ||
+                          subscriptionData.planName ||
+                          "N/A"}
                       </p>
-                      {subscriptionData.price && (
+                      {(displaySubscription?.price ||
+                        subscriptionData.price) && (
                         <p className="text-lg font-semibold text-indigo-600 mt-1">
-                          ${subscriptionData.price}
+                          $
+                          {displaySubscription?.price || subscriptionData.price}
                         </p>
                       )}
                     </div>
@@ -859,23 +1006,34 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                       </div>
                       <p className="text-lg font-bold text-gray-900">
                         {(() => {
-                          if (subscriptionData?.startDate?.toDate) {
+                          const eff = displaySubscription || subscriptionData;
+                          const value = eff?.startDate;
+                          if (value?.toDate) {
+                            return new Date(value.toDate()).toLocaleDateString(
+                              "en-US",
+                              { year: "numeric", month: "long", day: "numeric" }
+                            );
+                          }
+                          if (value?._seconds) {
                             return new Date(
-                              subscriptionData.startDate.toDate()
+                              value._seconds * 1000
                             ).toLocaleDateString("en-US", {
                               year: "numeric",
                               month: "long",
                               day: "numeric",
                             });
                           }
-                          if (subscriptionData?.startDate?._seconds) {
-                            return new Date(
-                              subscriptionData.startDate._seconds * 1000
-                            ).toLocaleDateString("en-US", {
-                              year: "numeric",
-                              month: "long",
-                              day: "numeric",
-                            });
+                          if (typeof value === "string" && value) {
+                            try {
+                              return new Date(value).toLocaleDateString(
+                                "en-US",
+                                {
+                                  year: "numeric",
+                                  month: "long",
+                                  day: "numeric",
+                                }
+                              );
+                            } catch {}
                           }
                           return "N/A";
                         })()}
@@ -903,23 +1061,34 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                       </div>
                       <p className="text-lg font-bold text-gray-900">
                         {(() => {
-                          if (subscriptionData?.expiryDate?.toDate) {
+                          const eff = displaySubscription || subscriptionData;
+                          const value = eff?.expiryDate;
+                          if (value?.toDate) {
+                            return new Date(value.toDate()).toLocaleDateString(
+                              "en-US",
+                              { year: "numeric", month: "long", day: "numeric" }
+                            );
+                          }
+                          if (value?._seconds) {
                             return new Date(
-                              subscriptionData.expiryDate.toDate()
+                              value._seconds * 1000
                             ).toLocaleDateString("en-US", {
                               year: "numeric",
                               month: "long",
                               day: "numeric",
                             });
                           }
-                          if (subscriptionData?.expiryDate?._seconds) {
-                            return new Date(
-                              subscriptionData.expiryDate._seconds * 1000
-                            ).toLocaleDateString("en-US", {
-                              year: "numeric",
-                              month: "long",
-                              day: "numeric",
-                            });
+                          if (typeof value === "string" && value) {
+                            try {
+                              return new Date(value).toLocaleDateString(
+                                "en-US",
+                                {
+                                  year: "numeric",
+                                  month: "long",
+                                  day: "numeric",
+                                }
+                              );
+                            } catch {}
                           }
                           return "N/A";
                         })()}
@@ -942,14 +1111,21 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         </span>
                       </div>
                       <p className="text-2xl font-bold text-gray-900">
-                        {subscriptionData.smsCredits ?? "N/A"}
+                        {displaySubscription?.smsCredits ??
+                          subscriptionData.smsCredits ??
+                          "N/A"}
                       </p>
                       <p className="text-sm text-gray-600 mt-1">
-                        Remaining: {subscriptionData.remainingCredits ?? "N/A"}
+                        Remaining:{" "}
+                        {displaySubscription?.remainingCredits ??
+                          subscriptionData.remainingCredits ??
+                          "N/A"}
                       </p>
                       <div className="mt-2">
                         <SmsCreditsDisplay
-                          subscriptionData={subscriptionData}
+                          subscriptionData={
+                            displaySubscription || subscriptionData
+                          }
                         />
                       </div>
                     </div>

@@ -56,12 +56,46 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
           headers.Authorization = `Bearer ${token}`;
         }
 
-        const response = await fetch("/admin/server-config", { headers });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.config?.smsServerPort) {
-            setSmsServerPort(data.config.smsServerPort);
+        // Resolve API base so we don't accidentally hit the frontend
+        // origin (which returns index.html) and cause a JSON parse
+        // error when reading admin JSON endpoints.
+        const base = await getSmsServerUrl().catch(() => API_BASE);
+        const url = base
+          ? `${String(base).replace(/\/+$/, "")}/admin/server-config`
+          : `${API_BASE}/admin/server-config`;
+
+        let response: Response | null = null;
+        try {
+          response = await fetch(url, { headers });
+        } catch (fetchErr) {
+          console.error("Failed to fetch server port:", fetchErr);
+          setLoadingServerPort(false);
+          return;
+        }
+
+        if (response && response.ok) {
+          // Defensive parse: some hosting setups may return HTML error pages
+          // (DOCTYPE) instead of JSON — handle that gracefully.
+          try {
+            const data = await response.json();
+            if (data && data.success && data.config?.smsServerPort) {
+              setSmsServerPort(data.config.smsServerPort);
+            }
+          } catch (parseErr) {
+            const text = await response.text().catch(() => null);
+            console.error(
+              "Failed to parse /admin/server-config JSON response:",
+              parseErr,
+              text
+            );
           }
+        } else if (response) {
+          const text = await response.text().catch(() => null);
+          console.warn(
+            "admin/server-config responded with non-OK status:",
+            response.status,
+            text
+          );
         }
       } catch (error) {
         console.error("Failed to fetch server port:", error);
@@ -211,30 +245,81 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     // Save Google Review link to Firebase (per client)
     try {
       const companyId = localStorage.getItem("companyId");
-      if (companyId) {
+      if (!companyId) {
+        console.warn(
+          "No companyId found in localStorage — saving Google Review link locally as fallback"
+        );
+        try {
+          localStorage.setItem("googleReviewLink", googleLink);
+        } catch {}
+      } else {
         const base = await getSmsServerUrl().catch(() => API_BASE);
         const url = base
-          ? `${base}/api/company/links`
+          ? `${String(base).replace(/\/+$/, "")}/api/company/links`
           : `${API_BASE}/api/company/links`;
 
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            companyId,
-            googleReviewLink: googleLink,
-          }),
-        });
+        let response: Response | null = null;
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              companyId,
+              googleReviewLink: googleLink,
+            }),
+          });
+        } catch (fetchErr) {
+          console.error("Network error saving Google Review link:", fetchErr);
+          // Persist locally as a fallback so the user's change isn't lost
+          try {
+            localStorage.setItem("googleReviewLink", googleLink);
+            console.warn(
+              "Saved Google Review link to localStorage as fallback"
+            );
+          } catch {}
+          response = null;
+        }
 
-        if (!response.ok) {
-          console.error("Failed to save Google Review link to Firebase");
-        } else {
-          console.log("✅ Google Review link saved to Firebase successfully");
-          localStorage.setItem("googleReviewLink", googleLink);
+        if (response) {
+          // Try reading JSON body safely; if not JSON, capture text for logs
+          let bodyData: any = null;
+          try {
+            bodyData = await response.json();
+          } catch (parseErr) {
+            const txt = await response.text().catch(() => null);
+            console.error(
+              "Failed to parse /api/company/links response as JSON:",
+              parseErr,
+              txt
+            );
+          }
+
+          if (response.ok && bodyData && bodyData.success) {
+            console.log("✅ Google Review link saved to Firebase successfully");
+            try {
+              localStorage.setItem("googleReviewLink", googleLink);
+            } catch {}
+          } else {
+            console.error(
+              "Failed to save Google Review link to Firebase",
+              response.status,
+              bodyData || null
+            );
+            // Persist locally as a fallback so the user's change isn't lost
+            try {
+              localStorage.setItem("googleReviewLink", googleLink);
+              console.warn(
+                "Saved Google Review link to localStorage as fallback"
+              );
+            } catch {}
+          }
         }
       }
     } catch (error) {
       console.error("Error saving Google Review link:", error);
+      try {
+        localStorage.setItem("googleReviewLink", googleLink);
+      } catch {}
     }
 
     setShowSuccess(true);
