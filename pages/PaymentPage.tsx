@@ -103,20 +103,18 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           const active = sub.status === "active" || sub.planId || sub.planName;
           if (active && credits > 0) {
             console.log(
-              "[Payment] local cache indicates active subscription, redirecting to dashboard"
+              "[Payment] local cache indicates active subscription; marking as alreadyPaid (no auto-redirect)"
             );
             setAlreadyPaid(true);
-            window.location.href = "/dashboard";
             return;
           }
         }
         const present = localStorage.getItem("profile_subscription_present");
         if (present) {
           console.log(
-            "[Payment] profile_subscription_present found, redirecting to dashboard"
+            "[Payment] profile_subscription_present found; marking as alreadyPaid (no auto-redirect)"
           );
           setAlreadyPaid(true);
-          window.location.href = "/dashboard";
           return;
         }
       } catch (e) {
@@ -170,14 +168,10 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             existing.status === "active" ||
             Number(existing.remainingCredits || existing.smsCredits || 0) > 0)
         ) {
+          // Mark as already paid but do NOT auto-redirect. Let the user
+          // remain on the Payment page and choose whether to navigate to
+          // the Dashboard using the provided CTA.
           setAlreadyPaid(true);
-          // Redirect automatically to keep users out of checkout when they
-          // already have an active subscription.
-          try {
-            window.location.href = "/dashboard";
-          } catch (e) {
-            console.warn("[Payment] redirect failed:", e);
-          }
         }
       } catch (e) {
         // Non-fatal

@@ -567,11 +567,7 @@ const SubscriptionCustomerLock: React.FC = () => {
   }, []);
 
   if (!locked) return null;
-  const PAYMENTS_ENABLED =
-    (import.meta as any)?.env?.VITE_PAYMENTS_ENABLED === "1" ||
-    (import.meta as any)?.env?.VITE_PAYMENTS_ENABLED === "true";
-  const ADMIN_EMAIL =
-    (import.meta as any)?.env?.VITE_ADMIN_EMAIL || "support@reputationflow.app";
+  // Payments are always enabled — remove feature-flagged disabled state.
 
   return (
     <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/85 backdrop-blur-sm border-2 border-dashed border-indigo-300">
@@ -580,35 +576,17 @@ const SubscriptionCustomerLock: React.FC = () => {
           Activate Your Plan
         </h4>
         <p className="text-gray-600 mb-4 max-w-xs">
-          {PAYMENTS_ENABLED
-            ? "Subscribe to unlock customer import and bulk SMS sending."
-            : "Payments are currently disabled in this build. Contact the admin to enable subscription plans."}
+          Subscribe to unlock customer import and bulk SMS sending.
         </p>
         <button
           onClick={() => {
-            if (PAYMENTS_ENABLED) {
-              try {
-                window.location.href = "/payment";
-              } catch {}
-            } else {
-              try {
-                window.location.href = `mailto:${encodeURIComponent(
-                  ADMIN_EMAIL
-                )}?subject=${encodeURIComponent(
-                  "Enable Payments for my Account"
-                )}`;
-              } catch (e) {
-                try {
-                  alert(
-                    `Payments are disabled. Please contact: ${ADMIN_EMAIL}`
-                  );
-                } catch {}
-              }
-            }
+            try {
+              window.location.href = "/payment";
+            } catch {}
           }}
           className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-500"
         >
-          {PAYMENTS_ENABLED ? "Choose a Plan" : "Contact Admin"}
+          Choose a Plan
         </button>
       </div>
     </div>

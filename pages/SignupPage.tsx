@@ -60,8 +60,9 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess }) => {
         })
       );
 
-      // Navigate to dashboard
-      window.history.pushState({ page: "/dashboard" }, "", "/dashboard");
+      // Navigate to Payment page so users complete payment before seeing Dashboard
+      const target = "/payment";
+      window.history.pushState({ page: target }, "", target);
       onSignupSuccess("client");
     } catch (err: any) {
       setError(err.message || "Signup failed. Please try again.");
@@ -99,8 +100,9 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess }) => {
         })
       );
 
-      // Navigate to dashboard
-      window.history.pushState({ page: "/dashboard" }, "", "/dashboard");
+      // Navigate to Payment page so users complete payment before seeing Dashboard
+      const target = "/payment";
+      window.history.pushState({ page: target }, "", target);
       onSignupSuccess("client");
     } catch (err: any) {
       setError(err.message || "Google signup failed. Please try again.");

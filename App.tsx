@@ -1971,13 +1971,14 @@ const App: React.FC = () => {
     currentPage === Page.AdminLogin ||
     currentPage === Page.Signup
   ) {
-    // If already authenticated and somehow on Auth page, redirect to dashboard
+    // If already authenticated and somehow on Auth page, redirect to payment
+    // so users always land on the Payment page immediately after login.
     if (auth && currentPage === Page.Auth) {
-      const target = joinBase("dashboard");
+      const target = joinBase("payment");
       if (window.location.pathname !== target) {
         window.history.pushState({ page: target }, "", target);
       }
-      setCurrentPage(Page.Dashboard);
+      setCurrentPage(Page.Payment);
     }
     // If someone directly visits /admin without being authenticated as admin,
     // send them to the dedicated Admin Login page and render it.
@@ -2162,7 +2163,7 @@ const App: React.FC = () => {
             return;
           }
 
-          // Buyer login: check for plan in query param first (homepage -> auth?plan=)
+          // Buyer login: always land buyers on the Payment page first.
           setAuth({ role: "buyer" });
           let pending: string | null = null;
           try {
@@ -2181,75 +2182,8 @@ const App: React.FC = () => {
             return;
           }
 
-          // No pending plan - check if this user already has a subscription.
-          // If they do, send them to Dashboard; otherwise show Payment page.
-          try {
-            const authModule = await import("./lib/firebaseAuth");
-            const currentUser = authModule.getCurrentUser
-              ? authModule.getCurrentUser()
-              : null;
-
-            let clientId: string | null = null;
-            try {
-              clientId = localStorage.getItem("companyId");
-            } catch {}
-
-            if (!clientId && currentUser) {
-              clientId = await authModule.getUserClientId(currentUser);
-            }
-
-            if (clientId) {
-              const { getClientProfile } = await import(
-                "./lib/firestoreClient"
-              );
-              const profile = await getClientProfile(clientId);
-
-              const hasPlan =
-                profile &&
-                (profile.planId ||
-                  profile.plan ||
-                  profile.planName ||
-                  profile.smsCredits ||
-                  profile.remainingCredits);
-
-              const status =
-                (profile && (profile.status || "active")) || "active";
-              const isActive = ["active", "trialing", "paid"].includes(
-                String(status).toLowerCase()
-              );
-
-              if (hasPlan && isActive) {
-                try {
-                  localStorage.setItem("companyId", clientId);
-                  localStorage.setItem("clientId", clientId);
-                  if (currentUser?.email)
-                    localStorage.setItem("userEmail", currentUser.email);
-                  if (currentUser?.uid)
-                    localStorage.setItem("auth_uid", currentUser.uid);
-                } catch {}
-
-                // notify other parts of the app that auth is ready
-                window.dispatchEvent(new Event("auth:ready"));
-
-                setCurrentPage(Page.Dashboard);
-                if (
-                  stripBase(window.location.pathname).toLowerCase() !==
-                  "/dashboard"
-                ) {
-                  window.history.pushState(
-                    { page: "/dashboard" },
-                    "",
-                    "/dashboard"
-                  );
-                }
-                return;
-              }
-            }
-          } catch (e) {
-            console.warn("[App] Subscription check failed during login:", e);
-          }
-
-          // Fallback: show Payment page
+          // Default: always show Payment page after login so users can
+          // complete or confirm payment before seeing the Dashboard.
           setCurrentPage(Page.Payment);
           const target = joinBase("payment");
           if (
