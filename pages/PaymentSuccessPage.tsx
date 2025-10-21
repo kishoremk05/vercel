@@ -315,9 +315,39 @@ const PaymentSuccessPage: React.FC = () => {
         const base = await getSmsServerUrl().catch(() => "");
         if (!base) console.warn("[PaymentSuccess] No API base available");
 
-        // Build payload for server save
+        // Derive a canonical planId to send to the server when possible.
+        // This helps the server accept the request even if a human-friendly
+        // plan name was used earlier (e.g. "Starter"). Prefer explicit
+        // effectivePlanId, otherwise try name -> enum mapping, then
+        // infer from SMS allocation.
+        let canonicalPlanId: string | null = effectivePlanId || null;
+        try {
+          const pname =
+            plan && plan.name ? String(plan.name).toLowerCase() : "";
+          if (!canonicalPlanId && pname) {
+            if (pname.includes("starter") || pname.includes("monthly"))
+              canonicalPlanId = "starter_1m";
+            else if (pname.includes("growth") || pname.includes("quarterly"))
+              canonicalPlanId = "growth_3m";
+            else if (
+              pname.includes("pro") ||
+              pname.includes("professional") ||
+              pname.includes("halfyearly")
+            )
+              canonicalPlanId = "pro_6m";
+          }
+          if (!canonicalPlanId) {
+            canonicalPlanId = smsToPlan(plan?.sms) || null;
+          }
+        } catch (e) {
+          // No-op; fallback to sending human-friendly name below
+          canonicalPlanId = canonicalPlanId || null;
+        }
+
+        // Build payload for server save. Use canonicalPlanId when available
+        // so the server can map to known credit bundles deterministically.
         const payload: any = {
-          planId: effectivePlanId || plan.name,
+          planId: canonicalPlanId || effectivePlanId || plan.name,
           smsCredits: plan.sms,
           durationMonths: plan.months,
           status: "active",
@@ -550,6 +580,12 @@ const PaymentSuccessPage: React.FC = () => {
               );
             }
           }
+          // After writing auth-owned profile, ensure payload contains a
+          // companyId so server-side POSTs succeed. Prefer the auth-owned
+          // client id (authUid) when nothing else was derived earlier.
+          if (!payload.companyId && currentUser?.uid) {
+            payload.companyId = currentUser.uid;
+          }
         } catch (e) {
           console.warn("[PaymentSuccess] Error preparing Firestore write:", e);
         }
@@ -576,6 +612,11 @@ const PaymentSuccessPage: React.FC = () => {
             // affected by proxies or other quirks.
             if (payload.companyId) headers["x-company-id"] = payload.companyId;
             if (payload.planId) headers["x-plan-id"] = payload.planId;
+            // Also include user email and session id in headers as a
+            // fallback so the server can reconcile claims even if body is
+            // not parsed correctly by the hosting platform.
+            if (currentUser?.email) headers["x-user-email"] = currentUser.email;
+            if (payload.sessionId) headers["x-session-id"] = payload.sessionId;
             console.log("[PaymentSuccess] Posting subscription to server:", {
               url: `${base}/api/subscription`,
               headers,
@@ -597,14 +638,47 @@ const PaymentSuccessPage: React.FC = () => {
             } else {
               console.warn("[PaymentSuccess] Server save incomplete:", data);
               // If server did not accept the payload (e.g., missing companyId),
-              // try claim by session id if sessionId is available
-              if (sessionId) {
+              // try claim by session id or userEmail so the server can
+              // reconcile the session even when JSON bodies are dropped by
+              // upstream proxies. Include header fallbacks (x-user-email,
+              // x-session-id, x-company-id, x-plan-id and Authorization) so
+              // the claim endpoint has multiple ways to derive the target
+              // company/plan.
+              if (sessionId || currentUser?.email) {
                 try {
+                  const claimHeaders: any = {
+                    "Content-Type": "application/json",
+                  };
+                  if (currentUser) {
+                    try {
+                      const idToken = await currentUser.getIdToken();
+                      if (idToken)
+                        claimHeaders.Authorization = `Bearer ${idToken}`;
+                    } catch {}
+                    if (currentUser.email)
+                      claimHeaders["x-user-email"] = currentUser.email;
+                  }
+                  if (sessionId) claimHeaders["x-session-id"] = sessionId;
+                  if (payload.companyId)
+                    claimHeaders["x-company-id"] = payload.companyId;
+                  if (payload.planId)
+                    claimHeaders["x-plan-id"] = payload.planId;
+
+                  console.log(
+                    "[PaymentSuccess] Attempting claim with headers:",
+                    {
+                      x_user_email: claimHeaders["x-user-email"],
+                      x_session_id: claimHeaders["x-session-id"],
+                      x_company_id: claimHeaders["x-company-id"],
+                      x_plan_id: claimHeaders["x-plan-id"],
+                    }
+                  );
+
                   const claimRes = await fetch(
                     `${base}/api/subscription/claim`,
                     {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: claimHeaders,
                       body: JSON.stringify({
                         sessionId,
                         userEmail: currentUser?.email,

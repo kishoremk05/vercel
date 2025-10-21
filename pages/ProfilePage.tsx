@@ -65,6 +65,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
+  const [claimReconciled, setClaimReconciled] = useState<{
+    at: number;
+    message?: string;
+  } | null>(null);
   // Render-time subscription which may merge Firestore data with
   // client-side pending/legacy local values so the UI shows the
   // plan the user selected (pendingPlan / local subscription) when
@@ -886,11 +890,20 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                       Number(formattedData.remainingCredits || 0) > 0;
                     if (!userEmail || hasCredits) return;
 
+                    const claimHeaders: any = {
+                      "Content-Type": "application/json",
+                    };
+                    try {
+                      const token = await me.getIdToken();
+                      if (token) claimHeaders.Authorization = `Bearer ${token}`;
+                    } catch {}
+                    claimHeaders["x-user-email"] = userEmail;
+
                     const claimRes = await fetch(
                       `${smsServer}/api/subscription/claim`,
                       {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: claimHeaders,
                         body: JSON.stringify({ userEmail }),
                       }
                     );
@@ -945,6 +958,22 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                       }
                       setSubscriptionData(merged);
                       setDisplaySubscription(merged);
+                      // Mark that we reconciled via server claim so the UI
+                      // can notify the user (helps operators and debugging)
+                      setClaimReconciled({
+                        at: Date.now(),
+                        message: "Credits reconciled from server",
+                      });
+                      try {
+                        window.dispatchEvent(
+                          new CustomEvent("subscription:claimed", {
+                            detail: { companyId: claimJson.companyId || null },
+                          })
+                        );
+                        window.dispatchEvent(new Event("subscription:updated"));
+                      } catch {}
+                      // Auto-hide banner after 8s
+                      setTimeout(() => setClaimReconciled(null), 8000);
                     }
                   } catch (e) {
                     console.warn(

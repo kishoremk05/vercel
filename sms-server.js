@@ -240,6 +240,8 @@ try {
           "x-plan",
           "x-price",
           "x-amount",
+          "x-session-id",
+          "x-subscription-id",
         ],
         credentials: false,
         optionsSuccessStatus: 200,
@@ -307,7 +309,7 @@ try {
       );
       res.setHeader(
         "Access-Control-Allow-Headers",
-        "Authorization, Content-Type, Accept, X-Requested-With, x-company-id, x-client-id, x-user-email, x-plan-id, x-plan, x-price, x-amount"
+        "Authorization, Content-Type, Accept, X-Requested-With, x-company-id, x-client-id, x-user-email, x-plan-id, x-plan, x-price, x-amount, x-session-id, x-subscription-id"
       );
       res.setHeader("Access-Control-Max-Age", "86400");
       if (req.method === "OPTIONS") {
@@ -1337,11 +1339,167 @@ app.post("/api/subscription/claim", async (req, res) => {
         .status(503)
         .json({ success: false, error: "firestore-disabled" });
     }
-    const { sessionId, userEmail } = req.body || {};
-    if (!sessionId && !userEmail) {
+    // Robustly derive sessionId and userEmail from multiple sources so
+    // the claim endpoint can be used even when upstream proxies or
+    // hosting platforms fail to parse JSON bodies reliably.
+    let sessionId = null;
+    let userEmail = null;
+
+    try {
+      // Primary: prefer parsed JSON body fields
+      if (
+        req.body &&
+        typeof req.body === "object" &&
+        Object.keys(req.body).length
+      ) {
+        sessionId = req.body.sessionId || req.body.session_id || null;
+        userEmail = req.body.userEmail || req.body.user_email || null;
+      }
+
+      // Secondary: headers (x-session-id / x-user-email) are a reliable
+      // fallback when JSON bodies are dropped by some platforms.
+      if (!sessionId && req.headers["x-session-id"]) {
+        sessionId = String(req.headers["x-session-id"] || null);
+      }
+      if (!userEmail && req.headers["x-user-email"]) {
+        userEmail = String(req.headers["x-user-email"] || null);
+      }
+
+      // Tertiary: query params
+      if (
+        !sessionId &&
+        req.query &&
+        (req.query.sessionId || req.query.session_id)
+      ) {
+        sessionId = req.query.sessionId || req.query.session_id || null;
+      }
+      if (
+        !userEmail &&
+        req.query &&
+        (req.query.userEmail || req.query.user_email)
+      ) {
+        userEmail = req.query.userEmail || req.query.user_email || null;
+      }
+
+      // Final attempt: parse rawBody captured by express.json verify hook
+      // (some hosts keep raw body but don't populate req.body)
+      if (
+        (!sessionId || !userEmail) &&
+        req.rawBody &&
+        typeof req.rawBody === "string"
+      ) {
+        try {
+          const parsed = JSON.parse(req.rawBody || "{}");
+          if (!sessionId)
+            sessionId = parsed.sessionId || parsed.session_id || null;
+          if (!userEmail)
+            userEmail = parsed.userEmail || parsed.user_email || null;
+          console.log(
+            "[api:subscription:claim] Parsed rawBody for claim fallback"
+          );
+        } catch (e) {
+          // ignore parse errors
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[api:subscription:claim] Error deriving session/user from request:",
+        e?.message || e
+      );
+    }
+
+    // Allow claim via Authorization (ID token) or x-company-id header as
+    // an alternative to sessionId/userEmail so clients that only send a
+    // bearer token can still reconcile subscriptions.
+    let companyId = null;
+    try {
+      companyId =
+        req.headers["x-company-id"] ||
+        req.headers["x-client-id"] ||
+        req.query.companyId ||
+        req.query.company_id ||
+        null;
+    } catch (e) {
+      companyId = null;
+    }
+
+    // If companyId not provided, try to derive it from an Authorization
+    // bearer token similar to /api/subscription route.
+    if (!companyId) {
+      try {
+        const authz =
+          req.headers.authorization || req.headers.Authorization || "";
+        if (authz && String(authz).startsWith("Bearer ") && firebaseAdmin) {
+          const idToken = String(authz).slice(7).trim();
+          if (idToken) {
+            try {
+              const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+              const uid = decoded?.uid || decoded?.sub || null;
+              if (uid) {
+                // Prefer dbV2 mapping when available
+                try {
+                  if (dbV2 && typeof dbV2.getUserById === "function") {
+                    const userRec = await dbV2.getUserById(uid);
+                    if (userRec && userRec.companyId) {
+                      companyId = userRec.companyId;
+                      console.log(
+                        `[api:subscription:claim] Derived companyId ${companyId} from idToken (uid=${uid})`
+                      );
+                    }
+                  }
+                } catch (e) {
+                  console.warn(
+                    "[api:subscription:claim] dbV2.getUserById failed:",
+                    e?.message || e
+                  );
+                }
+                if (!companyId) {
+                  try {
+                    const clientsRef = firebaseAdmin
+                      .firestore()
+                      .collection("clients");
+                    const q = clientsRef
+                      .where("auth_uid", "==", String(uid))
+                      .limit(1);
+                    const searchSnap = await q.get();
+                    if (!searchSnap.empty) {
+                      companyId = searchSnap.docs[0].id;
+                      console.log(
+                        `[api:subscription:claim] Derived companyId ${companyId} from auth uid ${uid}`
+                      );
+                    }
+                  } catch (e) {
+                    console.warn(
+                      "[api:subscription:claim] Failed to derive companyId from auth uid:",
+                      e?.message || e
+                    );
+                  }
+                }
+              }
+            } catch (tokErr) {
+              console.warn(
+                "[api:subscription:claim] ID token verify failed:",
+                tokErr?.message || tokErr
+              );
+            }
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[api:subscription:claim] Error deriving companyId from Authorization header:",
+          e?.message || e
+        );
+      }
+    }
+
+    if (!sessionId && !userEmail && !companyId) {
       return res
         .status(400)
-        .json({ success: false, error: "sessionId or userEmail required" });
+        .json({
+          success: false,
+          error:
+            "sessionId or userEmail required (or provide x-company-id / Authorization token)",
+        });
     }
 
     const firestore = firebaseAdmin.firestore();
@@ -1360,7 +1518,7 @@ app.post("/api/subscription/claim", async (req, res) => {
           const profileData = profileSnap.data();
           // Derive companyId from the document path: clients/{companyId}/profile/main
           const pathParts = profileSnap.ref.path.split("/");
-          const companyId = pathParts[1] || null;
+          const foundCompanyId = pathParts[1] || null;
 
           // Attempt to derive planId from common fields
           let planId =
@@ -1381,7 +1539,7 @@ app.post("/api/subscription/claim", async (req, res) => {
             if (!Number.isNaN(p) && priceToPlan[p]) planId = priceToPlan[p];
           }
 
-          if (!companyId) {
+          if (!foundCompanyId) {
             return res.status(404).json({
               success: false,
               error: "Could not derive companyId from session",
@@ -1404,7 +1562,7 @@ app.post("/api/subscription/claim", async (req, res) => {
 
           const billingRef = firestore
             .collection("clients")
-            .doc(String(companyId))
+            .doc(String(foundCompanyId))
             .collection("billing")
             .doc("subscription");
           const billingPayload = {
@@ -1423,7 +1581,7 @@ app.post("/api/subscription/claim", async (req, res) => {
 
           const profileRef = firestore
             .collection("clients")
-            .doc(String(companyId))
+            .doc(String(foundCompanyId))
             .collection("profile")
             .doc("main");
           const profilePayload = {
@@ -1441,10 +1599,12 @@ app.post("/api/subscription/claim", async (req, res) => {
           };
           await profileRef.set(profilePayload, { merge: true });
 
+          // Return the found company id in the response so callers can
+          // persist it locally for subsequent requests.
           return res.json({
             success: true,
             subscription: profilePayload,
-            companyId,
+            companyId: foundCompanyId,
           });
         }
       } catch (e) {

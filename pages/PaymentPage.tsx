@@ -87,6 +87,36 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
   // the payment CTA when they don't need it.
   useEffect(() => {
     (async () => {
+      // Quick synchronous local check: if the app already has a cached
+      // subscription with positive remaining credits, redirect fast so
+      // users don't land on the checkout page unnecessarily.
+      try {
+        const cached = localStorage.getItem("subscription");
+        if (cached) {
+          const sub = JSON.parse(cached || "{}");
+          const credits = Number(sub.remainingCredits || sub.smsCredits || 0);
+          const active = sub.status === "active" || sub.planId || sub.planName;
+          if (active && credits > 0) {
+            console.log(
+              "[Payment] local cache indicates active subscription, redirecting to dashboard"
+            );
+            setAlreadyPaid(true);
+            window.location.href = "/dashboard";
+            return;
+          }
+        }
+        const present = localStorage.getItem("profile_subscription_present");
+        if (present) {
+          console.log(
+            "[Payment] profile_subscription_present found, redirecting to dashboard"
+          );
+          setAlreadyPaid(true);
+          window.location.href = "/dashboard";
+          return;
+        }
+      } catch (e) {
+        console.warn("[Payment] quick local subscription check failed:", e);
+      }
       try {
         const companyId = localStorage.getItem("companyId");
         if (!companyId) return;
@@ -136,12 +166,28 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             Number(existing.remainingCredits || existing.smsCredits || 0) > 0)
         ) {
           setAlreadyPaid(true);
+          // Redirect automatically to keep users out of checkout when they
+          // already have an active subscription.
+          try {
+            window.location.href = "/dashboard";
+          } catch (e) {
+            console.warn("[Payment] redirect failed:", e);
+          }
         }
       } catch (e) {
         // Non-fatal
       }
     })();
   }, []);
+
+  // Safety: if some other code flips the flag, redirect away immediately.
+  useEffect(() => {
+    if (alreadyPaid) {
+      try {
+        window.location.href = "/dashboard";
+      } catch {}
+    }
+  }, [alreadyPaid]);
 
   // Get user info
   const userEmail = localStorage.getItem("userEmail") || "";
