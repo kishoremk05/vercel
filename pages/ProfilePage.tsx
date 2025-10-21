@@ -41,6 +41,7 @@ interface ProfilePageProps {
   onLogout: () => void;
   setBusinessName: (name: string) => void;
   setBusinessEmail: (email: string) => void;
+  messagesSentThisMonth?: number;
 }
 
 const ProfilePage: React.FC<ProfilePageProps> = ({
@@ -49,6 +50,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   onLogout,
   setBusinessName,
   setBusinessEmail,
+  messagesSentThisMonth,
 }) => {
   const [editBusinessName, setEditBusinessName] = useState(user.name || "");
   // Removed Logo URL and Support Email fields
@@ -71,10 +73,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
 
   // Derive authoritative 'sent' count from dashboard activity logs when
   // available so the Profile page shows the same "Sent" number as the
-  // Dashboard. This prefers the activityLogs prop over inferring sent
-  // from smsCredits/remainingCredits (which can be racy during webhook
-  // reconciliation).
-  const messagesSentThisMonth = useMemo(() => {
+  // Dashboard. Prefer the parent-provided messagesSentThisMonth when
+  // available so both pages (Dashboard and Profile) use the exact same
+  // computation/authority.
+  const activityMessagesSentThisMonth = useMemo(() => {
     try {
       const today = new Date();
       const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -97,7 +99,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
 
   // Server-provided authoritative monthly message count (persistent
   // across reloads). We will prefer this value when available so the
-  // Profile page mirrors the Dashboard's persisted count.
+  // Profile page mirrors the Dashboard's persisted count. However, the
+  // highest priority source is a parent-provided computation (passed
+  // from App) so Dashboard and Profile always match exactly.
   const [serverMessageCount, setServerMessageCount] = useState<number | null>(
     null
   );
@@ -341,7 +345,52 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
         let chosen = null as any;
 
         if (pendingPlanObj) {
-          chosen = pendingPlanObj;
+          // Merge in any server-provided dates so the UI shows start/expiry
+          // even while the server is reconciling the full subscription.
+          const merged: any = { ...pendingPlanObj } as any;
+          if (server) {
+            merged.startDate =
+              merged.startDate ||
+              server.startDate ||
+              server.raw?.activatedAt ||
+              null;
+            merged.expiryDate =
+              merged.expiryDate ||
+              server.expiryDate ||
+              server.raw?.expiryAt ||
+              null;
+            merged.paymentSessionId =
+              merged.paymentSessionId ||
+              server.paymentSessionId ||
+              server.raw?.paymentSessionId ||
+              null;
+          }
+          // If server didn't supply dates, compute reasonable defaults
+          // from the planId so the UI shows start/expiry immediately.
+          try {
+            const PLAN_MONTHS: Record<string, number> = {
+              starter_1m: 1,
+              monthly: 1,
+              growth_3m: 3,
+              quarterly: 3,
+              pro_6m: 6,
+              halfyearly: 6,
+            };
+            if (!merged.startDate) {
+              merged.startDate = new Date().toISOString();
+            }
+            if (!merged.expiryDate) {
+              const months = PLAN_MONTHS[merged.planId] || 1;
+              try {
+                const d = new Date(merged.startDate);
+                d.setMonth(d.getMonth() + months);
+                merged.expiryDate = d.toISOString();
+              } catch {
+                merged.expiryDate = null;
+              }
+            }
+          } catch {}
+          chosen = merged;
         } else if (server && server.planName && server.planName !== "Custom") {
           chosen = server;
         } else if (
@@ -359,6 +408,33 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           chosen = null;
         }
 
+        // Ensure chosen has start/expiry dates when possible so Profile
+        // always displays dates even if server omitted them.
+        try {
+          if (chosen) {
+            const PLAN_MONTHS: Record<string, number> = {
+              starter_1m: 1,
+              monthly: 1,
+              growth_3m: 3,
+              quarterly: 3,
+              pro_6m: 6,
+              halfyearly: 6,
+            };
+            if (!chosen.startDate) {
+              chosen.startDate = new Date().toISOString();
+            }
+            if (!chosen.expiryDate) {
+              const months = PLAN_MONTHS[chosen.planId] || 1;
+              try {
+                const d = new Date(chosen.startDate);
+                d.setMonth(d.getMonth() + months);
+                chosen.expiryDate = d.toISOString();
+              } catch {
+                chosen.expiryDate = null;
+              }
+            }
+          }
+        } catch {}
         setDisplaySubscription(chosen);
       } catch (e) {
         console.warn("[Profile] compute display subscription failed:", e);
@@ -795,6 +871,88 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                   } catch {}
                   window.dispatchEvent(new Event("subscription:updated"));
                 } catch {}
+                // If the auth-owned profile does not include SMS credits
+                // but a canonical subscription may exist at company-level,
+                // attempt to claim it server-side using the user's email so
+                // the client-visible profile shows credits after logout/login.
+                (async () => {
+                  try {
+                    const smsServer = await getSmsServerUrl().catch(() => "");
+                    if (!smsServer) return;
+                    const userEmail = me?.email || null;
+                    // Only attempt if we don't already have positive credits
+                    const hasCredits =
+                      Number(formattedData.smsCredits || 0) > 0 ||
+                      Number(formattedData.remainingCredits || 0) > 0;
+                    if (!userEmail || hasCredits) return;
+
+                    const claimRes = await fetch(
+                      `${smsServer}/api/subscription/claim`,
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ userEmail }),
+                      }
+                    );
+                    if (!claimRes.ok) return;
+                    const claimJson = await claimRes
+                      .json()
+                      .catch(() => ({} as any));
+                    if (
+                      claimJson &&
+                      claimJson.success &&
+                      claimJson.subscription
+                    ) {
+                      const srv = claimJson.subscription;
+                      const merged: any = { ...formattedData };
+                      merged.smsCredits = Number(
+                        srv.smsCredits ||
+                          srv.remainingCredits ||
+                          merged.smsCredits ||
+                          0
+                      );
+                      merged.remainingCredits = Number(
+                        srv.remainingCredits ||
+                          srv.smsCredits ||
+                          merged.remainingCredits ||
+                          merged.smsCredits ||
+                          0
+                      );
+                      merged.startDate =
+                        merged.startDate ||
+                        srv.startDate ||
+                        srv.activatedAt ||
+                        srv.activatedAt ||
+                        null;
+                      merged.expiryDate =
+                        merged.expiryDate ||
+                        srv.endDate ||
+                        srv.expiryAt ||
+                        srv.expiryAt ||
+                        null;
+                      // Persist companyId when returned
+                      if (claimJson.companyId) {
+                        try {
+                          localStorage.setItem(
+                            "companyId",
+                            String(claimJson.companyId)
+                          );
+                          localStorage.setItem(
+                            "serverCompanyId",
+                            String(claimJson.companyId)
+                          );
+                        } catch {}
+                      }
+                      setSubscriptionData(merged);
+                      setDisplaySubscription(merged);
+                    }
+                  } catch (e) {
+                    console.warn(
+                      "[Profile] claim subscription attempt failed:",
+                      e
+                    );
+                  }
+                })();
                 try {
                   localStorage.setItem("companyId", me.uid);
                 } catch {}
@@ -1318,9 +1476,11 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                             displaySubscription || subscriptionData
                           }
                           messagesSentThisMonth={
-                            serverMessageCount !== null
+                            typeof messagesSentThisMonth === "number"
+                              ? messagesSentThisMonth
+                              : serverMessageCount !== null
                               ? serverMessageCount
-                              : messagesSentThisMonth
+                              : activityMessagesSentThisMonth
                           }
                         />
                       </div>
@@ -1548,7 +1708,7 @@ const SmsCreditsDisplay: React.FC<{
     } finally {
       setLoading(false);
     }
-  }, [subscriptionData]);
+  }, [subscriptionData, messagesSentThisMonth]);
 
   if (loading) return <div className="text-sm text-gray-500">Loading...</div>;
   return (

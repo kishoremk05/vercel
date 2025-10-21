@@ -4196,7 +4196,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                         Messages Sent
                       </div>
                       <div className="text-4xl sm:text-5xl font-extrabold text-blue-600 mb-2">
-                        {messageCount}
+                        {messagesSentThisMonth}
                       </div>
                       <div className="bg-blue-100 p-2 rounded-lg inline-flex">
                         <svg

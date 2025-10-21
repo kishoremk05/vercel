@@ -1400,6 +1400,67 @@ const App: React.FC = () => {
     ).length;
   }, [activityLogs]);
 
+  // Server-provided messages count (month) so Dashboard and Profile
+  // can share the exact authoritative number. This will be used to
+  // override the in-memory activityLogs value when available.
+  const [serverMessagesThisMonth, setServerMessagesThisMonth] = useState<
+    number | null
+  >(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchServerCount = async () => {
+      try {
+        const companyId = localStorage.getItem("companyId");
+        if (!companyId) return;
+        const base =
+          (await getSmsServerUrl().catch(() => API_BASE)) || API_BASE;
+        const url = base
+          ? `${String(base)
+              .trim()
+              .replace(
+                /\/+$/,
+                ""
+              )}/api/dashboard/messages?companyId=${companyId}`
+          : `/api/dashboard/messages?companyId=${companyId}`;
+        const resp = await fetch(url).catch(() => null);
+        if (!resp || !resp.ok) return;
+        const json = await resp.json().catch(() => ({} as any));
+        const messages = Array.isArray(json.messages) ? json.messages : [];
+        const today = new Date();
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        const count = messages.filter((m: any) => {
+          try {
+            const ts = m.timestamp ? new Date(m.timestamp) : null;
+            return ts && ts >= firstDay;
+          } catch {
+            return false;
+          }
+        }).length;
+        if (mounted) setServerMessagesThisMonth(count);
+      } catch (e) {
+        console.warn("[App] fetchServerCount failed:", e);
+      }
+    };
+
+    fetchServerCount();
+    const onSms = () => setTimeout(fetchServerCount, 800);
+    window.addEventListener("dash:sms:success", onSms as any);
+    window.addEventListener("subscription:updated", onSms as any);
+    return () => {
+      mounted = false;
+      window.removeEventListener("dash:sms:success", onSms as any);
+      window.removeEventListener("subscription:updated", onSms as any);
+    };
+  }, []);
+
+  // Prefer server-provided monthly count when available so Dashboard
+  // and Profile consistently show the same number.
+  const effectiveMessagesSentThisMonth =
+    serverMessagesThisMonth !== null
+      ? serverMessagesThisMonth
+      : messagesSentThisMonth;
+
   // Handlers expected by DashboardPage
   const handleAddCustomer = (name: string, phone: string) => {
     const newCustomer: Customer = {
@@ -2223,7 +2284,7 @@ const App: React.FC = () => {
               customers={customers}
               activityLogs={activityLogs}
               plan={plan}
-              messagesSentThisMonth={messagesSentThisMonth}
+              messagesSentThisMonth={effectiveMessagesSentThisMonth}
               onAddCustomer={handleAddCustomer}
               onSendMessage={handleSendMessage}
               onDeleteCustomer={handleDeleteCustomer}
@@ -2269,6 +2330,7 @@ const App: React.FC = () => {
               supportEmail: "support@email.com",
             }}
             activityLogs={activityLogs}
+            messagesSentThisMonth={effectiveMessagesSentThisMonth}
             onLogout={handleLogout}
             setBusinessName={setBusinessName}
             setBusinessEmail={setBusinessEmail}
