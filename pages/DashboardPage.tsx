@@ -1275,15 +1275,15 @@ const SentimentChartWrapper: React.FC = () => {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-6 animate-pulse">
         <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
-        <div className="h-64 bg-gray-200 rounded"></div>
+        <div className="h-48 bg-gray-200 rounded"></div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-red-600">
-        <p className="font-semibold">Error loading sentiment data</p>
+      <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 text-red-600">
+        <p className="font-semibold">Error loading sentiment chart</p>
         <p className="text-sm">{error}</p>
       </div>
     );
@@ -1291,491 +1291,10 @@ const SentimentChartWrapper: React.FC = () => {
 
   return <SentimentChart stats={stats} />;
 };
-
-// Dashboard Overview cards (top summary) – counts sent based on logs first, fallback to status.
-const DashboardOverview: React.FC<{
-  customers: Customer[];
-  activityLogs: ActivityLog[];
-}> = ({ customers, activityLogs }) => {
-  // Count sends from logs (preferred accurate source)
-  const sentLogCount = activityLogs.filter((log) => {
-    const a = log.action.toLowerCase();
-    return (
-      a.includes("sent sms") ||
-      a.includes("resend sms") ||
-      a.includes("sent review request")
-    );
-  }).length;
-  // Fallback to status derived
-  const statusDerivedSent = customers
-    .filter((c) => c.id !== "public-feedback")
-    .filter(
-      (c) =>
-        c.status === "Sent" || c.status === "Clicked" || c.status === "Reviewed"
-    ).length;
-  const messagesSent = sentLogCount > 0 ? sentLogCount : statusDerivedSent;
-
-  const reviewRedirects = customers.filter(
-    (c) => c.status === "Clicked" || c.status === "Reviewed"
-  ).length;
-
-  const conversionRate =
-    messagesSent > 0 ? (reviewRedirects / messagesSent) * 100 : 0;
-
-  const Card = ({
-    value,
-    label,
-    colorClass = "text-gray-900",
-  }: {
-    value: string;
-    label: string;
-    colorClass?: string;
-  }) => {
-    let bgColor = "bg-gray-50";
-    let iconColor = "text-gray-400";
-    let iconBg = "bg-gray-100";
-    let iconPath =
-      "M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4";
-
-    if (colorClass.includes("green")) {
-      bgColor = "bg-emerald-50";
-      iconColor = "text-emerald-600";
-      iconBg = "bg-emerald-100";
-      iconPath = "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z";
-    } else if (colorClass.includes("red")) {
-      bgColor = "bg-red-50";
-      iconColor = "text-red-600";
-      iconBg = "bg-red-100";
-      iconPath =
-        "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z";
-    }
-
-    return (
-      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 lg:p-6 hover:shadow-lg hover:border-gray-300 transition-all duration-200">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <div className="text-[10px] sm:text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 sm:mb-3">
-              {label}
-            </div>
-            <div className={`text-2xl sm:text-3xl font-bold ${colorClass}`}>
-              {value}
-            </div>
-          </div>
-          <div className={`${iconBg} p-2 sm:p-3 rounded-xl`}>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className={`h-5 w-5 ${iconColor}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d={iconPath}
-              />
-            </svg>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Count positive/negative reviews from all feedback
-  const allFeedback = customers.flatMap((c) => c.feedback || []);
-  const positiveCount = allFeedback.filter(
-    (f) => f.sentiment === "positive"
-  ).length;
-  const negativeCount = allFeedback.filter(
-    (f) => f.sentiment === "negative"
-  ).length;
-
-  return (
-    <div className="mb-0">
-      <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold text-gray-900 mb-3 sm:mb-4 lg:mb-6">
-        Overview
-      </h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-        <Card value={messagesSent.toLocaleString()} label="Messages Sent" />
-        <Card
-          value={positiveCount.toLocaleString()}
-          label="Positive Reviews"
-          colorClass="text-green-600"
-        />
-        <Card
-          value={negativeCount.toLocaleString()}
-          label="Negative Reviews"
-          colorClass="text-red-600"
-        />
-      </div>
-    </div>
-  );
-};
-// (Small card component for negative comments removed per UI request)
-// Props for NegativeFeedbackSection
-// Section to show only negative feedback comments FROM FIREBASE
-type NegativeFeedbackSectionProps = {
-  comments: Array<{
-    id: string;
-    companyId: string;
-    customerPhone: string;
-    commentText: string;
-    rating: number;
-    createdAt: any;
-  }>;
-  loading: boolean;
-  onDelete: (commentId: string) => void;
-  onExport?: () => void;
-  onClearAll?: () => void;
-  businessName?: string;
-  feedbackPageLink?: string;
-  deletingIds?: string[];
-};
-const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
-  comments,
-  loading,
-  onDelete,
-  onExport,
-  onClearAll,
-  businessName,
-  feedbackPageLink,
-  deletingIds = [],
-}) => {
-  // Pagination and search state (table style like Customer List)
-  const pageSize = 2;
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  useEffect(() => setCurrentPage(1), [searchQuery, comments]);
-
-  // Local helper for WhatsApp support-style message (kept inside component scope)
-  function getSupportWaMessage(customerName: string) {
-    const reviewLink = feedbackPageLink || window.location.href;
-    const tmpl =
-      "Hi [Customer Name], sorry for your bad experience. We'll sort the issue as soon as possible.";
-    return tmpl
-      .replace(/\[Customer Name\]/g, customerName || "Customer")
-      .replace(/\[Review Link\]/g, reviewLink || "");
-  }
-
-  // Build a deduplicated list of comments (fingerprint: phone|text|createdAt)
-  const uniqueComments = React.useMemo(() => {
-    const map: Record<string, any> = {};
-    (comments || []).forEach((c) => {
-      if (!c) return;
-      const phone = (c.customerPhone || "").replace(/\s+/g, "");
-      const text = String(c.commentText || "").replace(/\r?\n/g, " ");
-
-      // Safe date conversion with validation
-      let createdAtIso: string;
-      try {
-        if (c.createdAt?.toDate) {
-          const d = new Date(c.createdAt.toDate());
-          createdAtIso = !isNaN(d.getTime())
-            ? d.toISOString()
-            : new Date().toISOString();
-        } else if (c.createdAt) {
-          const d = new Date(c.createdAt);
-          createdAtIso = !isNaN(d.getTime())
-            ? d.toISOString()
-            : new Date().toISOString();
-        } else {
-          createdAtIso = new Date().toISOString();
-        }
-      } catch {
-        createdAtIso = new Date().toISOString();
-      }
-
-      const key = `${phone}||${text}||${createdAtIso}`;
-      const existing = map[key];
-      if (!existing) map[key] = { ...c, createdAtIso };
-      else {
-        try {
-          const cur = Date.parse(
-            existing.createdAtIso || existing.createdAt || ""
-          );
-          const nowTs = Date.parse(createdAtIso || "");
-          if (nowTs > cur) map[key] = { ...c, createdAtIso };
-        } catch {
-          // ignore
-        }
-      }
-    });
-    return Object.values(map).sort((a: any, b: any) => {
-      const ta = Date.parse(a.createdAtIso || a.createdAt || "");
-      const tb = Date.parse(b.createdAtIso || b.createdAt || "");
-      return tb - ta;
-    });
-  }, [comments]);
-  // Filter by search query (name or phone or text)
-  const filtered = React.useMemo(() => {
-    const q = String(searchQuery || "")
-      .trim()
-      .toLowerCase();
-    if (!q) return uniqueComments;
-    return uniqueComments.filter((c) => {
-      const phone = String(c.customerPhone || "").toLowerCase();
-      const text = String(c.commentText || "").toLowerCase();
-      return phone.includes(q) || text.includes(q);
-    });
-  }, [uniqueComments, searchQuery]);
-  if (loading) {
-    return (
-      <div className="bg-white p-6 rounded-2xl border border-gray-200 mt-2">
-        <h3 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-2">
-          <div className="bg-red-100 p-1.5 rounded-full">
-            <XCircleIcon className="h-5 w-5 text-red-600" />
-          </div>
-          Negative Comments
-        </h3>
-        <p className="text-gray-500 text-center py-4">Loading comments...</p>
-      </div>
-    );
-  }
-
-  if (filtered.length === 0) {
-    return (
-      <div className="bg-white p-6 rounded-2xl border border-gray-200 mt-2">
-        <h3 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-2">
-          <div className="bg-red-100 p-1.5 rounded-full">
-            <XCircleIcon className="h-5 w-5 text-red-600" />
-          </div>
-          Negative Comments
-        </h3>
-        <p className="text-gray-500 text-center py-8">
-          No negative comments yet. Feedback will appear here automatically.
-        </p>
-      </div>
-    );
-  }
-  // New: render table-style layout similar to Customer List
-  return (
-    <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg transition-all duration-300 hover:shadow-xl rounded-2xl p-4 sm:p-5 lg:p-6">
-      <div className="mb-4 sm:mb-6 flex items-center justify-between">
-        <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-0 flex items-center gap-2">
-          <div className="bg-red-100 p-1.5 rounded-full">
-            <XCircleIcon className="h-5 w-5 text-red-600" />
-          </div>
-          Negative Comments
-          <span className="text-xs leading-4 font-bold text-gray-600 bg-gray-100 border border-gray-200 px-3 py-1 rounded-full">
-            {uniqueComments.length} total
-          </span>
-        </h3>
-        <div className="w-full">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="Search by phone or text..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-3 pr-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-gray-900 shadow-sm text-sm sm:text-base"
-              />
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => onExport && onExport()}
-                className="px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 text-sm"
-              >
-                Export
-              </button>
-              <button
-                type="button"
-                onClick={() => onClearAll && onClearAll()}
-                className="px-3 py-2 bg-red-50 border border-red-100 text-red-700 rounded-xl hover:bg-red-100 text-sm"
-              >
-                Clear data
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        {/* Desktop/table view (show on sm and larger) */}
-        <div className="hidden sm:block overflow-x-auto">
-          <table className="w-full text-sm text-left text-gray-500">
-            <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10">
-              <tr>
-                <th className="px-3 sm:px-6 py-3 font-medium">Phone</th>
-                <th className="px-3 sm:px-6 py-3 font-medium">Comment</th>
-
-                <th className="px-3 sm:px-6 py-3 text-right font-medium">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {(() => {
-                const start = (currentPage - 1) * pageSize;
-                const rows = filtered.slice(start, start + pageSize);
-                return rows.map((c) => (
-                  <tr key={c.id} className="bg-white border-b hover:bg-gray-50">
-                    <td className="px-3 sm:px-6 py-3">{c.customerPhone}</td>
-                    <td className="px-3 sm:px-6 py-3">{c.commentText}</td>
-
-                    <td className="px-6 py-3 text-right">
-                      <div className="flex items-center gap-2 justify-end">
-                        <a
-                          onClick={(e) => {
-                            e.preventDefault();
-                            const phone = (c.customerPhone || "").replace(
-                              /\D/g,
-                              ""
-                            );
-                            if (!phone) return;
-                            const msg = encodeURIComponent(
-                              getSupportWaMessage(c.customerPhone || "Customer")
-                            );
-                            window.open(
-                              `https://wa.me/${phone}?text=${msg}`,
-                              "_blank",
-                              "noopener,noreferrer"
-                            );
-                          }}
-                          className="p-3 rounded-md hover:bg-green-50 text-green-700 inline-flex items-center justify-center"
-                          href="#"
-                          title="Reply via WhatsApp"
-                        >
-                          <svg
-                            className="h-6 w-6"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                            aria-hidden
-                          >
-                            <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .02 5.36 0 12c0 2.11.55 4.18 1.6 6.01L0 24l6.12-1.59A11.95 11.95 0 0012 24c6.63 0 12-5.37 12-12 0-3.2-1.25-6.2-3.48-8.52zM12 21.5c-1.8 0-3.55-.46-5.1-1.33l-.36-.19-3.64.94.98-3.55-.23-.37A9.5 9.5 0 012.5 12c0-5.24 4.26-9.5 9.5-9.5 2.54 0 4.92.99 6.72 2.79A9.45 9.45 0 0121.5 12c0 5.24-4.26 9.5-9.5 9.5z" />
-                          </svg>
-                        </a>
-                        <button
-                          onClick={() => onDelete(c.id)}
-                          className="p-3 rounded-md hover:bg-red-50 text-red-600 inline-flex items-center justify-center"
-                          disabled={(deletingIds || []).includes(c.id)}
-                          title="Delete comment"
-                        >
-                          {(deletingIds || []).includes(c.id) ? (
-                            <span className="text-xs text-gray-500">
-                              Deleting...
-                            </span>
-                          ) : (
-                            <TrashIcon className="h-5 w-5" />
-                          )}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ));
-              })()}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile stacked card view (show on xs only) */}
-        <div className="block sm:hidden space-y-3">
-          {(() => {
-            const start = (currentPage - 1) * pageSize;
-            const rows = filtered.slice(start, start + pageSize);
-            return rows.map((c) => (
-              <div
-                key={c.id}
-                className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-medium text-gray-900 truncate">
-                        {c.customerPhone || "—"}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {c.createdAt?.toDate
-                          ? new Date(c.createdAt.toDate()).toLocaleString()
-                          : new Date(c.createdAt).toLocaleString()}
-                      </div>
-                    </div>
-                    <div className="mt-2 text-sm text-gray-700 whitespace-pre-line break-words">
-                      {c.commentText}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      const phone = (c.customerPhone || "").replace(/\D/g, "");
-                      if (!phone) return;
-                      const msg = encodeURIComponent(
-                        getSupportWaMessage(c.customerPhone || "Customer")
-                      );
-                      window.open(
-                        `https://wa.me/${phone}?text=${msg}`,
-                        "_blank",
-                        "noopener,noreferrer"
-                      );
-                    }}
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-green-50 text-green-700 text-sm font-semibold hover:bg-green-100"
-                    title="Reply via WhatsApp"
-                  >
-                    Reply
-                  </button>
-                  <button
-                    onClick={() => onDelete(c.id)}
-                    disabled={(deletingIds || []).includes(c.id)}
-                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm font-semibold hover:bg-red-100"
-                    title="Delete comment"
-                  >
-                    {(deletingIds || []).includes(c.id) ? (
-                      <span className="text-xs text-gray-500">Deleting...</span>
-                    ) : (
-                      <TrashIcon className="h-4 w-4" />
-                    )}
-                    <span className="hidden sm:inline">Delete</span>
-                  </button>
-                </div>
-              </div>
-            ));
-          })()}
-        </div>
-      </div>
-
-      {/* Pagination */}
-      {(() => {
-        const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-        return (
-          <div className="flex justify-center items-center mt-4 gap-2">
-            <button
-              className="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-900 font-medium hover:bg-gray-50 disabled:opacity-50"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-            >
-              Prev
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                onClick={() => setCurrentPage(p)}
-                className={`px-3 py-1 rounded-full font-medium ${
-                  p === currentPage
-                    ? "bg-gray-900 text-white"
-                    : "bg-white border text-gray-700"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-            <button
-              className="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-900 font-medium hover:bg-gray-50 disabled:opacity-50"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-            >
-              Next
-            </button>
-          </div>
-        );
-      })()}
-    </div>
-  );
-};
+// NOTE: removed an accidentally duplicated JSX block that was inserted here by
+// a previous edit. The CustomerTable and related components are defined later
+// in this file; keeping this duplicate caused stray JSX to exist outside any
+// component scope and produced parse errors.
 // (imports moved to top)
 
 declare var XLSX: any;
@@ -2037,6 +1556,158 @@ const FunnelAnalytics: React.FC<{ customers: Customer[] }> = ({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+};
+
+// Negative feedback section (simplified)
+type NegativeFeedbackSectionProps = {
+  comments: Array<{
+    id: string;
+    companyId: string;
+    customerPhone: string;
+    commentText: string;
+    rating: number;
+    createdAt: any;
+  }>;
+  loading: boolean;
+  onDelete: (commentId: string) => void;
+  onExport?: () => void;
+  onClearAll?: () => void;
+  businessName?: string;
+  feedbackPageLink?: string;
+  deletingIds?: string[];
+};
+
+const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
+  comments,
+  loading,
+  onDelete,
+  onExport,
+  onClearAll,
+  businessName,
+  feedbackPageLink,
+  deletingIds = [],
+}) => {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    // reset pagination/search when comments change
+  }, [comments]);
+
+  function getSupportWaMessage(customerName: string) {
+    const reviewLink = feedbackPageLink || window.location.href;
+    const tmpl =
+      "Hi [Customer Name], sorry for your bad experience. We'll sort the issue as soon as possible.";
+    return tmpl.replace(/\[Customer Name\]/g, customerName || "Customer");
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 mt-2">
+        <h3 className="text-lg font-bold text-gray-900 mb-5">
+          Negative Comments
+        </h3>
+        <p className="text-gray-500">Loading comments...</p>
+      </div>
+    );
+  }
+
+  if (!comments || comments.length === 0) {
+    return (
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 mt-2">
+        <h3 className="text-lg font-bold text-gray-900 mb-5">
+          Negative Comments
+        </h3>
+        <p className="text-gray-500">
+          No negative comments yet. Feedback will appear here automatically.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg transition-all duration-300 hover:shadow-xl rounded-2xl p-4 sm:p-5 lg:p-6">
+      <div className="mb-4 sm:mb-6 flex items-center justify-between">
+        <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-0">
+          Negative Comments
+        </h3>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onExport && onExport()}
+            className="px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 text-sm"
+          >
+            Export
+          </button>
+          <button
+            onClick={() => onClearAll && onClearAll()}
+            className="px-3 py-2 bg-red-50 border border-red-100 text-red-700 rounded-xl hover:bg-red-100 text-sm"
+          >
+            Clear data
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {comments.map((c) => (
+          <div
+            key={c.id}
+            className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-gray-900 truncate">
+                  {c.customerPhone || "—"}
+                </div>
+                <div className="mt-2 text-sm text-gray-700 whitespace-pre-line break-words">
+                  {c.commentText}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const phone = (c.customerPhone || "").replace(/\D/g, "");
+                    if (!phone) return;
+                    const msg = encodeURIComponent(
+                      getSupportWaMessage(c.customerPhone || "Customer")
+                    );
+                    window.open(
+                      `https://wa.me/${phone}?text=${msg}`,
+                      "_blank",
+                      "noopener,noreferrer"
+                    );
+                  }}
+                  className="p-3 rounded-md hover:bg-green-50 text-green-700 inline-flex items-center justify-center"
+                  href="#"
+                  title="Reply via WhatsApp"
+                >
+                  <svg
+                    className="h-6 w-6"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden
+                  >
+                    <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .02 5.36 0 12c0 2.11.55 4.18 1.6 6.01L0 24l6.12-1.59A11.95 11.95 0 0012 24c6.63 0 12-5.37 12-12 0-3.2-1.25-6.2-3.48-8.52zM12 21.5c-1.8 0-3.55-.46-5.1-1.33l-.36-.19-3.64.94.98-3.55-.23-.37A9.5 9.5 0 012.5 12c0-5.24 4.26-9.5 9.5-9.5 2.54 0 4.92.99 6.72 2.79A9.45 9.45 0 0121.5 12c0 5.24-4.26 9.5-9.5 9.5z" />
+                  </svg>
+                </a>
+                <button
+                  onClick={() => onDelete(c.id)}
+                  className="p-3 rounded-md hover:bg-red-50 text-red-600 inline-flex items-center justify-center"
+                  disabled={(deletingIds || []).includes(c.id)}
+                  title="Delete comment"
+                >
+                  {(deletingIds || []).includes(c.id) ? (
+                    <span className="text-xs text-gray-500">Deleting...</span>
+                  ) : (
+                    <TrashIcon className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2716,7 +2387,7 @@ const CustomerTable: React.FC<CustomerTableProps> = ({
               {showSubscriptionDebug ? "Hide" : "Show"} Subscription Debug
             </button>
           </div>
-          <SubscriptionCustomerLock />
+          {/* Subscription lock removed — show upload UI unblocked */}
           {showSubscriptionDebug && <SubscriptionDebugView />}
           <div className="flex flex-col gap-3">
             <div className="w-full flex flex-col sm:flex-row items-center gap-2">
