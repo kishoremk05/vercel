@@ -4292,6 +4292,46 @@ app.delete("/api/account/delete", async (req, res) => {
           e?.message || e
         );
       }
+
+      // LEGACY: Delete tenant entries (tenants/{tenantId}) that reference this email
+      if (targetEmail) {
+        try {
+          const profilesSnap = await firestore
+            .collectionGroup("profiles")
+            .where("email", "==", String(targetEmail))
+            .get();
+          for (const p of profilesSnap.docs) {
+            try {
+              const parts = p.ref.path.split("/");
+              const tIndex = parts.indexOf("tenants");
+              if (tIndex >= 0 && parts[tIndex + 1]) {
+                const tenantId = parts[tIndex + 1];
+                const tenantRef = firestore.collection("tenants").doc(tenantId);
+                await deleteDocRecursively(tenantRef).catch((err) =>
+                  console.warn(
+                    "[api:account:delete] Failed to delete tenant:",
+                    tenantId,
+                    err?.message || err
+                  )
+                );
+                console.log(
+                  `[api:account:delete] Removed legacy tenant ${tenantId} for email ${targetEmail}`
+                );
+              }
+            } catch (e) {
+              console.warn(
+                "[api:account:delete] Failed processing profile->tenant cleanup:",
+                e?.message || e
+              );
+            }
+          }
+        } catch (e) {
+          console.warn(
+            "[api:account:delete] Tenant cleanup by email failed:",
+            e?.message || e
+          );
+        }
+      }
     }
 
     // Delete company document (companies/{companyId})
@@ -4367,6 +4407,152 @@ app.delete("/api/account/delete", async (req, res) => {
       "companyId",
       String(companyId)
     );
+
+    // Delete top-level messages (legacy storage) to ensure no message
+    // history can resurrect the client when they re-register.
+    let messagesDeleted = 0;
+    try {
+      messagesDeleted = await deleteCollectionWhere(
+        "messages",
+        "companyId",
+        String(companyId)
+      );
+      console.log(
+        `[api:account:delete] Deleted top-level messages for ${companyId}: ${messagesDeleted}`
+      );
+    } catch (e) {
+      console.warn(
+        "[api:account:delete] Failed to delete top-level messages:",
+        e?.message || e
+      );
+    }
+
+    // Remove any v2 'users' records that reference this company (so dbV2 mappings
+    // don't point to a deleted company). This prevents automatic re-linking.
+    let usersByCompanyDeleted = 0;
+    try {
+      usersByCompanyDeleted = await deleteCollectionWhere(
+        "users",
+        "companyId",
+        String(companyId)
+      );
+      console.log(
+        `[api:account:delete] Deleted v2 users mapped to company ${companyId}: ${usersByCompanyDeleted}`
+      );
+    } catch (e) {
+      console.warn(
+        "[api:account:delete] Failed to remove v2 users for company:",
+        e?.message || e
+      );
+    }
+
+    // Delete the canonical users record for the auth UID (if present)
+    try {
+      await firestore
+        .collection("users")
+        .doc(String(auth_uid))
+        .delete()
+        .catch(() => null);
+      console.log(
+        `[api:account:delete] Removed users/${String(auth_uid)} (if existed)`
+      );
+    } catch (e) {
+      console.warn(
+        "[api:account:delete] Failed to delete users/{auth_uid} doc:",
+        e?.message || e
+      );
+    }
+
+    // If we derived a target email, delete any users docs that match that email
+    // (prevents resurrection via email-based lookups)
+    if (targetEmail) {
+      try {
+        const byEmailSnap = await firestore
+          .collection("users")
+          .where("email", "==", String(targetEmail))
+          .get();
+        for (const u of byEmailSnap.docs) {
+          try {
+            await u.ref.delete();
+            console.log(
+              "[api:account:delete] Deleted user by email:",
+              u.ref.path
+            );
+          } catch (ue) {
+            console.warn(
+              "[api:account:delete] Failed to delete user doc:",
+              ue?.message || ue
+            );
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[api:account:delete] Failed to query users by email:",
+          e?.message || e
+        );
+      }
+    }
+
+    // Delete any clientAuth credentials stored in legacy clientAuth collection
+    try {
+      await firestore
+        .collection("clientAuth")
+        .doc(String(auth_uid))
+        .delete()
+        .catch(() => null);
+      // Also remove any clientAuth records keyed by email to be safe
+      if (targetEmail) {
+        const authByEmail = await firestore
+          .collection("clientAuth")
+          .where("email", "==", String(targetEmail))
+          .get();
+        for (const doc of authByEmail.docs) {
+          try {
+            await doc.ref.delete();
+            console.log(
+              "[api:account:delete] Deleted legacy clientAuth:",
+              doc.ref.path
+            );
+          } catch (err) {
+            console.warn(
+              "[api:account:delete] Failed to delete clientAuth doc:",
+              err?.message || err
+            );
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[api:account:delete] Failed to clean clientAuth records:",
+        e?.message || e
+      );
+    }
+
+    // Try removing any legacy activity log entries keyed by companyId
+    try {
+      const activityDeletedA = await deleteCollectionWhere(
+        "activity_logs",
+        "companyId",
+        String(companyId)
+      );
+      const activityDeletedB = await deleteCollectionWhere(
+        "activityLogs",
+        "companyId",
+        String(companyId)
+      );
+      if (activityDeletedA || activityDeletedB) {
+        console.log(
+          `[api:account:delete] Purged activity logs for ${companyId}: ${
+            activityDeletedA + activityDeletedB
+          }`
+        );
+      }
+    } catch (e) {
+      console.warn(
+        "[api:account:delete] Failed to delete activity logs:",
+        e?.message || e
+      );
+    }
 
     console.log(
       `[api:account:delete] ✅ Successfully deleted account: ${companyId}`

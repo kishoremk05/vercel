@@ -1098,6 +1098,26 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           localStorage.removeItem("profilePhoto");
         } catch {}
         try {
+          // Ensure the client signs out of Firebase so cached auth state
+          // does not remain after the server removed the auth user.
+          initializeFirebase();
+          const auth = getFirebaseAuth();
+          if (auth && auth.signOut) {
+            try {
+              await auth.signOut();
+            } catch (signOutErr) {
+              // If signOut fails, ignore - we still clear local storage below.
+              console.warn(
+                "[profile:delete] firebase signOut failed:",
+                signOutErr?.message || signOutErr
+              );
+            }
+          }
+        } catch (e) {
+          // ignore any sign-out errors
+        }
+
+        try {
           sessionStorage.clear();
         } catch {}
 
