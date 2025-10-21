@@ -73,12 +73,74 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     return pricingPlans[1];
   }); // Default to Growth plan
   const [isProcessing, setIsProcessing] = useState(false);
+  const [alreadyPaid, setAlreadyPaid] = useState(false);
 
   // Clear pendingPlan after mount so refresh won't overwrite selection later
   useEffect(() => {
     try {
       localStorage.removeItem("pendingPlan");
     } catch {}
+  }, []);
+
+  // On mount, perform a pre-flight check so the page can immediately
+  // indicate if the client already has a subscription and avoid showing
+  // the payment CTA when they don't need it.
+  useEffect(() => {
+    (async () => {
+      try {
+        const companyId = localStorage.getItem("companyId");
+        if (!companyId) return;
+        const resolveApiBase = () => {
+          try {
+            const fromSms = localStorage.getItem("smsServerUrl");
+            if (fromSms) return fromSms.replace(/\/$/, "");
+          } catch {}
+          try {
+            const fromLS = localStorage.getItem("apiBase");
+            if (fromLS) return fromLS.replace(/\/$/, "");
+          } catch {}
+          try {
+            const g =
+              (window as any).SMS_SERVER_URL || (window as any).API_BASE;
+            if (g) return String(g).replace(/\/$/, "");
+          } catch {}
+          try {
+            const env = (import.meta as any)?.env?.VITE_API_BASE;
+            if (env) return String(env).replace(/\/$/, "");
+          } catch {}
+          if (
+            typeof window !== "undefined" &&
+            window.location &&
+            window.location.hostname &&
+            window.location.hostname !== "localhost" &&
+            window.location.hostname !== "127.0.0.1"
+          ) {
+            return "https://server-cibp.onrender.com";
+          }
+          return "";
+        };
+
+        const apiBase = resolveApiBase();
+        const checkUrl = apiBase
+          ? `${apiBase}/api/subscription?companyId=${companyId}`
+          : `/api/subscription?companyId=${companyId}`;
+        const resp = await fetch(checkUrl).catch(() => null);
+        if (!resp || !resp.ok) return;
+        const json = await resp.json().catch(() => ({}));
+        const existing = json && json.subscription;
+        if (
+          existing &&
+          (existing.planId ||
+            existing.planName ||
+            existing.status === "active" ||
+            Number(existing.remainingCredits || existing.smsCredits || 0) > 0)
+        ) {
+          setAlreadyPaid(true);
+        }
+      } catch (e) {
+        // Non-fatal
+      }
+    })();
   }, []);
 
   // Get user info
@@ -146,6 +208,40 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         companyId,
         userEmail,
       });
+
+      // Pre-flight: check if client already has an active subscription so
+      // we can avoid duplicate one-time purchases. Prefer the server
+      // canonical subscription endpoint which reads billing/profile.
+      try {
+        const checkResp = await fetch(
+          apiBase
+            ? `${apiBase}/api/subscription?companyId=${companyId}`
+            : `/api/subscription?companyId=${companyId}`
+        );
+        if (checkResp.ok) {
+          const checkJson = await checkResp.json().catch(() => ({}));
+          const existing = checkJson && checkJson.subscription;
+          const alreadyHasPlan = !!(
+            existing &&
+            (existing.planId ||
+              existing.planName ||
+              existing.status === "active" ||
+              Number(existing.remainingCredits || existing.smsCredits || 0) > 0)
+          );
+          if (alreadyHasPlan) {
+            alert(
+              "You already have an active subscription. Redirecting to Dashboard."
+            );
+            window.location.href = "/dashboard";
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[Payment] Pre-flight subscription check failed, continuing with checkout",
+          e
+        );
+      }
 
       // Create Dodo payment session
       const response = await fetch(url, {
@@ -416,8 +512,14 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
               </div>
 
               <button
-                onClick={handlePayment}
-                disabled={isProcessing}
+                onClick={() => {
+                  if (alreadyPaid) {
+                    window.location.href = "/dashboard";
+                    return;
+                  }
+                  handlePayment();
+                }}
+                disabled={isProcessing || alreadyPaid}
                 className={`w-full py-4 px-6 rounded-lg font-bold text-lg transition-all ${
                   isProcessing
                     ? "bg-gray-400 cursor-not-allowed"
@@ -448,10 +550,24 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
                     </svg>
                     Processing...
                   </span>
+                ) : alreadyPaid ? (
+                  `Active — Go to Dashboard`
                 ) : (
                   `Pay $${selectedPlan.price}`
                 )}
               </button>
+
+              {alreadyPaid && (
+                <div className="mt-4 text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg p-3">
+                  You already have an active subscription.{" "}
+                  <button
+                    onClick={() => (window.location.href = "/dashboard")}
+                    className="underline font-semibold"
+                  >
+                    Go to Dashboard
+                  </button>
+                </div>
+              )}
 
               <div className="mt-6 space-y-3 text-xs text-gray-500">
                 <div className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { ActivityLog } from "../types";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 import {
@@ -68,6 +68,32 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   // plan the user selected (pendingPlan / local subscription) when
   // Firestore contains an ambiguous value like "Custom".
   const [displaySubscription, setDisplaySubscription] = useState<any>(null);
+
+  // Derive authoritative 'sent' count from dashboard activity logs when
+  // available so the Profile page shows the same "Sent" number as the
+  // Dashboard. This prefers the activityLogs prop over inferring sent
+  // from smsCredits/remainingCredits (which can be racy during webhook
+  // reconciliation).
+  const messagesSentThisMonth = useMemo(() => {
+    try {
+      const today = new Date();
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      return (
+        (activityLogs || [])
+          .filter(
+            (log) =>
+              (log.action || "")
+                .toLowerCase()
+                .includes("sent review request") ||
+              (log.action || "").toLowerCase().includes("sent sms") ||
+              (log.action || "").toLowerCase().includes("resend sms")
+          )
+          .filter((l) => new Date(l.timestamp) >= firstDay).length || 0
+      );
+    } catch (e) {
+      return 0;
+    }
+  }, [activityLogs]);
 
   // Load profile photo from localStorage on mount (Firebase upload handled separately)
   useEffect(() => {
@@ -1126,6 +1152,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                           subscriptionData={
                             displaySubscription || subscriptionData
                           }
+                          messagesSentThisMonth={messagesSentThisMonth}
                         />
                       </div>
                     </div>
@@ -1309,9 +1336,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
 };
 
 // SMS Credits display component - shows sent count derived from subscription
-const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
-  subscriptionData,
-}) => {
+const SmsCreditsDisplay: React.FC<{
+  subscriptionData: any;
+  messagesSentThisMonth?: number;
+}> = ({ subscriptionData, messagesSentThisMonth }) => {
   const [sentCount, setSentCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -1322,17 +1350,29 @@ const SmsCreditsDisplay: React.FC<{ subscriptionData: any }> = ({
         setSentCount(0);
         return;
       }
-      const total = Number(
-        subscriptionData.smsCredits ?? subscriptionData.totalCredits ?? 0
-      );
-      const remaining = Number(
-        subscriptionData.remainingCredits ?? subscriptionData.remaining ?? total
-      );
-      const sent =
-        Number.isFinite(total) && Number.isFinite(remaining)
-          ? Math.max(0, total - remaining)
-          : 0;
-      setSentCount(sent);
+      if (
+        typeof messagesSentThisMonth === "number" &&
+        messagesSentThisMonth >= 0
+      ) {
+        // Prefer the dashboard-computed count when available because it's
+        // derived from actual message activity logs and is authoritative
+        // for the Sent metric.
+        setSentCount(messagesSentThisMonth);
+      } else {
+        const total = Number(
+          subscriptionData.smsCredits ?? subscriptionData.totalCredits ?? 0
+        );
+        const remaining = Number(
+          subscriptionData.remainingCredits ??
+            subscriptionData.remaining ??
+            total
+        );
+        const sent =
+          Number.isFinite(total) && Number.isFinite(remaining)
+            ? Math.max(0, total - remaining)
+            : 0;
+        setSentCount(sent);
+      }
     } catch (e) {
       console.warn("[SmsCreditsDisplay] compute error:", e);
       setSentCount(0);

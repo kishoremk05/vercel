@@ -253,6 +253,37 @@ const App: React.FC = () => {
         companyId,
         userEmail,
       });
+
+      // Pre-flight: check if a subscription already exists for this company
+      try {
+        const checkUrl = API_BASE
+          ? `${API_BASE}/api/subscription?companyId=${companyId}`
+          : `/api/subscription?companyId=${companyId}`;
+        const pre = await fetch(checkUrl).catch(() => null);
+        if (pre && pre.ok) {
+          const preJson = await pre.json().catch(() => ({} as any));
+          const existing = preJson && preJson.subscription;
+          if (
+            existing &&
+            (existing.planId ||
+              existing.planName ||
+              existing.status === "active" ||
+              Number(existing.remainingCredits || existing.smsCredits || 0) > 0)
+          ) {
+            alert(
+              "You already have an active subscription. Redirecting to Dashboard."
+            );
+            if (window.location.pathname !== "/dashboard")
+              window.location.href = "/dashboard";
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[Checkout] Pre-flight subscription check failed, continuing",
+          e
+        );
+      }
       const resp = await fetch(url, {
         method: "POST",
         headers: {
