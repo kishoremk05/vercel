@@ -48,6 +48,34 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess }) => {
         localStorage.setItem("agentCode", agentCode.trim()); // Store agent code if provided
       }
 
+      // Remove any cached subscription that belongs to a different
+      // company id or only matches by email — treat Google sign-up as a
+      // potential re-creation and avoid inheriting someone else's
+      // subscription state.
+      try {
+        const raw = localStorage.getItem("subscription");
+        if (raw) {
+          const sub = JSON.parse(raw || "{}");
+          const subCompany =
+            sub.companyId || sub.clientId || sub.client || null;
+          const subEmail = (sub.userEmail || sub.email || "").toLowerCase();
+          const currEmail = (user.email || "").toLowerCase();
+          const companyMismatch =
+            subCompany && String(subCompany) !== String(authUid);
+          const emailMatchOnly =
+            !subCompany && subEmail && subEmail === currEmail;
+          if (companyMismatch || emailMatchOnly) {
+            try {
+              localStorage.removeItem("subscription");
+              localStorage.removeItem("profile_subscription_present");
+              localStorage.removeItem("pendingPlan");
+            } catch {}
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+
       // Dispatch auth ready event
       window.dispatchEvent(
         new CustomEvent("auth:ready", {
@@ -59,6 +87,36 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess }) => {
           },
         })
       );
+
+      // Clear any previous local subscription/pending flags that don't
+      // belong to this new user so they start with a clean slate. If a
+      // cached subscription belongs to a different companyId (or only
+      // matches by email) treat this as a re-created/deleted account and
+      // clear the cached subscription so the new account does not inherit
+      // the previous owner's subscription state.
+      try {
+        const raw = localStorage.getItem("subscription");
+        if (raw) {
+          const sub = JSON.parse(raw || "{}");
+          const subCompany =
+            sub.companyId || sub.clientId || sub.client || null;
+          const subEmail = (sub.userEmail || sub.email || "").toLowerCase();
+          const currEmail = (user.email || "").toLowerCase();
+          const companyMismatch =
+            subCompany && String(subCompany) !== String(authUid);
+          const emailMatchOnly =
+            !subCompany && subEmail && subEmail === currEmail;
+          if (companyMismatch || emailMatchOnly) {
+            try {
+              localStorage.removeItem("subscription");
+              localStorage.removeItem("profile_subscription_present");
+              localStorage.removeItem("pendingPlan");
+            } catch {}
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
 
       // Navigate to Payment page so users complete payment before seeing Dashboard
       const target = "/payment";

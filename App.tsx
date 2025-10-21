@@ -201,6 +201,9 @@ const App: React.FC = () => {
         "smsServerUrl",
         "firebaseUser", // Clear Firebase user cache
         "pendingPlan", // Clear pending plan
+        "profile_subscription_present", // Clear short-lived profile flag
+        "subscription", // Clear any legacy cached subscription
+        "serverCompanyId",
       ];
       keysToRemove.forEach((key) => localStorage.removeItem(key));
       console.log("[App] ✅ Cleared localStorage");

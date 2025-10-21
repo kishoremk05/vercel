@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from "react";
-import {
-  initializeFirebase,
-  getFirebaseAuth,
-  waitForAuthToken,
-} from "../lib/firebaseClient";
+import { waitForAuthToken } from "../lib/firebaseClient";
+import { getSmsServerUrl } from "../lib/firebaseConfig";
 
 interface PaymentPageProps {
   onPaymentSuccess: () => void;
@@ -77,96 +74,80 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       }
     } catch {}
     return pricingPlans[1];
-  }); // Default to Growth plan
+  });
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [alreadyPaid, setAlreadyPaid] = useState(false);
+  const [alreadyPaidSource, setAlreadyPaidSource] = useState<
+    "server" | "local" | null
+  >(null);
 
-  // Remove 'plan' query param from URL after mount to keep URL tidy
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search || "");
-      if (params.has("plan")) {
-        const base = window.location.pathname || "/payment";
-        window.history.replaceState({}, "", base);
-      }
-    } catch {}
-  }, []);
-
-  // On mount, perform a pre-flight check so the page can immediately
-  // indicate if the client already has a subscription and avoid showing
-  // the payment CTA when they don't need it.
   useEffect(() => {
     (async () => {
-      // Quick synchronous local check: if the app already has a cached
-      // subscription with positive remaining credits, redirect fast so
-      // users don't land on the checkout page unnecessarily.
       try {
-        const cached = localStorage.getItem("subscription");
-        if (cached) {
-          const sub = JSON.parse(cached || "{}");
-          const credits = Number(sub.remainingCredits || sub.smsCredits || 0);
-          const active = sub.status === "active" || sub.planId || sub.planName;
-          if (active && credits > 0) {
-            console.log(
-              "[Payment] local cache indicates active subscription; marking as alreadyPaid (no auto-redirect)"
-            );
-            setAlreadyPaid(true);
-            return;
-          }
-        }
-        const present = localStorage.getItem("profile_subscription_present");
-        if (present) {
-          console.log(
-            "[Payment] profile_subscription_present found; marking as alreadyPaid (no auto-redirect)"
-          );
-          setAlreadyPaid(true);
-          return;
-        }
-      } catch (e) {
-        console.warn("[Payment] quick local subscription check failed:", e);
-      }
-      try {
-        const companyId = localStorage.getItem("companyId");
-        if (!companyId) return;
-        const resolveApiBase = () => {
-          try {
-            const fromSms = localStorage.getItem("smsServerUrl");
-            if (fromSms) return fromSms.replace(/\/$/, "");
-          } catch {}
-          try {
-            const fromLS = localStorage.getItem("apiBase");
-            if (fromLS) return fromLS.replace(/\/$/, "");
-          } catch {}
-          try {
-            const g =
-              (window as any).SMS_SERVER_URL || (window as any).API_BASE;
-            if (g) return String(g).replace(/\/$/, "");
-          } catch {}
-          try {
-            const env = (import.meta as any)?.env?.VITE_API_BASE;
-            if (env) return String(env).replace(/\/$/, "");
-          } catch {}
-          if (
-            typeof window !== "undefined" &&
-            window.location &&
-            window.location.hostname &&
-            window.location.hostname !== "localhost" &&
-            window.location.hostname !== "127.0.0.1"
-          ) {
-            return "https://server-cibp.onrender.com";
-          }
-          return "";
-        };
+        const currentCompanyId =
+          localStorage.getItem("companyId") ||
+          localStorage.getItem("auth_uid") ||
+          "";
+        const currentEmail = (
+          localStorage.getItem("userEmail") || ""
+        ).toLowerCase();
 
-        const apiBase = resolveApiBase();
-        const checkUrl = apiBase
-          ? `${apiBase}/api/subscription?companyId=${companyId}`
-          : `/api/subscription?companyId=${companyId}`;
-        // Wait briefly for Firebase ID token so server can apply ownership
-        // filtering. If token isn't available within 5s we will SKIP the
-        // server-side subscription preflight to avoid returning a stale
-        // canonical subscription that may belong to another (deleted)
-        // company and cause a false-positive "already paid" decision.
+        // 1) Quick local cache check (fast, may be stale)
+        try {
+          const raw = localStorage.getItem("subscription");
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const subCompany = parsed.companyId || parsed.clientId || null;
+            const subEmail = (
+              parsed.userEmail ||
+              parsed.email ||
+              ""
+            ).toLowerCase();
+            const companyMatches =
+              subCompany &&
+              currentCompanyId &&
+              String(subCompany) === String(currentCompanyId);
+            const emailMatches =
+              subEmail && currentEmail && subEmail === currentEmail;
+            const hasPlan =
+              parsed.planId || parsed.planName || parsed.status === "active";
+            const hasCredits =
+              Number(parsed.remainingCredits || parsed.smsCredits || 0) > 0;
+            if ((companyMatches || emailMatches) && (hasPlan || hasCredits)) {
+              setAlreadyPaid(true);
+              setAlreadyPaidSource("local");
+            }
+          }
+        } catch (e) {
+          // ignore parse errors
+        }
+
+        // 2) Short-lived profile flag written by PaymentSuccess (cross-tab sync)
+        try {
+          const rawFlag = localStorage.getItem("profile_subscription_present");
+          if (rawFlag) {
+            const flag = JSON.parse(rawFlag || "{}");
+            const pfCompany = flag.companyId || null;
+            const pfEmail = (flag.userEmail || "").toLowerCase();
+            const pfTs = Number(flag.ts || 0);
+            const recent = Date.now() - pfTs < 1000 * 60 * 10; // 10 minutes
+            const companyMatches =
+              pfCompany &&
+              currentCompanyId &&
+              String(pfCompany) === String(currentCompanyId);
+            const emailMatches =
+              pfEmail && currentEmail && pfEmail === currentEmail;
+            if (recent && (companyMatches || emailMatches)) {
+              setAlreadyPaid(true);
+              setAlreadyPaidSource("local");
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        // 3) Server pre-flight (ownership-aware) — try to obtain a token
         let token: string | null = null;
         try {
           token = await waitForAuthToken(5000);
@@ -181,217 +162,193 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           return;
         }
 
+        const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
+        const checkUrl = apiBase
+          ? `${String(apiBase).replace(
+              /\/+$|$/,
+              ""
+            )}/api/subscription?companyId=${currentCompanyId}`
+          : `/api/subscription?companyId=${currentCompanyId}`;
+
         const resp = await fetch(checkUrl, {
           headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => null);
-        if (!resp || !resp.ok) return;
-        const json = await resp.json().catch(() => ({}));
+        }).catch(() => null as any);
+        if (!resp || !resp.ok) {
+          // Server doesn't confirm an owned subscription — if our UI was
+          // showing a local cached subscription, clear it to avoid blocking
+          // new customers.
+          if (alreadyPaid && alreadyPaidSource === "local") {
+            setAlreadyPaid(false);
+            setAlreadyPaidSource(null);
+          }
+          return;
+        }
+
+        const json = await resp.json().catch(() => ({} as any));
         const existing = json && json.subscription;
-        if (
-          existing &&
-          (existing.planId ||
+        if (existing) {
+          const subCompany = existing.companyId || existing.clientId || null;
+          const subEmail = (
+            existing.userEmail ||
+            existing.email ||
+            ""
+          ).toLowerCase();
+          const companyMatches =
+            subCompany &&
+            currentCompanyId &&
+            String(subCompany) === String(currentCompanyId);
+          const emailMatches =
+            subEmail && currentEmail && subEmail === currentEmail;
+          const hasPlan =
+            existing.planId ||
             existing.planName ||
-            existing.status === "active" ||
-            Number(existing.remainingCredits || existing.smsCredits || 0) > 0)
-        ) {
-          // Mark as already paid but do NOT auto-redirect. Let the user
-          // remain on the Payment page and choose whether to navigate to
-          // the Dashboard using the provided CTA.
-          setAlreadyPaid(true);
+            existing.status === "active";
+          const hasCredits =
+            Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
+          if ((companyMatches || emailMatches) && (hasPlan || hasCredits)) {
+            setAlreadyPaid(true);
+            setAlreadyPaidSource("server");
+          } else if (alreadyPaid && alreadyPaidSource === "local") {
+            // Server says the subscription is not owned by this user — clear
+            // local detection so the Pay button remains available.
+            setAlreadyPaid(false);
+            setAlreadyPaidSource(null);
+          }
         }
       } catch (e) {
-        // Non-fatal
+        console.warn("[Payment] Preflight failed", e);
       }
     })();
   }, []);
 
-  // Safety: if some other code flips the flag, redirect away immediately.
-  useEffect(() => {
-    if (alreadyPaid) {
-      try {
-        window.location.href = "/dashboard";
-      } catch {}
-    }
-  }, [alreadyPaid]);
-
-  // Get user info
+  // Get user info from localStorage for display
   const userEmail = localStorage.getItem("userEmail") || "";
   const businessName = localStorage.getItem("businessName") || "Your Business";
-  // Start hosted checkout immediately using backend create-session
-  const handlePayment = async () => {
-    setIsProcessing(true);
 
+  const handlePayment = async () => {
+    if (alreadyPaid) {
+      // Prefer explicit user navigation to the dashboard when already paid
+      window.location.href = "/dashboard";
+      return;
+    }
+
+    setIsProcessing(true);
     try {
       const companyId = localStorage.getItem("companyId");
-      const userEmail = localStorage.getItem("userEmail") || "";
-
+      const email = localStorage.getItem("userEmail") || "";
       if (!companyId) {
-        throw new Error("Please log in to continue with payment");
+        // Not authenticated — send user to auth page with the plan param
+        window.location.href = `/auth?plan=${encodeURIComponent(
+          selectedPlan.id
+        )}`;
+        return;
       }
 
-      console.log("[Payment] Creating Dodo payment session for:", {
-        plan: selectedPlan.id,
-        price: selectedPlan.price,
-        companyId,
-      });
-
-      // Resolve API base
-      const resolveApiBase = () => {
-        // Priority: smsServerUrl from Firebase config -> explicit apiBase -> globals -> Vite env -> hosted fallback (Render)
-        try {
-          const fromSms = localStorage.getItem("smsServerUrl");
-          if (fromSms) return fromSms.replace(/\/$/, "");
-        } catch {}
-        try {
-          const fromLS = localStorage.getItem("apiBase");
-          if (fromLS) return fromLS.replace(/\/$/, "");
-        } catch {}
-        try {
-          const g = (window as any).SMS_SERVER_URL || (window as any).API_BASE;
-          if (g) return String(g).replace(/\/$/, "");
-        } catch {}
-        try {
-          const env = (import.meta as any)?.env?.VITE_API_BASE;
-          if (env) return String(env).replace(/\/$/, "");
-        } catch {}
-        // Production fallback to Render when on a hosted domain
-        if (
-          typeof window !== "undefined" &&
-          window.location &&
-          window.location.hostname &&
-          window.location.hostname !== "localhost" &&
-          window.location.hostname !== "127.0.0.1"
-        ) {
-          return "https://server-cibp.onrender.com";
-        }
-        return ""; // dev: fall back to relative for local proxy
-      };
-
-      const apiBase = resolveApiBase();
-      const url = apiBase
-        ? `${apiBase}/api/payments/create-session`
-        : `/api/payments/create-session`;
-
-      console.log("[Payment] Sending request:", {
-        url,
-        plan: selectedPlan.id,
-        price: selectedPlan.price,
-        companyId,
-        userEmail,
-      });
-
-      // Pre-flight: check if client already has an active subscription so
-      // we can avoid duplicate one-time purchases. Prefer the server
-      // canonical subscription endpoint which reads billing/profile.
+      // Re-run a fast server preflight with token to avoid duplicate charges
+      let token: string | null = null;
       try {
-        // Wait for a token (up to 5s) so server ownership checks can hide
-        // subscriptions owned by other companies. If no token becomes
-        // available we will SKIP the server-side preflight to avoid a
-        // false-positive that could block checkout (see ticket).
-        let token: string | null = null;
-        try {
-          token = await waitForAuthToken(5000);
-        } catch (e) {
-          token = null;
-        }
+        token = await waitForAuthToken(5000);
+      } catch (e) {
+        token = null;
+      }
 
-        if (!token) {
-          console.log(
-            "[Payment] No auth token available; skipping subscription preflight to avoid false-positive active subscription."
-          );
-        } else {
-          const checkResp = await fetch(
-            apiBase
-              ? `${apiBase}/api/subscription?companyId=${companyId}`
-              : `/api/subscription?companyId=${companyId}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (checkResp.ok) {
-            const checkJson = await checkResp.json().catch(() => ({}));
-            const existing = checkJson && checkJson.subscription;
-            const alreadyHasPlan = !!(
+      if (token) {
+        try {
+          const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
+          const checkUrl = apiBase
+            ? `${String(apiBase).replace(
+                /\/+$|$/,
+                ""
+              )}/api/subscription?companyId=${companyId}`
+            : `/api/subscription?companyId=${companyId}`;
+          const resp = await fetch(checkUrl, {
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => null as any);
+          if (resp && resp.ok) {
+            const json = await resp.json().catch(() => ({} as any));
+            const existing = json && json.subscription;
+            const subCompany =
+              existing?.companyId || existing?.clientId || null;
+            const subEmail = (
+              existing?.userEmail ||
+              existing?.email ||
+              ""
+            ).toLowerCase();
+            const companyMatches =
+              subCompany && String(subCompany) === String(companyId);
+            const emailMatches =
+              subEmail && email && subEmail === email.toLowerCase();
+            const hasPlan =
               existing &&
               (existing.planId ||
                 existing.planName ||
-                existing.status === "active" ||
-                Number(existing.remainingCredits || existing.smsCredits || 0) >
-                  0)
-            );
-            if (alreadyHasPlan) {
-              alert(
-                "You already have an active subscription. Redirecting to Dashboard."
-              );
-              window.location.href = "/dashboard";
+                existing.status === "active");
+            const hasCredits =
+              existing &&
+              Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
+            if ((companyMatches || emailMatches) && (hasPlan || hasCredits)) {
+              setAlreadyPaid(true);
+              setAlreadyPaidSource("server");
+              alert("You already have an active subscription.");
+              setIsProcessing(false);
               return;
             }
           }
+        } catch (e) {
+          // non-fatal — continue to create session
         }
-      } catch (e) {
-        console.warn(
-          "[Payment] Pre-flight subscription check failed, continuing with checkout",
-          e
-        );
       }
 
-      // Create Dodo payment session
-      // Include Authorization header when available so server can validate
-      // that the requesting user actually owns the companyId being charged.
-      let createToken: string | null = null;
-      try {
-        createToken = await waitForAuthToken(5000);
-      } catch (e) {
-        createToken = null;
-      }
-      const requestHeaders: any = {
+      const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
+      const createUrl = apiBase
+        ? `${String(apiBase).replace(/\/+$|$/, "")}/api/payments/create-session`
+        : `/api/payments/create-session`;
+
+      const headers: any = {
         "Content-Type": "application/json",
         "x-company-id": companyId || "",
-        "x-user-email": userEmail || "",
+        "x-user-email": email || "",
         "x-plan-id": selectedPlan.id || "",
         "x-price": String(selectedPlan.price || ""),
       };
-      if (createToken) requestHeaders.Authorization = `Bearer ${createToken}`;
+      if (token) headers.Authorization = `Bearer ${token}`;
 
-      const response = await fetch(url, {
+      const resp = await fetch(createUrl, {
         method: "POST",
-        headers: requestHeaders,
+        headers,
         body: JSON.stringify({
           plan: selectedPlan.id,
           price: selectedPlan.price,
           companyId,
-          userEmail,
+          userEmail: email,
         }),
       });
 
-      const contentType = response.headers.get("content-type") || "";
+      const contentType = resp.headers.get("content-type") || "";
       let data: any = null;
-      try {
-        data = contentType.includes("application/json")
-          ? await response.json()
-          : await response.text();
-      } catch {}
+      if (contentType.includes("application/json")) {
+        data = await resp.json().catch(() => null);
+      } else {
+        const text = await resp.text().catch(() => "");
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { url: text };
+        }
+      }
 
-      if (!response.ok) {
+      if (!resp.ok) {
         const msg =
-          (data && typeof data === "object" && (data.error || data.message)) ||
-          (typeof data === "string"
-            ? data
-            : "Failed to create payment session");
+          data?.error || data?.message || "Failed to create payment session";
         throw new Error(msg);
       }
-
-      if (!data || !data.url) {
+      if (!data || !data.url)
         throw new Error("No payment URL received from server");
-      }
 
-      console.log("[Payment] ✅ Redirecting to Dodo payment:", data.url);
-      // Note: do not persist a pendingPlan in localStorage. The server will
-      // include plan metadata in the hosted checkout session so Payment
-      // Success can derive the plan from the provider/session or from the
-      // canonical subscription document written by the webhook.
-      window.location.href = data.url; // Redirect to Dodo hosted checkout
-    } catch (error: any) {
-      console.error("Payment error:", error);
-      alert(`❌ Payment failed: ${error.message || "Please try again later."}`);
+      window.location.href = data.url;
+    } catch (err: any) {
+      console.error("[Payment] Error:", err);
+      alert(err?.message || "Payment failed. Please try again later.");
     } finally {
       setIsProcessing(false);
     }
@@ -431,13 +388,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           </div>
           <div className="flex items-center gap-6">
             <button
-              onClick={() => {
-                // Allow user to change plan selection - navigate back to pricing section on Home page
-                // Do not persist selected plan to localStorage; plan is explicit on the
-                // Payment page and will be carried through session metadata.
-                // Use hash so HomePage can scroll to pricing section
-                window.location.href = "/#pricing";
-              }}
+              onClick={() => (window.location.href = "/#pricing")}
               className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
             >
               Change plan
@@ -461,18 +412,16 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             Welcome <strong>{businessName}</strong> • {userEmail}
           </p>
           <p className="text-sm text-gray-500">
-            Select a plan to unlock unlimited SMS credits.
+            Select a plan to unlock SMS credits.
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Plan Selection */}
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">
                 Select Your Plan
               </h2>
-
               <div className="space-y-4">
                 {pricingPlans.map((plan) => (
                   <div
@@ -544,7 +493,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
               </div>
             </div>
 
-            {/* Payment Method */}
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-2">
                 Checkout
@@ -571,13 +519,11 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             </div>
           </div>
 
-          {/* Order Summary */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl shadow-lg p-6 sticky top-6">
               <h2 className="text-xl font-bold text-gray-900 mb-6">
                 Order Summary
               </h2>
-
               <div className="space-y-4 mb-6">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Plan</span>
@@ -624,35 +570,11 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
                     : "bg-gray-900 hover:bg-gray-800 text-white shadow-lg hover:shadow-xl"
                 }`}
               >
-                {isProcessing ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg
-                      className="animate-spin h-5 w-5"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                    Processing...
-                  </span>
-                ) : alreadyPaid ? (
-                  `Active — Go to Dashboard`
-                ) : (
-                  `Pay $${selectedPlan.price}`
-                )}
+                {isProcessing
+                  ? "Processing..."
+                  : alreadyPaid
+                  ? `Active — Go to Dashboard`
+                  : `Pay $${selectedPlan.price}`}
               </button>
 
               {alreadyPaid && (

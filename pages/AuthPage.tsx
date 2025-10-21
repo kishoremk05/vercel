@@ -67,6 +67,41 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         })
       );
 
+      // Remove any stale client-local subscription/pending flags that
+      // belong to a different account OR were tied to a previous
+      // company id. Treat same-email re-creation as a new account: if
+      // a cached subscription belongs to a different companyId (or
+      // has only an email match but no matching companyId) remove it
+      // so the newly created account starts with a clean slate.
+      try {
+        const raw = localStorage.getItem("subscription");
+        if (raw) {
+          const sub = JSON.parse(raw || "{}");
+          const subCompany =
+            sub.companyId || sub.clientId || sub.client || null;
+          const subEmail = (sub.userEmail || sub.email || "").toLowerCase();
+          const currEmail = (user.email || "").toLowerCase();
+
+          const companyMismatch =
+            subCompany && String(subCompany) !== String(authUid);
+          // No company mapping but email matches existing cached subscription
+          // — treat this as a potential recreation of a deleted account and
+          // clear the cached subscription so the new account does not inherit it.
+          const emailMatchOnly =
+            !subCompany && subEmail && subEmail === currEmail;
+
+          if (companyMismatch || emailMatchOnly) {
+            try {
+              localStorage.removeItem("subscription");
+              localStorage.removeItem("profile_subscription_present");
+              localStorage.removeItem("pendingPlan");
+            } catch {}
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+
       // Let the app-level onAuthSuccess handle navigation so it can
       // check for an existing subscription before deciding where to go.
       onAuthSuccess("client");
@@ -101,6 +136,34 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         };
         localStorage.setItem("firebaseUser", JSON.stringify(u));
       } catch {}
+
+      // Same removal logic for Google login: a cached subscription that
+      // belongs to a different companyId (or only matches by email) should
+      // be cleared so the freshly created or re-created account does not
+      // inherit someone else's subscription state.
+      try {
+        const raw = localStorage.getItem("subscription");
+        if (raw) {
+          const sub = JSON.parse(raw || "{}");
+          const subCompany =
+            sub.companyId || sub.clientId || sub.client || null;
+          const subEmail = (sub.userEmail || sub.email || "").toLowerCase();
+          const currEmail = (user.email || "").toLowerCase();
+          const companyMismatch =
+            subCompany && String(subCompany) !== String(authUid);
+          const emailMatchOnly =
+            !subCompany && subEmail && subEmail === currEmail;
+          if (companyMismatch || emailMatchOnly) {
+            try {
+              localStorage.removeItem("subscription");
+              localStorage.removeItem("profile_subscription_present");
+              localStorage.removeItem("pendingPlan");
+            } catch {}
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
 
       // Dispatch auth ready event
       window.dispatchEvent(

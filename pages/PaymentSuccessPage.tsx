@@ -568,6 +568,24 @@ const PaymentSuccessPage: React.FC = () => {
                           payload.smsCredits ||
                           plan.sms,
                       });
+                      // Mark a short-lived flag so other tabs/pages (Payment,
+                      // Dashboard) can detect that a subscription was just
+                      // saved for this user and immediately update their UI.
+                      try {
+                        localStorage.setItem(
+                          "profile_subscription_present",
+                          JSON.stringify({
+                            companyId: String(authUid),
+                            userEmail: currentUser?.email || null,
+                            ts: Date.now(),
+                          })
+                        );
+                        // Clear legacy pending indicators to avoid loops
+                        try {
+                          localStorage.removeItem("pendingPlan");
+                          localStorage.removeItem("subscription");
+                        } catch {}
+                      } catch (e) {}
                     } catch {}
                   } else {
                     console.warn(
@@ -798,6 +816,25 @@ const PaymentSuccessPage: React.FC = () => {
                       "✅ Claimed subscription via session endpoint:",
                       claimJson.subscription
                     );
+                    try {
+                      localStorage.setItem(
+                        "profile_subscription_present",
+                        JSON.stringify({
+                          companyId: String(
+                            claimJson.companyId ||
+                              payload.companyId ||
+                              currentUser?.uid ||
+                              null
+                          ),
+                          userEmail: currentUser?.email || null,
+                          ts: Date.now(),
+                        })
+                      );
+                      try {
+                        localStorage.removeItem("pendingPlan");
+                        localStorage.removeItem("subscription");
+                      } catch {}
+                    } catch {}
                     // Verify after successful claim
                     try {
                       setVerifying(true);
