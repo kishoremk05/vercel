@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { initializeFirebase, getFirebaseAuth } from "../lib/firebaseClient";
+import {
+  initializeFirebase,
+  getFirebaseAuth,
+  waitForAuthToken,
+} from "../lib/firebaseClient";
 
 interface PaymentPageProps {
   onPaymentSuccess: () => void;
@@ -158,37 +162,27 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         const checkUrl = apiBase
           ? `${apiBase}/api/subscription?companyId=${companyId}`
           : `/api/subscription?companyId=${companyId}`;
-        // Attempt to include Firebase ID token so server can verify ownership
+        // Wait briefly for Firebase ID token so server can apply ownership
+        // filtering. If token isn't available within 5s we will SKIP the
+        // server-side subscription preflight to avoid returning a stale
+        // canonical subscription that may belong to another (deleted)
+        // company and cause a false-positive "already paid" decision.
         let token: string | null = null;
         try {
-          initializeFirebase();
-          const auth = getFirebaseAuth();
-          if (auth && auth.currentUser) {
-            token = await auth.currentUser.getIdToken();
-          } else if (auth && typeof auth.onAuthStateChanged === "function") {
-            token = await new Promise((resolve) => {
-              const unsub = auth.onAuthStateChanged(async (u: any) => {
-                if (u) {
-                  try {
-                    const t = await u.getIdToken();
-                    resolve(t);
-                  } catch {
-                    resolve(null);
-                  }
-                  try {
-                    unsub();
-                  } catch {}
-                }
-              });
-              setTimeout(() => resolve(null), 2500);
-            });
-          }
+          token = await waitForAuthToken(5000);
         } catch (e) {
           token = null;
         }
 
+        if (!token) {
+          console.log(
+            "[Payment] No auth token available; skipping server subscription preflight to avoid false-positive active subscription"
+          );
+          return;
+        }
+
         const resp = await fetch(checkUrl, {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          headers: { Authorization: `Bearer ${token}` },
         }).catch(() => null);
         if (!resp || !resp.ok) return;
         const json = await resp.json().catch(() => ({}));
@@ -290,38 +284,46 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       // we can avoid duplicate one-time purchases. Prefer the server
       // canonical subscription endpoint which reads billing/profile.
       try {
-        // Include Firebase auth token so ownership checks on server can apply
+        // Wait for a token (up to 5s) so server ownership checks can hide
+        // subscriptions owned by other companies. If no token becomes
+        // available we will SKIP the server-side preflight to avoid a
+        // false-positive that could block checkout (see ticket).
         let token: string | null = null;
         try {
-          initializeFirebase();
-          const auth = getFirebaseAuth();
-          if (auth && auth.currentUser)
-            token = await auth.currentUser.getIdToken();
+          token = await waitForAuthToken(5000);
         } catch (e) {
           token = null;
         }
-        const checkResp = await fetch(
-          apiBase
-            ? `${apiBase}/api/subscription?companyId=${companyId}`
-            : `/api/subscription?companyId=${companyId}`,
-          { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
-        );
-        if (checkResp.ok) {
-          const checkJson = await checkResp.json().catch(() => ({}));
-          const existing = checkJson && checkJson.subscription;
-          const alreadyHasPlan = !!(
-            existing &&
-            (existing.planId ||
-              existing.planName ||
-              existing.status === "active" ||
-              Number(existing.remainingCredits || existing.smsCredits || 0) > 0)
+
+        if (!token) {
+          console.log(
+            "[Payment] No auth token available; skipping subscription preflight to avoid false-positive active subscription."
           );
-          if (alreadyHasPlan) {
-            alert(
-              "You already have an active subscription. Redirecting to Dashboard."
+        } else {
+          const checkResp = await fetch(
+            apiBase
+              ? `${apiBase}/api/subscription?companyId=${companyId}`
+              : `/api/subscription?companyId=${companyId}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (checkResp.ok) {
+            const checkJson = await checkResp.json().catch(() => ({}));
+            const existing = checkJson && checkJson.subscription;
+            const alreadyHasPlan = !!(
+              existing &&
+              (existing.planId ||
+                existing.planName ||
+                existing.status === "active" ||
+                Number(existing.remainingCredits || existing.smsCredits || 0) >
+                  0)
             );
-            window.location.href = "/dashboard";
-            return;
+            if (alreadyHasPlan) {
+              alert(
+                "You already have an active subscription. Redirecting to Dashboard."
+              );
+              window.location.href = "/dashboard";
+              return;
+            }
           }
         }
       } catch (e) {
@@ -336,10 +338,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       // that the requesting user actually owns the companyId being charged.
       let createToken: string | null = null;
       try {
-        initializeFirebase();
-        const auth = getFirebaseAuth();
-        if (auth && auth.currentUser)
-          createToken = await auth.currentUser.getIdToken();
+        createToken = await waitForAuthToken(5000);
       } catch (e) {
         createToken = null;
       }

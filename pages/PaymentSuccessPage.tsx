@@ -1064,7 +1064,17 @@ const PaymentSuccessPage: React.FC = () => {
                           ? `${baseLocal}/api/subscription?companyId=${cid}`
                           : `/api/subscription?companyId=${cid}`;
                         pushDebug("Manual verify requested", { verifyUrl });
-                        const vres = await fetch(verifyUrl);
+                        const verifyHeaders: any = {};
+                        try {
+                          const au = getFirebaseAuth().currentUser;
+                          if (au) {
+                            const t = await au.getIdToken();
+                            if (t) verifyHeaders.Authorization = `Bearer ${t}`;
+                          }
+                        } catch {}
+                        const vres = await fetch(verifyUrl, {
+                          headers: verifyHeaders,
+                        });
                         const j = await vres.json().catch(() => ({}));
                         setServerVerification(j);
                         pushDebug("Manual verify result", j);

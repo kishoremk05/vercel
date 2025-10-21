@@ -17,7 +17,11 @@ import PaymentPage from "./pages/PaymentPage";
 import PaymentSuccessPage from "./pages/PaymentSuccessPage";
 import PaymentCancelPage from "./pages/PaymentCancelPage";
 import { initializeGlobalConfig, getSmsServerUrl } from "./lib/firebaseConfig";
-import { initializeFirebase, getFirebaseAuth } from "./lib/firebaseClient";
+import {
+  initializeFirebase,
+  getFirebaseAuth,
+  waitForAuthToken,
+} from "./lib/firebaseClient";
 import {
   getClientProfile,
   getClientByAuthUid,
@@ -269,37 +273,45 @@ const App: React.FC = () => {
         const checkUrl = API_BASE
           ? `${API_BASE}/api/subscription?companyId=${companyId}`
           : `/api/subscription?companyId=${companyId}`;
-        // Attempt to include Firebase ID token so ownership verification
-        // on the server can hide subscriptions that belong to other
-        // (previous) companies and avoid false positives.
-        let preHeaders: any = {};
+
+        // Attempt to obtain a Firebase ID token so server can apply
+        // ownership filtering. If no token becomes available we SKIP the
+        // preflight entirely to avoid returning a stale subscription that
+        // might belong to a deleted/previous company (causes false-positives).
+        let preToken: string | null = null;
         try {
-          initializeFirebase();
-          const auth = getFirebaseAuth();
-          if (auth && auth.currentUser) {
-            const idToken = await auth.currentUser.getIdToken();
-            if (idToken) preHeaders.Authorization = `Bearer ${idToken}`;
-          }
-        } catch (e) {}
-        const pre = await fetch(checkUrl, { headers: preHeaders }).catch(
-          () => null
-        );
-        if (pre && pre.ok) {
-          const preJson = await pre.json().catch(() => ({} as any));
-          const existing = preJson && preJson.subscription;
-          if (
-            existing &&
-            (existing.planId ||
-              existing.planName ||
-              existing.status === "active" ||
-              Number(existing.remainingCredits || existing.smsCredits || 0) > 0)
-          ) {
-            alert(
-              "You already have an active subscription. Redirecting to Dashboard."
-            );
-            if (window.location.pathname !== "/dashboard")
-              window.location.href = "/dashboard";
-            return;
+          preToken = await waitForAuthToken(5000);
+        } catch (e) {
+          preToken = null;
+        }
+
+        if (!preToken) {
+          console.log(
+            "[Checkout] No auth token available; skipping subscription preflight to avoid false-positive"
+          );
+        } else {
+          const preHeaders: any = { Authorization: `Bearer ${preToken}` };
+          const pre = await fetch(checkUrl, { headers: preHeaders }).catch(
+            () => null
+          );
+          if (pre && pre.ok) {
+            const preJson = await pre.json().catch(() => ({} as any));
+            const existing = preJson && preJson.subscription;
+            if (
+              existing &&
+              (existing.planId ||
+                existing.planName ||
+                existing.status === "active" ||
+                Number(existing.remainingCredits || existing.smsCredits || 0) >
+                  0)
+            ) {
+              alert(
+                "You already have an active subscription. Redirecting to Dashboard."
+              );
+              if (window.location.pathname !== "/dashboard")
+                window.location.href = "/dashboard";
+              return;
+            }
           }
         }
       } catch (e) {
@@ -318,13 +330,11 @@ const App: React.FC = () => {
         "x-price": String(price || ""),
       };
       try {
-        initializeFirebase();
-        const auth = getFirebaseAuth();
-        if (auth && auth.currentUser) {
-          const idToken = await auth.currentUser.getIdToken();
-          if (idToken) postHeaders.Authorization = `Bearer ${idToken}`;
-        }
-      } catch (e) {}
+        const createToken = await waitForAuthToken(5000);
+        if (createToken) postHeaders.Authorization = `Bearer ${createToken}`;
+      } catch (e) {
+        // proceed unauthenticated if token not available
+      }
       const resp = await fetch(url, {
         method: "POST",
         headers: postHeaders,

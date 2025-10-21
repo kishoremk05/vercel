@@ -59,3 +59,61 @@ export function getFirebaseDb() {
   }
   return db;
 }
+
+/**
+ * Wait for a Firebase ID token to become available. Useful when the app
+ * has just redirected from an OAuth provider and auth state restoration
+ * may take a short moment. Resolves to the ID token string or null on
+ * timeout/failure.
+ */
+export async function waitForAuthToken(timeoutMs = 5000): Promise<string | null> {
+  try {
+    initializeFirebase();
+    const authObj = getAuth();
+    // If currentUser already present, return its token immediately
+    if (authObj && (authObj as any).currentUser) {
+      try {
+        const t = await (authObj as any).currentUser.getIdToken();
+        return t || null;
+      } catch (e) {
+        return null;
+      }
+    }
+    // Otherwise wait for onAuthStateChanged or timeout
+    return await new Promise((resolve) => {
+      let resolved = false;
+      try {
+        const unsub = authObj.onAuthStateChanged(async (u: any) => {
+          if (u) {
+            try {
+              const token = await u.getIdToken();
+              resolved = true;
+              try {
+                unsub();
+              } catch {}
+              resolve(token || null);
+            } catch (err) {
+              resolved = true;
+              try {
+                unsub();
+              } catch {}
+              resolve(null);
+            }
+          }
+        });
+        setTimeout(() => {
+          if (!resolved) {
+            try {
+              unsub();
+            } catch {}
+            resolve(null);
+          }
+        }, timeoutMs);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  } catch (e) {
+    return null;
+  }
+}
