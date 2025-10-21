@@ -226,13 +226,23 @@ const App: React.FC = () => {
       const companyId = localStorage.getItem("companyId");
       const userEmail = localStorage.getItem("userEmail") || "";
       if (!companyId) {
-        // Not logged in, send to auth and keep pendingPlan
+        // Not logged in: navigate to Auth page carrying the plan as a
+        // query parameter so the flow becomes: homepage -> auth?plan=ID ->
+        // app will start checkout automatically after login.
         try {
-          localStorage.setItem("pendingPlan", planId);
-        } catch {}
-        const target = joinBase("auth");
-        if (window.location.pathname !== target) {
-          window.history.pushState({ page: target }, "", target);
+          const target =
+            joinBase("auth") + `?plan=${encodeURIComponent(planId)}`;
+          if (window.location.pathname + window.location.search !== target) {
+            window.history.pushState({ page: target }, "", target);
+          }
+        } catch (e) {
+          // Fallback: navigate to auth page without param
+          try {
+            const target = joinBase("auth");
+            if (window.location.pathname !== target) {
+              window.history.pushState({ page: target }, "", target);
+            }
+          } catch {}
         }
         setCurrentPage(Page.Auth);
         return;
@@ -2110,15 +2120,18 @@ const App: React.FC = () => {
             setCurrentPage(Page.Auth);
           }}
           onSelectPlan={(planId) => {
-            try {
-              localStorage.setItem("pendingPlan", planId);
-            } catch {}
-            // If logged in, start checkout immediately; else go to auth
+            // If logged in, start checkout immediately; otherwise navigate
+            // to the Auth page carrying the selected plan as a query
+            // parameter so the flow becomes: homepage -> auth -> payment.
             if (auth) {
               startCheckout(planId);
             } else {
-              const target = joinBase("auth");
-              if (window.location.pathname !== target) {
+              const target =
+                joinBase("auth") + `?plan=${encodeURIComponent(planId)}`;
+              if (
+                window.location.pathname + window.location.search !==
+                target
+              ) {
                 window.history.pushState({ page: target }, "", target);
               }
               setCurrentPage(Page.Auth);
@@ -2149,16 +2162,20 @@ const App: React.FC = () => {
             return;
           }
 
-          // Buyer login: check for pending plan first
+          // Buyer login: check for plan in query param first (homepage -> auth?plan=)
           setAuth({ role: "buyer" });
           let pending: string | null = null;
           try {
-            pending = localStorage.getItem("pendingPlan");
+            const params = new URLSearchParams(window.location.search || "");
+            const planParam = params.get("plan");
+            if (planParam) pending = planParam;
           } catch {}
 
           if (pending) {
+            // Remove plan param from URL to avoid repeated attempts
             try {
-              localStorage.removeItem("pendingPlan");
+              const base = window.location.pathname || "/auth";
+              window.history.replaceState({}, "", base);
             } catch {}
             startCheckout(pending);
             return;

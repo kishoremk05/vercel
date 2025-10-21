@@ -567,6 +567,12 @@ const SubscriptionCustomerLock: React.FC = () => {
   }, []);
 
   if (!locked) return null;
+  const PAYMENTS_ENABLED =
+    (import.meta as any)?.env?.VITE_PAYMENTS_ENABLED === "1" ||
+    (import.meta as any)?.env?.VITE_PAYMENTS_ENABLED === "true";
+  const ADMIN_EMAIL =
+    (import.meta as any)?.env?.VITE_ADMIN_EMAIL || "support@reputationflow.app";
+
   return (
     <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/85 backdrop-blur-sm border-2 border-dashed border-indigo-300">
       <div className="text-center px-6 py-8">
@@ -574,22 +580,35 @@ const SubscriptionCustomerLock: React.FC = () => {
           Activate Your Plan
         </h4>
         <p className="text-gray-600 mb-4 max-w-xs">
-          Subscribe to unlock customer import and bulk SMS sending.
+          {PAYMENTS_ENABLED
+            ? "Subscribe to unlock customer import and bulk SMS sending."
+            : "Payments are currently disabled in this build. Contact the admin to enable subscription plans."}
         </p>
         <button
           onClick={() => {
-            try {
-              localStorage.setItem("pendingPlan", "growth_3m");
-            } catch {}
-            try {
-              alert(
-                "Payments are currently disabled in this build. Contact the admin to enable subscription plans."
-              );
-            } catch {}
+            if (PAYMENTS_ENABLED) {
+              try {
+                window.location.href = "/payment";
+              } catch {}
+            } else {
+              try {
+                window.location.href = `mailto:${encodeURIComponent(
+                  ADMIN_EMAIL
+                )}?subject=${encodeURIComponent(
+                  "Enable Payments for my Account"
+                )}`;
+              } catch (e) {
+                try {
+                  alert(
+                    `Payments are disabled. Please contact: ${ADMIN_EMAIL}`
+                  );
+                } catch {}
+              }
+            }
           }}
           className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-500"
         >
-          Choose a Plan
+          {PAYMENTS_ENABLED ? "Choose a Plan" : "Contact Admin"}
         </button>
       </div>
     </div>
@@ -1211,14 +1230,12 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
           <button
             onClick={() => {
               try {
-                localStorage.setItem("pendingPlan", "growth_3m");
-              } catch {}
-              // Payments removed: inform the user how to proceed
-              try {
-                alert(
-                  "Payments are currently disabled in this build. Contact the admin to enable subscription plans."
-                );
-              } catch {}
+                window.location.href = "/payment";
+              } catch (e) {
+                try {
+                  window.location.href = "/#pricing";
+                } catch {}
+              }
             }}
             className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-500"
           >

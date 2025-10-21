@@ -298,12 +298,6 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           // ignore parse errors
         }
 
-        // Pending plan stored before redirect (set by PaymentPage)
-        let pendingPlan: string | null = null;
-        try {
-          pendingPlan = localStorage.getItem("pendingPlan");
-        } catch {}
-
         // Helper to normalise a plan object from various sources
         const normalise = (src: any) => {
           if (!src) return null;
@@ -325,17 +319,6 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           };
         };
 
-        const pendingPlanObj =
-          pendingPlan && PLAN_METADATA[pendingPlan]
-            ? {
-                planId: pendingPlan,
-                planName: PLAN_METADATA[pendingPlan].name,
-                smsCredits: PLAN_METADATA[pendingPlan].smsCredits,
-                remainingCredits: PLAN_METADATA[pendingPlan].smsCredits,
-                price: PLAN_METADATA[pendingPlan].price,
-              }
-            : null;
-
         const server = normalise(subscriptionData);
         const local = normalise(localSub);
 
@@ -348,54 +331,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
         // 5. Fallback to server (may be null).
         let chosen = null as any;
 
-        if (pendingPlanObj) {
-          // Merge in any server-provided dates so the UI shows start/expiry
-          // even while the server is reconciling the full subscription.
-          const merged: any = { ...pendingPlanObj } as any;
-          if (server) {
-            merged.startDate =
-              merged.startDate ||
-              server.startDate ||
-              server.raw?.activatedAt ||
-              null;
-            merged.expiryDate =
-              merged.expiryDate ||
-              server.expiryDate ||
-              server.raw?.expiryAt ||
-              null;
-            merged.paymentSessionId =
-              merged.paymentSessionId ||
-              server.paymentSessionId ||
-              server.raw?.paymentSessionId ||
-              null;
-          }
-          // If server didn't supply dates, compute reasonable defaults
-          // from the planId so the UI shows start/expiry immediately.
-          try {
-            const PLAN_MONTHS: Record<string, number> = {
-              starter_1m: 1,
-              monthly: 1,
-              growth_3m: 3,
-              quarterly: 3,
-              pro_6m: 6,
-              halfyearly: 6,
-            };
-            if (!merged.startDate) {
-              merged.startDate = new Date().toISOString();
-            }
-            if (!merged.expiryDate) {
-              const months = PLAN_MONTHS[merged.planId] || 1;
-              try {
-                const d = new Date(merged.startDate);
-                d.setMonth(d.getMonth() + months);
-                merged.expiryDate = d.toISOString();
-              } catch {
-                merged.expiryDate = null;
-              }
-            }
-          } catch {}
-          chosen = merged;
-        } else if (server && server.planName && server.planName !== "Custom") {
+        if (server && server.planName && server.planName !== "Custom") {
           chosen = server;
         } else if (
           server &&
@@ -449,7 +385,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     computeDisplay();
 
     const storageHandler = (ev?: StorageEvent) => {
-      if (!ev || ev.key === "subscription" || ev.key === "pendingPlan") {
+      if (!ev || ev.key === "subscription") {
         computeDisplay();
       }
     };

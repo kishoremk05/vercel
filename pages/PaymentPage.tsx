@@ -64,9 +64,10 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
 }) => {
   const [selectedPlan, setSelectedPlan] = useState<PricingPlan>(() => {
     try {
-      const pending = localStorage.getItem("pendingPlan");
-      if (pending) {
-        const found = pricingPlans.find((p) => p.id === pending);
+      const params = new URLSearchParams(window.location.search || "");
+      const planParam = params.get("plan");
+      if (planParam) {
+        const found = pricingPlans.find((p) => p.id === planParam);
         if (found) return found;
       }
     } catch {}
@@ -75,10 +76,14 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [alreadyPaid, setAlreadyPaid] = useState(false);
 
-  // Clear pendingPlan after mount so refresh won't overwrite selection later
+  // Remove 'plan' query param from URL after mount to keep URL tidy
   useEffect(() => {
     try {
-      localStorage.removeItem("pendingPlan");
+      const params = new URLSearchParams(window.location.search || "");
+      if (params.has("plan")) {
+        const base = window.location.pathname || "/payment";
+        window.history.replaceState({}, "", base);
+      }
     } catch {}
   }, []);
 
@@ -330,11 +335,10 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       }
 
       console.log("[Payment] ✅ Redirecting to Dodo payment:", data.url);
-      // Persist the pending plan so we can recover it after redirect from the
-      // hosted checkout (server or redirect may not include the plan param).
-      try {
-        localStorage.setItem("pendingPlan", selectedPlan.id);
-      } catch (e) {}
+      // Note: do not persist a pendingPlan in localStorage. The server will
+      // include plan metadata in the hosted checkout session so Payment
+      // Success can derive the plan from the provider/session or from the
+      // canonical subscription document written by the webhook.
       window.location.href = data.url; // Redirect to Dodo hosted checkout
     } catch (error: any) {
       console.error("Payment error:", error);
@@ -380,9 +384,8 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             <button
               onClick={() => {
                 // Allow user to change plan selection - navigate back to pricing section on Home page
-                try {
-                  localStorage.setItem("pendingPlan", selectedPlan.id);
-                } catch {}
+                // Do not persist selected plan to localStorage; plan is explicit on the
+                // Payment page and will be carried through session metadata.
                 // Use hash so HomePage can scroll to pricing section
                 window.location.href = "/#pricing";
               }}
