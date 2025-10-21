@@ -1047,6 +1047,92 @@ app.get("/api/subscription", async (req, res) => {
         reason: "missing-companyId",
       });
     }
+
+    // Ownership check: if a caller provides a Firebase ID token, verify it
+    // and ensure the caller maps to the same companyId. If the caller is
+    // authenticated but belongs to a different company, treat the
+    // subscription as non-existent for that caller so they can sign up
+    // again without being blocked by another client's subscription.
+    try {
+      const authz =
+        req.headers.authorization || req.headers.Authorization || "";
+      if (authz && String(authz).startsWith("Bearer ") && firebaseAdmin) {
+        try {
+          const idToken = String(authz).slice(7).trim();
+          const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+
+          // Allow admins to view subscriptions as before
+          if (
+            !(decoded && (decoded.admin === true || decoded.admin === "true"))
+          ) {
+            const callerUid = decoded?.uid || decoded?.sub || null;
+            if (callerUid) {
+              // Try dbV2 mapping first
+              let callerCompanyId = null;
+              try {
+                if (dbV2 && typeof dbV2.getUserById === "function") {
+                  const userRec = await dbV2
+                    .getUserById(callerUid)
+                    .catch(() => null);
+                  if (userRec && userRec.companyId)
+                    callerCompanyId = String(userRec.companyId);
+                }
+              } catch (e) {
+                console.warn(
+                  "[api:subscription] dbV2.getUserById failed:",
+                  e?.message || e
+                );
+              }
+
+              // Fallback: check legacy clients collection by auth_uid
+              if (!callerCompanyId) {
+                try {
+                  const clientsRef = firebaseAdmin
+                    .firestore()
+                    .collection("clients");
+                  const q = clientsRef
+                    .where("auth_uid", "==", String(callerUid))
+                    .limit(1);
+                  const searchSnap = await q.get();
+                  if (!searchSnap.empty)
+                    callerCompanyId = searchSnap.docs[0].id;
+                } catch (e) {
+                  console.warn(
+                    "[api:subscription] owner derive from auth uid failed:",
+                    e?.message || e
+                  );
+                }
+              }
+
+              if (
+                callerCompanyId &&
+                String(callerCompanyId) !== String(companyId)
+              ) {
+                console.log(
+                  `[api:subscription] ownership mismatch: callerCompany=${callerCompanyId} requested=${companyId} -> hiding subscription`
+                );
+                return res.json({
+                  success: true,
+                  subscription: null,
+                  ownerMismatch: true,
+                });
+              }
+            }
+          }
+        } catch (tokErr) {
+          // Token verification failed - ignore ownership check and continue
+          console.warn(
+            "[api:subscription] ID token verify failed (ignoring):",
+            tokErr?.message || tokErr
+          );
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[api:subscription] Ownership verification failed (ignoring):",
+        e?.message || e
+      );
+    }
     const firestore = firebaseAdmin.firestore();
     // Prefer billing path, fallback to profile path if legacy
     const billingRef = firestore
@@ -1892,6 +1978,103 @@ app.post("/api/payments/create-session", async (req, res) => {
       hasApiKey: !!DODO_API_KEY,
       origin: req.headers.origin || null,
     });
+
+    // Ownership check: if caller presented a Firebase ID token, verify the
+    // token and ensure the caller is allowed to create a session for the
+    // requested companyId. If the caller belongs to a different company,
+    // deny the request to prevent creating sessions for another client.
+    try {
+      const authz =
+        req.headers.authorization || req.headers.Authorization || "";
+      if (authz && String(authz).startsWith("Bearer ") && firebaseAdmin) {
+        try {
+          const idToken = String(authz).slice(7).trim();
+          const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+          // Allow admin tokens through
+          if (
+            !(decoded && (decoded.admin === true || decoded.admin === "true"))
+          ) {
+            const callerUid = decoded?.uid || decoded?.sub || null;
+            if (callerUid) {
+              let callerCompanyId = null;
+              try {
+                if (dbV2 && typeof dbV2.getUserById === "function") {
+                  const userRec = await dbV2
+                    .getUserById(callerUid)
+                    .catch(() => null);
+                  if (userRec && userRec.companyId)
+                    callerCompanyId = String(userRec.companyId);
+                }
+              } catch (e) {
+                console.warn(
+                  "[Dodo Payment] dbV2.getUserById failed:",
+                  e?.message || e
+                );
+              }
+
+              // Fallback to legacy clients collection by auth_uid
+              if (!callerCompanyId) {
+                try {
+                  const clientsRef = firebaseAdmin
+                    .firestore()
+                    .collection("clients");
+                  const q = clientsRef
+                    .where("auth_uid", "==", String(callerUid))
+                    .limit(1);
+                  const searchSnap = await q.get();
+                  if (!searchSnap.empty)
+                    callerCompanyId = searchSnap.docs[0].id;
+                } catch (e) {
+                  console.warn(
+                    "[Dodo Payment] derive owner from auth uid failed:",
+                    e?.message || e
+                  );
+                }
+              }
+
+              if (
+                callerCompanyId &&
+                companyId &&
+                String(callerCompanyId) !== String(companyId)
+              ) {
+                console.log(
+                  `[Dodo Payment] ownership mismatch: callerCompany=${callerCompanyId} requested=${companyId}`
+                );
+                return res
+                  .status(403)
+                  .json({
+                    success: false,
+                    error:
+                      "Ownership mismatch: cannot create session for another company",
+                  });
+              }
+
+              // If companyId was not provided, derive it from token mapping so
+              // clients can rely solely on their ID token to request sessions.
+              if (!companyId && callerCompanyId) {
+                companyId = callerCompanyId;
+                console.log(
+                  `[Dodo Payment] derived companyId=${companyId} from idToken uid=${callerUid}`
+                );
+              }
+            }
+          }
+        } catch (tokErr) {
+          // Ignore token verification failures here; fall back to other
+          // heuristics (headers/query/body). We don't want to block
+          // requests solely because token verification failed.
+          console.warn(
+            "[Dodo Payment] ID token verify failed (ignoring):",
+            tokErr?.message || tokErr
+          );
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[Dodo Payment] Ownership verification failed (ignoring):",
+        e?.message || e
+      );
+    }
 
     // Validate inputs: only plan is strictly required to map to a Dodo product
     if (!plan) {

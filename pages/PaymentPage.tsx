@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { initializeFirebase, getFirebaseAuth } from "../lib/firebaseClient";
 
 interface PaymentPageProps {
   onPaymentSuccess: () => void;
@@ -157,7 +158,38 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         const checkUrl = apiBase
           ? `${apiBase}/api/subscription?companyId=${companyId}`
           : `/api/subscription?companyId=${companyId}`;
-        const resp = await fetch(checkUrl).catch(() => null);
+        // Attempt to include Firebase ID token so server can verify ownership
+        let token: string | null = null;
+        try {
+          initializeFirebase();
+          const auth = getFirebaseAuth();
+          if (auth && auth.currentUser) {
+            token = await auth.currentUser.getIdToken();
+          } else if (auth && typeof auth.onAuthStateChanged === "function") {
+            token = await new Promise((resolve) => {
+              const unsub = auth.onAuthStateChanged(async (u: any) => {
+                if (u) {
+                  try {
+                    const t = await u.getIdToken();
+                    resolve(t);
+                  } catch {
+                    resolve(null);
+                  }
+                  try {
+                    unsub();
+                  } catch {}
+                }
+              });
+              setTimeout(() => resolve(null), 2500);
+            });
+          }
+        } catch (e) {
+          token = null;
+        }
+
+        const resp = await fetch(checkUrl, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        }).catch(() => null);
         if (!resp || !resp.ok) return;
         const json = await resp.json().catch(() => ({}));
         const existing = json && json.subscription;
@@ -258,10 +290,21 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       // we can avoid duplicate one-time purchases. Prefer the server
       // canonical subscription endpoint which reads billing/profile.
       try {
+        // Include Firebase auth token so ownership checks on server can apply
+        let token: string | null = null;
+        try {
+          initializeFirebase();
+          const auth = getFirebaseAuth();
+          if (auth && auth.currentUser)
+            token = await auth.currentUser.getIdToken();
+        } catch (e) {
+          token = null;
+        }
         const checkResp = await fetch(
           apiBase
             ? `${apiBase}/api/subscription?companyId=${companyId}`
-            : `/api/subscription?companyId=${companyId}`
+            : `/api/subscription?companyId=${companyId}`,
+          { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
         );
         if (checkResp.ok) {
           const checkJson = await checkResp.json().catch(() => ({}));
@@ -289,16 +332,29 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       }
 
       // Create Dodo payment session
+      // Include Authorization header when available so server can validate
+      // that the requesting user actually owns the companyId being charged.
+      let createToken: string | null = null;
+      try {
+        initializeFirebase();
+        const auth = getFirebaseAuth();
+        if (auth && auth.currentUser)
+          createToken = await auth.currentUser.getIdToken();
+      } catch (e) {
+        createToken = null;
+      }
+      const requestHeaders: any = {
+        "Content-Type": "application/json",
+        "x-company-id": companyId || "",
+        "x-user-email": userEmail || "",
+        "x-plan-id": selectedPlan.id || "",
+        "x-price": String(selectedPlan.price || ""),
+      };
+      if (createToken) requestHeaders.Authorization = `Bearer ${createToken}`;
+
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // Fallback headers so server can read identifiers even if body parsing is impaired by host
-          "x-company-id": companyId || "",
-          "x-user-email": userEmail || "",
-          "x-plan-id": selectedPlan.id || "",
-          "x-price": String(selectedPlan.price || ""),
-        },
+        headers: requestHeaders,
         body: JSON.stringify({
           plan: selectedPlan.id,
           price: selectedPlan.price,

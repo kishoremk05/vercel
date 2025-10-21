@@ -269,7 +269,21 @@ const App: React.FC = () => {
         const checkUrl = API_BASE
           ? `${API_BASE}/api/subscription?companyId=${companyId}`
           : `/api/subscription?companyId=${companyId}`;
-        const pre = await fetch(checkUrl).catch(() => null);
+        // Attempt to include Firebase ID token so ownership verification
+        // on the server can hide subscriptions that belong to other
+        // (previous) companies and avoid false positives.
+        let preHeaders: any = {};
+        try {
+          initializeFirebase();
+          const auth = getFirebaseAuth();
+          if (auth && auth.currentUser) {
+            const idToken = await auth.currentUser.getIdToken();
+            if (idToken) preHeaders.Authorization = `Bearer ${idToken}`;
+          }
+        } catch (e) {}
+        const pre = await fetch(checkUrl, { headers: preHeaders }).catch(
+          () => null
+        );
         if (pre && pre.ok) {
           const preJson = await pre.json().catch(() => ({} as any));
           const existing = preJson && preJson.subscription;
@@ -294,15 +308,26 @@ const App: React.FC = () => {
           e
         );
       }
+      // Include Authorization header when available so server can derive
+      // the company mapping from the token and enforce ownership checks.
+      const postHeaders: any = {
+        "Content-Type": "application/json",
+        "x-company-id": companyId || "",
+        "x-user-email": userEmail || "",
+        "x-plan-id": planId || "",
+        "x-price": String(price || ""),
+      };
+      try {
+        initializeFirebase();
+        const auth = getFirebaseAuth();
+        if (auth && auth.currentUser) {
+          const idToken = await auth.currentUser.getIdToken();
+          if (idToken) postHeaders.Authorization = `Bearer ${idToken}`;
+        }
+      } catch (e) {}
       const resp = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-company-id": companyId || "",
-          "x-user-email": userEmail || "",
-          "x-plan-id": planId || "",
-          "x-price": String(price || ""),
-        },
+        headers: postHeaders,
         body: JSON.stringify({ plan: planId, price, companyId, userEmail }),
       });
       const data = await resp.json().catch(() => ({} as any));

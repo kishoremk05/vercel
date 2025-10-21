@@ -202,8 +202,17 @@ const PaymentSuccessPage: React.FC = () => {
             try {
               const baseLocal = await getSmsServerUrl().catch(() => "");
               if (!baseLocal) return null;
+              // Include ID token when available so server can verify ownership
+              const headers: any = {};
+              if (currentUser) {
+                try {
+                  const idToken = await currentUser.getIdToken();
+                  if (idToken) headers.Authorization = `Bearer ${idToken}`;
+                } catch {}
+              }
               const res = await fetch(
-                `${baseLocal}/api/subscription?companyId=${companyId}`
+                `${baseLocal}/api/subscription?companyId=${companyId}`,
+                { headers }
               );
               const json = await res.json().catch(() => ({}));
               if (json && json.success && json.subscription)
@@ -702,7 +711,18 @@ const PaymentSuccessPage: React.FC = () => {
                   pushDebug("Verification GET (after server save)", {
                     verifyUrl,
                   });
-                  const vres = await fetch(verifyUrl);
+                  // Attach ID token to verification request when available
+                  const verifyHeaders: any = {};
+                  if (currentUser) {
+                    try {
+                      const idToken = await currentUser.getIdToken();
+                      if (idToken)
+                        verifyHeaders.Authorization = `Bearer ${idToken}`;
+                    } catch {}
+                  }
+                  const vres = await fetch(verifyUrl, {
+                    headers: verifyHeaders,
+                  });
                   const verifyJson = await vres.json().catch(() => ({}));
                   setServerVerification(verifyJson);
                   pushDebug(
@@ -796,7 +816,18 @@ const PaymentSuccessPage: React.FC = () => {
                         pushDebug("Verification GET (post-claim)", {
                           verifyUrl,
                         });
-                        const vres = await fetch(verifyUrl);
+                        // Attach ID token when available
+                        const verifyHeaders2: any = {};
+                        if (currentUser) {
+                          try {
+                            const idToken = await currentUser.getIdToken();
+                            if (idToken)
+                              verifyHeaders2.Authorization = `Bearer ${idToken}`;
+                          } catch {}
+                        }
+                        const vres = await fetch(verifyUrl, {
+                          headers: verifyHeaders2,
+                        });
                         const verifyResp = await vres.json().catch(() => ({}));
                         setServerVerification(verifyResp);
                         pushDebug(
