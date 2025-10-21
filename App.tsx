@@ -300,20 +300,31 @@ const App: React.FC = () => {
           if (pre && pre.ok) {
             const preJson = await pre.json().catch(() => ({} as any));
             const existing = preJson && preJson.subscription;
-            if (
-              existing &&
-              (existing.planId ||
+            if (existing) {
+              const subCompany =
+                existing.companyId || existing.clientId || null;
+              const companyMatches =
+                subCompany &&
+                companyId &&
+                String(subCompany) === String(companyId);
+              const hasPlan =
+                existing.planId ||
                 existing.planName ||
-                existing.status === "active" ||
+                existing.status === "active";
+              const hasCredits =
                 Number(existing.remainingCredits || existing.smsCredits || 0) >
-                  0)
-            ) {
-              alert(
-                "You already have an active subscription. Redirecting to Dashboard."
-              );
-              if (window.location.pathname !== "/dashboard")
-                window.location.href = "/dashboard";
-              return;
+                0;
+              // Only treat the subscription as authoritative when it is
+              // explicitly owned by the same companyId. Ignore email-only
+              // matches to avoid redirecting recreated accounts.
+              if (companyMatches && (hasPlan || hasCredits)) {
+                alert(
+                  "You already have an active subscription. Redirecting to Dashboard."
+                );
+                if (window.location.pathname !== "/dashboard")
+                  window.location.href = "/dashboard";
+                return;
+              }
             }
           }
         }
@@ -2159,10 +2170,18 @@ const App: React.FC = () => {
             setCurrentPage(Page.Auth);
           }}
           onSelectPlan={(planId) => {
+            // Persist pending plan so selection survives redirects
+            try {
+              localStorage.setItem("pendingPlan", String(planId));
+            } catch {}
             // If logged in, start checkout immediately; otherwise navigate
             // to the Auth page carrying the selected plan as a query
             // parameter so the flow becomes: homepage -> auth -> payment.
             if (auth) {
+              // Clear persisted pendingPlan when starting immediate checkout
+              try {
+                localStorage.removeItem("pendingPlan");
+              } catch {}
               startCheckout(planId);
             } else {
               const target =
@@ -2201,27 +2220,96 @@ const App: React.FC = () => {
             return;
           }
 
-          // Buyer login: always land buyers on the Payment page first.
+          // Buyer login: determine where to send the user.
           setAuth({ role: "buyer" });
+
+          // Check for a pending plan persisted in localStorage first
           let pending: string | null = null;
           try {
-            const params = new URLSearchParams(window.location.search || "");
-            const planParam = params.get("plan");
-            if (planParam) pending = planParam;
+            pending = localStorage.getItem("pendingPlan") || null;
           } catch {}
+          // Fallback to URL param if no local pending plan
+          if (!pending) {
+            try {
+              const params = new URLSearchParams(window.location.search || "");
+              const planParam = params.get("plan");
+              if (planParam) pending = planParam;
+            } catch {}
+          }
 
           if (pending) {
-            // Remove plan param from URL to avoid repeated attempts
+            // Remove plan param from URL and clear persisted pending plan
             try {
               const base = window.location.pathname || "/auth";
               window.history.replaceState({}, "", base);
+            } catch {}
+            try {
+              localStorage.removeItem("pendingPlan");
             } catch {}
             startCheckout(pending);
             return;
           }
 
-          // Default: always show Payment page after login so users can
-          // complete or confirm payment before seeing the Dashboard.
+          // No pending plan — check whether the user already owns a subscription
+          try {
+            const companyId = localStorage.getItem("companyId") || null;
+            if (companyId) {
+              let token: string | null = null;
+              try {
+                token = await waitForAuthToken(5000);
+              } catch {
+                token = null;
+              }
+              const apiBase =
+                (await getSmsServerUrl().catch(() => "")) || API_BASE;
+              const checkUrl = apiBase
+                ? `${String(apiBase).replace(
+                    /\/+$/,
+                    ""
+                  )}/api/subscription?companyId=${companyId}`
+                : `/api/subscription?companyId=${companyId}`;
+              const headers: any = {};
+              if (token) headers.Authorization = `Bearer ${token}`;
+              const pre = await fetch(checkUrl, { headers }).catch(
+                () => null as any
+              );
+              if (pre && pre.ok) {
+                const preJson = await pre.json().catch(() => ({} as any));
+                const existing = preJson && preJson.subscription;
+                if (existing) {
+                  const subCompany =
+                    existing.companyId || existing.clientId || null;
+                  const companyMatches =
+                    subCompany && String(subCompany) === String(companyId);
+                  const hasPlan =
+                    existing &&
+                    (existing.planId ||
+                      existing.planName ||
+                      existing.status === "active");
+                  const hasCredits =
+                    existing &&
+                    Number(
+                      existing.remainingCredits || existing.smsCredits || 0
+                    ) > 0;
+                  if (companyMatches && (hasPlan || hasCredits)) {
+                    alert(
+                      "You already have an active subscription. Redirecting to Dashboard."
+                    );
+                    if (window.location.pathname !== "/dashboard")
+                      window.location.href = "/dashboard";
+                    return;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(
+              "[App] subscription preflight failed, falling back to payment page:",
+              e
+            );
+          }
+
+          // Default: show Payment page after login so users can complete or confirm payment
           setCurrentPage(Page.Payment);
           const target = joinBase("payment");
           if (
