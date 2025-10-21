@@ -95,6 +95,171 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     }
   }, [activityLogs]);
 
+  // Server-provided authoritative monthly message count (persistent
+  // across reloads). We will prefer this value when available so the
+  // Profile page mirrors the Dashboard's persisted count.
+  const [serverMessageCount, setServerMessageCount] = useState<number | null>(
+    null
+  );
+
+  // Try to derive companyId from localStorage, authenticated /auth/me,
+  // or via auth-UID -> client mapping. This mirrors logic used elsewhere
+  // so the Profile page can fetch server-side dashboard messages.
+  const deriveCompanyId = async (): Promise<string | null> => {
+    try {
+      try {
+        const stored = localStorage.getItem("companyId");
+        if (stored) return stored;
+      } catch {}
+
+      // Try auth-based discovery
+      try {
+        initializeFirebase();
+        const auth = getFirebaseAuth();
+        const waitForAuth = (authObj: any, timeoutMs = 5000) =>
+          new Promise<any>((resolve) => {
+            if (authObj.currentUser) return resolve(authObj.currentUser);
+            const unsubscribe = authObj.onAuthStateChanged((user: any) => {
+              if (user) {
+                try {
+                  unsubscribe();
+                } catch {}
+                return resolve(user);
+              }
+            });
+            setTimeout(() => {
+              try {
+                unsubscribe();
+              } catch {}
+              return resolve(authObj.currentUser || null);
+            }, timeoutMs);
+          });
+
+        const current = await waitForAuth(getFirebaseAuth(), 3000);
+        if (current && current.getIdToken) {
+          try {
+            const baseLocal = await getSmsServerUrl().catch(() => "");
+            if (baseLocal) {
+              const idToken = await current.getIdToken();
+              const meResp = await fetch(`${baseLocal}/auth/me`, {
+                headers: { Authorization: `Bearer ${idToken}` },
+              });
+              if (meResp.ok) {
+                const meJson = await meResp.json().catch(() => ({}));
+                const cid = meJson.companyId || null;
+                if (cid) {
+                  try {
+                    localStorage.setItem("companyId", cid);
+                  } catch {}
+                  return cid;
+                }
+              }
+            }
+          } catch (e) {
+            /* ignore */
+          }
+
+          // Fallback: map auth uid to client id
+          try {
+            const mapped = await getClientByAuthUid(current.uid).catch(
+              () => null
+            );
+            if (mapped && mapped.id) {
+              try {
+                localStorage.setItem("companyId", mapped.id);
+              } catch {}
+              return mapped.id;
+            }
+          } catch {}
+        }
+      } catch (e) {
+        /* ignore */
+      }
+
+      return null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Fetch messages from server and compute the count for the current month.
+  const fetchServerMonthlyCount = async (companyId: string) => {
+    try {
+      const base = await getSmsServerUrl().catch(() => API_BASE);
+      const url = base
+        ? `${base}/api/dashboard/messages?companyId=${companyId}`
+        : `/api/dashboard/messages?companyId=${companyId}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const json = await res.json().catch(() => ({} as any));
+      const messages = Array.isArray(json.messages) ? json.messages : [];
+      const today = new Date();
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      const count = messages.filter((m: any) => {
+        try {
+          const ts = m.timestamp ? new Date(m.timestamp) : null;
+          return ts && ts >= firstDay;
+        } catch {
+          return false;
+        }
+      }).length;
+      try {
+        localStorage.setItem("serverMessagesSentThisMonth", String(count));
+      } catch {}
+      setServerMessageCount(count);
+      return count;
+    } catch (e) {
+      console.warn("[Profile] fetchServerMonthlyCount failed:", e);
+      return null;
+    }
+  };
+
+  // On mount and when relevant events fire, refresh the server monthly
+  // count so Profile shows the same authoritative number as Dashboard.
+  useEffect(() => {
+    let mounted = true;
+    const refresh = async () => {
+      try {
+        try {
+          const cached = localStorage.getItem("serverMessagesSentThisMonth");
+          if (cached && mounted) setServerMessageCount(Number(cached));
+        } catch {}
+
+        let companyId: string | null = null;
+        try {
+          companyId = localStorage.getItem("companyId");
+        } catch {}
+        if (!companyId) companyId = await deriveCompanyId();
+        if (companyId && mounted) {
+          await fetchServerMonthlyCount(companyId);
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    };
+
+    refresh();
+
+    const handler = () => {
+      setTimeout(() => {
+        refresh();
+      }, 800);
+    };
+
+    window.addEventListener("dash:sms:success", handler as any);
+    window.addEventListener("subscription:updated", handler as any);
+    window.addEventListener("auth:ready", handler as any);
+
+    return () => {
+      mounted = false;
+      try {
+        window.removeEventListener("dash:sms:success", handler as any);
+        window.removeEventListener("subscription:updated", handler as any);
+        window.removeEventListener("auth:ready", handler as any);
+      } catch {}
+    };
+  }, []);
+
   // Load profile photo from localStorage on mount (Firebase upload handled separately)
   useEffect(() => {
     try {
@@ -1152,7 +1317,11 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                           subscriptionData={
                             displaySubscription || subscriptionData
                           }
-                          messagesSentThisMonth={messagesSentThisMonth}
+                          messagesSentThisMonth={
+                            serverMessageCount !== null
+                              ? serverMessageCount
+                              : messagesSentThisMonth
+                          }
                         />
                       </div>
                     </div>
