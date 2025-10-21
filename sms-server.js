@@ -3416,8 +3416,71 @@ app.post("/api/company/links", async (req, res) => {
         .status(503)
         .json({ success: false, error: "Database not configured" });
 
-    const companyId = String(req.body.companyId || "").trim();
-    const googleReviewLink = String(req.body.googleReviewLink || "").trim();
+    // Defensive body parsing: some hosting platforms or proxies may
+    // deliver requests in a manner that results in express.json() not
+    // populating req.body. In those cases we attempt to recover from
+    // req.rawBody (set by the verify hook) or by parsing the request
+    // stream manually. Also accept a company id from common headers.
+    let parsedBody =
+      req.body && Object.keys(req.body || {}).length > 0 ? req.body : null;
+    if (!parsedBody) {
+      try {
+        if (req.rawBody) {
+          parsedBody = JSON.parse(String(req.rawBody || "{}"));
+          console.log("[api:links] Parsed body from req.rawBody");
+        } else {
+          // Manual stream read fallback
+          const chunks = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const raw = Buffer.concat(chunks).toString("utf8");
+          if (raw && raw.trim()) {
+            parsedBody = JSON.parse(raw);
+            console.log("[api:links] Parsed body from manual stream read");
+          }
+        }
+      } catch (parseErr) {
+        console.warn(
+          "[api:links] Failed to parse request body:",
+          parseErr && (parseErr.message || parseErr)
+        );
+        parsedBody = parsedBody || {}; // keep working with an empty object
+      }
+    }
+
+    const headerCompanyId = String(
+      req.headers["x-company-id"] ||
+        req.headers["x-client-id"] ||
+        req.headers["x-companyid"] ||
+        req.headers["x-clientid"] ||
+        req.headers["companyid"] ||
+        ""
+    ).trim();
+
+    const companyId = String(
+      (parsedBody &&
+        (parsedBody.companyId ||
+          parsedBody.clientId ||
+          parsedBody.company ||
+          parsedBody.client)) ||
+        headerCompanyId ||
+        req.query.companyId ||
+        ""
+    ).trim();
+
+    const googleReviewLink = String(
+      (parsedBody &&
+        (parsedBody.googleReviewLink ||
+          parsedBody.google_review_link ||
+          parsedBody.googleRedirectUrl ||
+          parsedBody.feedbackUrl)) ||
+        ""
+    ).trim();
+
+    console.log("[api:links] incoming save request:", {
+      companyId: companyId || "(none)",
+      headerCompanyId,
+      bodyPresent: !!parsedBody,
+    });
 
     if (!companyId)
       return res

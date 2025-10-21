@@ -262,7 +262,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         try {
           response = await fetch(url, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              // Also surface companyId into headers so intermediary proxies
+              // or server parsers can still route the request correctly.
+              "x-company-id": companyId || "",
+            },
             body: JSON.stringify({
               companyId,
               googleReviewLink: googleLink,

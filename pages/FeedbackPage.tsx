@@ -659,15 +659,22 @@ const FeedbackPage: React.FC<FeedbackPageProps> = ({
 
                         // Show popup for 4-5 star ratings encouraging Google review
                         if (n >= 4 && googleReviewLink) {
-                          setTimeout(() => {
-                            const confirmed = window.confirm(
-                              "🌟 Thank you for the amazing rating! \\n\\nWould you like to share your positive experience on Google? It helps us a lot!"
-                            );
-                            if (confirmed) {
-                              // User clicked OK - redirect to Google review
-                              window.open(googleReviewLink, "_blank");
+                          // Ask user immediately; open link synchronously to
+                          // avoid popup blockers preventing a new tab/window.
+                          const confirmed = window.confirm(
+                            "🌟 Thank you for the amazing rating! \n\nWould you like to share your positive experience on Google? It helps us a lot!"
+                          );
+                          if (confirmed) {
+                            // Open the prepared positive target (strip id to avoid leaking)
+                            const target =
+                              positiveTargetHref || googleReviewLink;
+                            try {
+                              window.open(target, "_blank");
+                            } catch (openErr) {
+                              // Fallback: navigate in same window as last resort
+                              window.location.href = target;
                             }
-                          }, 300); // Small delay so the star selection is visible first
+                          }
                         }
                       }}
                       className={`text-3xl transition-transform ${
