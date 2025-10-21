@@ -30,6 +30,47 @@ const PaymentSuccessPage: React.FC = () => {
     planName: string;
     smsCredits: number;
   } | null>(null);
+  // Debugging helpers: record runtime steps and show verification results
+  const [debugLogs, setDebugLogs] = useState<Array<any>>([]);
+  const [showDebug, setShowDebug] = useState(false);
+  const [serverVerification, setServerVerification] = useState<any>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  const sanitizeDebug = (obj: any) => {
+    try {
+      const clone = JSON.parse(JSON.stringify(obj));
+      if (
+        clone &&
+        clone.headers &&
+        (clone.headers.Authorization || clone.headers.authorization)
+      ) {
+        clone.headers.Authorization = "REDACTED";
+        clone.headers.authorization = "REDACTED";
+      }
+      return clone;
+    } catch {
+      return obj;
+    }
+  };
+
+  const pushDebug = (
+    message: string,
+    payload?: any,
+    level: string = "info"
+  ) => {
+    try {
+      const entry = {
+        ts: Date.now(),
+        level,
+        message,
+        payload: sanitizeDebug(payload),
+      };
+      setDebugLogs((p) => [entry, ...p].slice(0, 200));
+      if (level === "error") console.error(message, payload);
+      else if (level === "warn") console.warn(message, payload);
+      else console.log(message, payload);
+    } catch {}
+  };
 
   useEffect(() => {
     // Extract plan info from URL params and save subscription
@@ -193,6 +234,7 @@ const PaymentSuccessPage: React.FC = () => {
               "[PaymentSuccess] Found canonical subscription:",
               found
             );
+            pushDebug("Found canonical subscription", found);
             try {
               setPlanInfo({
                 planName: found.planName || found.planId,
@@ -223,6 +265,10 @@ const PaymentSuccessPage: React.FC = () => {
             ) {
               console.log(
                 "[PaymentSuccess] Canonical subscription already present; will skip server POST but still write to client profile (auth uid)."
+              );
+              pushDebug(
+                "Server already has canonical subscription; skipping POST",
+                found
               );
               skipServerPost = true;
             }
@@ -352,6 +398,8 @@ const PaymentSuccessPage: React.FC = () => {
           durationMonths: plan.months,
           status: "active",
         };
+        // Record prepared payload for debugging
+        pushDebug("Prepared server payload", payload);
 
         // Determine companyId if available or supply userEmail for server-side derivation
         let derivedCompanyId = null;
@@ -478,6 +526,10 @@ const PaymentSuccessPage: React.FC = () => {
                 console.log(
                   `[PaymentSuccess] Wrote subscription to Firestore clients/${authUid}/profile/main (client-side)`
                 );
+                pushDebug("Wrote auth-owned profile (client-side)", {
+                  authUid,
+                  profilePayload,
+                });
                 try {
                   localStorage.setItem("companyId", String(authUid));
                   localStorage.setItem("auth_uid", String(authUid));
@@ -622,6 +674,11 @@ const PaymentSuccessPage: React.FC = () => {
               headers,
               payload,
             });
+            pushDebug("Posting subscription to server", {
+              url: `${base}/api/subscription`,
+              headers,
+              payload,
+            });
 
             const response = await fetch(`${base}/api/subscription`, {
               method: "POST",
@@ -630,11 +687,40 @@ const PaymentSuccessPage: React.FC = () => {
             });
 
             const data = await response.json().catch(() => ({}));
+            pushDebug("Server POST response", data);
             if (data && data.success) {
               console.log(
                 "✅ Subscription saved on server (billing/profile)",
                 data.subscription || data
               );
+              // Verify server-side saved record and show result in-debug UI
+              try {
+                setVerifying(true);
+                const cid = payload.companyId || currentUser?.uid || null;
+                if (cid) {
+                  const verifyUrl = `${base}/api/subscription?companyId=${cid}`;
+                  pushDebug("Verification GET (after server save)", {
+                    verifyUrl,
+                  });
+                  const vres = await fetch(verifyUrl);
+                  const verifyJson = await vres.json().catch(() => ({}));
+                  setServerVerification(verifyJson);
+                  pushDebug(
+                    "Verification GET result (after server save)",
+                    verifyJson
+                  );
+                } else {
+                  pushDebug("Verification skipped: no companyId available");
+                }
+              } catch (vErr) {
+                pushDebug(
+                  "Verification GET error (after server save)",
+                  vErr,
+                  "error"
+                );
+              } finally {
+                setVerifying(false);
+              }
             } else {
               console.warn("[PaymentSuccess] Server save incomplete:", data);
               // If server did not accept the payload (e.g., missing companyId),
@@ -686,11 +772,53 @@ const PaymentSuccessPage: React.FC = () => {
                     }
                   );
                   const claimJson = await claimRes.json().catch(() => ({}));
+                  pushDebug("Claim response", claimJson);
                   if (claimJson && claimJson.success) {
                     console.log(
                       "✅ Claimed subscription via session endpoint:",
                       claimJson.subscription
                     );
+                    // Verify after successful claim
+                    try {
+                      setVerifying(true);
+                      const cid =
+                        claimJson.companyId ||
+                        payload.companyId ||
+                        currentUser?.uid ||
+                        null;
+                      if (cid) {
+                        const baseLocal = await getSmsServerUrl().catch(
+                          () => ""
+                        );
+                        const verifyUrl = baseLocal
+                          ? `${baseLocal}/api/subscription?companyId=${cid}`
+                          : `/api/subscription?companyId=${cid}`;
+                        pushDebug("Verification GET (post-claim)", {
+                          verifyUrl,
+                        });
+                        const vres = await fetch(verifyUrl);
+                        const verifyResp = await vres.json().catch(() => ({}));
+                        setServerVerification(verifyResp);
+                        pushDebug(
+                          "Verification GET result (post-claim)",
+                          verifyResp
+                        );
+                      } else {
+                        pushDebug(
+                          "Verification skipped after claim: no companyId returned",
+                          claimJson,
+                          "warn"
+                        );
+                      }
+                    } catch (vErr) {
+                      pushDebug(
+                        "Verification GET error (post-claim)",
+                        vErr,
+                        "error"
+                      );
+                    } finally {
+                      setVerifying(false);
+                    }
                   } else {
                     console.warn(
                       "[PaymentSuccess] Claim attempt failed:",
@@ -862,6 +990,105 @@ const PaymentSuccessPage: React.FC = () => {
               A confirmation email has been sent to your registered email
               address.
             </p>
+
+            <div className="mt-3 text-left">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-gray-700">Debug</h4>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowDebug((s) => !s)}
+                    className="text-xs text-indigo-600 hover:underline"
+                  >
+                    {showDebug ? "Hide" : "Show"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        setVerifying(true);
+                        setServerVerification(null);
+                        // Prefer a stored companyId and fall back to current auth
+                        let cid: string | null = null;
+                        try {
+                          cid = localStorage.getItem("companyId");
+                        } catch {}
+                        if (!cid) {
+                          try {
+                            initializeFirebase();
+                            const au = getFirebaseAuth().currentUser;
+                            if (au && au.uid) cid = au.uid;
+                          } catch {}
+                        }
+                        if (!cid) {
+                          pushDebug(
+                            "Manual verify failed: no companyId available",
+                            null,
+                            "warn"
+                          );
+                          return;
+                        }
+                        const baseLocal = await getSmsServerUrl().catch(
+                          () => ""
+                        );
+                        const verifyUrl = baseLocal
+                          ? `${baseLocal}/api/subscription?companyId=${cid}`
+                          : `/api/subscription?companyId=${cid}`;
+                        pushDebug("Manual verify requested", { verifyUrl });
+                        const vres = await fetch(verifyUrl);
+                        const j = await vres.json().catch(() => ({}));
+                        setServerVerification(j);
+                        pushDebug("Manual verify result", j);
+                      } catch (err) {
+                        pushDebug("Manual verify error", err, "error");
+                      } finally {
+                        setVerifying(false);
+                      }
+                    }}
+                    className="text-xs text-gray-700 bg-gray-100 px-2 py-1 rounded"
+                  >
+                    Verify Now
+                  </button>
+                </div>
+              </div>
+
+              {verifying && (
+                <div className="text-xs text-gray-500 mt-1">
+                  Verifying server subscription...
+                </div>
+              )}
+
+              {serverVerification && (
+                <pre className="mt-2 p-2 rounded bg-black text-white text-xs overflow-auto max-h-40">
+                  {JSON.stringify(serverVerification, null, 2)}
+                </pre>
+              )}
+
+              {showDebug && (
+                <div className="mt-2">
+                  <div className="text-xs text-gray-600 mb-1">
+                    Recent debug logs (newest first)
+                  </div>
+                  <div className="text-xs bg-gray-900 text-white p-2 rounded max-h-40 overflow-auto">
+                    {debugLogs.length === 0 ? (
+                      <div className="text-gray-400">No debug logs yet.</div>
+                    ) : (
+                      debugLogs.map((d, i) => (
+                        <div key={i} className="mb-2">
+                          <div className="text-[11px] text-gray-300">
+                            {new Date(d.ts).toLocaleString()} • {d.level}
+                          </div>
+                          <div className="text-[13px] font-medium">
+                            {d.message}
+                          </div>
+                          <pre className="text-[11px] mt-1 whitespace-pre-wrap">
+                            {JSON.stringify(d.payload, null, 2)}
+                          </pre>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
