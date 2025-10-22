@@ -14,6 +14,10 @@ const PaymentSuccessPage: React.FC = () => {
     months: number;
     planId: string;
   } | null>(null);
+  const [planDebug, setPlanDebug] = useState<{
+    source: string;
+    value: string | undefined;
+  } | null>(null);
   const [serverPlan, setServerPlan] = useState<{
     plan?: string;
     price?: number;
@@ -58,6 +62,7 @@ const PaymentSuccessPage: React.FC = () => {
           planId = localStorage.getItem("pendingPlan") || undefined;
           if (planId) planSource = "localStorage";
         }
+        setPlanDebug({ source: planSource, value: planId });
         const sessionId =
           urlParams.get("sessionId") ||
           urlParams.get("subscription_id") ||
@@ -239,6 +244,15 @@ const PaymentSuccessPage: React.FC = () => {
             </p>
           </div>
 
+          {/* Debug: Show plan source and value */}
+          {planDebug && (
+            <div className="mb-2 text-xs text-gray-500 text-left">
+              Plan loaded from: <b>{planDebug.source}</b>{" "}
+              {planDebug.value
+                ? `(value: ${planDebug.value})`
+                : "(no value found)"}
+            </div>
+          )}
           {/* Details */}
           <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 space-y-3 text-left">
             <div className="flex items-center gap-3">
