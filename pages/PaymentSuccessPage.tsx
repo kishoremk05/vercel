@@ -11,6 +11,8 @@ const PaymentSuccessPage: React.FC = () => {
   const [planInfo, setPlanInfo] = useState<{
     planName: string;
     smsCredits: number;
+    months: number;
+    planId: string;
   } | null>(null);
   const [countdown, setCountdown] = useState(5);
 
@@ -68,7 +70,12 @@ const PaymentSuccessPage: React.FC = () => {
             sms: 0,
             months: 1,
           };
-          setPlanInfo({ planName: plan.name, smsCredits: plan.sms });
+          setPlanInfo({
+            planName: plan.name,
+            smsCredits: plan.sms,
+            months: plan.months,
+            planId,
+          });
           // Write to Firestore
           try {
             const db = getFirebaseDb();
@@ -124,6 +131,8 @@ const PaymentSuccessPage: React.FC = () => {
           setPlanInfo({
             planName: latest.planName || latest.planId,
             smsCredits: latest.smsCredits || latest.remainingCredits || 0,
+            months: latest.months || 1,
+            planId: latest.planId || "",
           });
         }
       } catch {}
@@ -219,19 +228,32 @@ const PaymentSuccessPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="border-t border-gray-200 pt-3 space-y-2 text-sm text-gray-700">
-              <div className="flex justify-between">
-                <span>✅ Subscription activated</span>
-              </div>
-              {planInfo && (
+            {planInfo && (
+              <div className="border-t border-gray-200 pt-3 space-y-2 text-sm text-gray-700">
                 <div className="flex justify-between">
-                  <span>✅ {planInfo.smsCredits} SMS credits loaded</span>
+                  <span>✅ Plan:</span>
+                  <span className="font-semibold">
+                    {planInfo.planName} ({planInfo.planId})
+                  </span>
                 </div>
-              )}
-              <div className="flex justify-between">
-                <span>✅ Dashboard ready</span>
+                <div className="flex justify-between">
+                  <span>✅ SMS Credits:</span>
+                  <span className="font-semibold">{planInfo.smsCredits}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>✅ Duration:</span>
+                  <span className="font-semibold">
+                    {planInfo.months} month{planInfo.months > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>✅ Subscription activated</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>✅ Dashboard ready</span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Countdown */}
