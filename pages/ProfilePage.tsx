@@ -110,80 +110,33 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     null
   );
 
-  // Try to derive companyId from localStorage, authenticated /auth/me,
-  // or via auth-UID -> client mapping. This mirrors logic used elsewhere
-  // so the Profile page can fetch server-side dashboard messages.
+  // Always use the current Firebase user's UID as companyId for Firestore profile/subscription
   const deriveCompanyId = async (): Promise<string | null> => {
     try {
-      try {
-        const stored = localStorage.getItem("companyId");
-        if (stored) return stored;
-      } catch {}
-
-      // Try auth-based discovery
-      try {
-        initializeFirebase();
-        const auth = getFirebaseAuth();
-        const waitForAuth = (authObj: any, timeoutMs = 5000) =>
-          new Promise<any>((resolve) => {
-            if (authObj.currentUser) return resolve(authObj.currentUser);
-            const unsubscribe = authObj.onAuthStateChanged((user: any) => {
-              if (user) {
-                try {
-                  unsubscribe();
-                } catch {}
-                return resolve(user);
-              }
-            });
-            setTimeout(() => {
+      initializeFirebase();
+      const auth = getFirebaseAuth();
+      const waitForAuth = (authObj: any, timeoutMs = 5000) =>
+        new Promise<any>((resolve) => {
+          if (authObj.currentUser) return resolve(authObj.currentUser);
+          const unsubscribe = authObj.onAuthStateChanged((user: any) => {
+            if (user) {
               try {
                 unsubscribe();
               } catch {}
-              return resolve(authObj.currentUser || null);
-            }, timeoutMs);
+              return resolve(user);
+            }
           });
-
-        const current = await waitForAuth(getFirebaseAuth(), 3000);
-        if (current && current.getIdToken) {
-          try {
-            const baseLocal = await getSmsServerUrl().catch(() => "");
-            if (baseLocal) {
-              const idToken = await current.getIdToken();
-              const meResp = await fetch(`${baseLocal}/auth/me`, {
-                headers: { Authorization: `Bearer ${idToken}` },
-              });
-              if (meResp.ok) {
-                const meJson = await meResp.json().catch(() => ({}));
-                const cid = meJson.companyId || null;
-                if (cid) {
-                  try {
-                    localStorage.setItem("companyId", cid);
-                  } catch {}
-                  return cid;
-                }
-              }
-            }
-          } catch (e) {
-            /* ignore */
-          }
-
-          // Fallback: map auth uid to client id
-          try {
-            const mapped = await getClientByAuthUid(current.uid).catch(
-              () => null
-            );
-            if (mapped && mapped.id) {
-              try {
-                localStorage.setItem("companyId", mapped.id);
-              } catch {}
-              return mapped.id;
-            }
-          } catch {}
-        }
-      } catch (e) {
-        /* ignore */
+          setTimeout(() => {
+            try {
+              unsubscribe();
+            } catch {}
+            return resolve(authObj.currentUser || null);
+          }, timeoutMs);
+        });
+      const current = await waitForAuth(getFirebaseAuth(), 3000);
+      if (current && current.uid) {
+        return current.uid;
       }
-
       return null;
     } catch (e) {
       return null;
@@ -233,11 +186,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
           if (cached && mounted) setServerMessageCount(Number(cached));
         } catch {}
 
-        let companyId: string | null = null;
-        try {
-          companyId = localStorage.getItem("companyId");
-        } catch {}
-        if (!companyId) companyId = await deriveCompanyId();
+        let companyId: string | null = await deriveCompanyId();
         if (companyId && mounted) {
           await fetchServerMonthlyCount(companyId);
         }
@@ -430,72 +379,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
 
     const loadSubscriptionData = async () => {
       try {
-        let companyId = null;
-        try {
-          companyId = localStorage.getItem("companyId");
-        } catch {}
-
-        // If companyId isn't in localStorage (redirects can clear it), try
-        // to derive it from the server via /auth/me using the current
-        // Firebase ID token. This allows the Profile page to show
-        // subscription data even when localStorage was lost during
-        // hosted-checkout redirects.
-        if (!companyId) {
-          try {
-            initializeFirebase();
-            const auth = getFirebaseAuth();
-            const user = await waitForAuth(auth, 10000);
-            if (user) {
-              const baseLocal = await getSmsServerUrl().catch(() => "");
-              if (baseLocal) {
-                const idToken = await user.getIdToken();
-                const meResp = await fetch(`${baseLocal}/auth/me`, {
-                  headers: { Authorization: `Bearer ${idToken}` },
-                });
-                if (meResp.ok) {
-                  const meJson = await meResp.json().catch(() => ({}));
-                  companyId = meJson.companyId || null;
-                  if (companyId) {
-                    try {
-                      localStorage.setItem("companyId", companyId);
-                    } catch {}
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            console.warn(
-              "[Profile] Failed to derive companyId from auth/me:",
-              e
-            );
-          }
-        }
-        if (!companyId) {
-          // No companyId stored — try to derive one from the authenticated
-          // user's client mapping so we can subscribe to a doc the user
-          // has permission to read.
-          try {
-            const auth = getFirebaseAuth();
-            const current = await waitForAuth(auth, 10000);
-            if (current) {
-              const mapped = await getClientByAuthUid(current.uid).catch(
-                () => null
-              );
-              if (mapped && mapped.id) {
-                companyId = mapped.id;
-                try {
-                  localStorage.setItem("companyId", companyId);
-                } catch {}
-              }
-            }
-          } catch (e) {
-            console.warn(
-              "[Profile] Failed to derive companyId from auth uid:",
-              e
-            );
-          }
-        }
-
+        let companyId: string | null = await deriveCompanyId();
         if (!companyId) {
           setLoadingSubscription(false);
           return;

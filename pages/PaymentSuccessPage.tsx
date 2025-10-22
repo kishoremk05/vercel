@@ -1,3 +1,24 @@
+// Utility: Call this after account deletion to clear all localStorage keys related to company/profile
+function clearProfileLocalStorage() {
+  try {
+    localStorage.removeItem("companyId");
+    localStorage.removeItem("auth_uid");
+    localStorage.removeItem("serverCompanyId");
+    localStorage.removeItem("profile_subscription_present");
+    localStorage.removeItem("pendingPlan");
+    localStorage.removeItem("subscription");
+    // Add any other keys you use for profile/account caching here
+    console.log(
+      "[Profile] Cleared all localStorage keys after account deletion."
+    );
+  } catch (e) {
+    console.warn(
+      "[Profile] Failed to clear localStorage after account deletion",
+      e
+    );
+  }
+}
+
 import React, { useEffect, useState } from "react";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 import {
@@ -128,7 +149,8 @@ const PaymentSuccessPage: React.FC = () => {
         let found: any = null;
         // Keep companyId available to the rest of the function so we can
         // include it in the server POST payload if needed.
-        let companyIdForPayload: string | null = null;
+        // companyId is always the current user's UID for Firestore profile
+        let companyIdForPayload: string | null = currentUser?.uid || null;
         // When the webhook/server already created a canonical subscription
         // we want to avoid POSTing the same payload again. However we
         // still need to ensure the authenticated user's client-visible
@@ -147,35 +169,7 @@ const PaymentSuccessPage: React.FC = () => {
             "[PaymentSuccess] No planId in return URL. Will attempt to fetch canonical subscription from Firestore / API."
           );
 
-          const getCompanyId = async () => {
-            // Prefer a client-side stored companyId when available
-            try {
-              const stored = localStorage.getItem("companyId");
-              if (stored) return stored;
-            } catch {}
-
-            // If user is authenticated, ask server for companyId via /auth/me
-            if (currentUser) {
-              try {
-                const baseLocal = await getSmsServerUrl().catch(() => "");
-                const idToken = await currentUser.getIdToken();
-                if (!baseLocal) return null;
-                const meResp = await fetch(`${baseLocal}/auth/me`, {
-                  headers: { Authorization: `Bearer ${idToken}` },
-                });
-                if (!meResp.ok) return null;
-                const meJson = await meResp.json().catch(() => ({}));
-                return meJson.companyId || null;
-              } catch (e) {
-                console.warn(
-                  "[PaymentSuccess] Failed to derive companyId from /auth/me:",
-                  e
-                );
-                return null;
-              }
-            }
-            return null;
-          };
+          // No need for getCompanyId: always use currentUser.uid
 
           const fetchSubscriptionByCompany = async (
             companyId: string | null
@@ -228,7 +222,7 @@ const PaymentSuccessPage: React.FC = () => {
 
           // Try a few times (simple retry) to let webhook/admin writes finish
           found = null;
-          companyIdForPayload = await getCompanyId();
+          companyIdForPayload = currentUser?.uid || null;
           for (let i = 0; i < 4; i++) {
             found = await fetchSubscriptionByCompany(companyIdForPayload).catch(
               () => null
@@ -250,20 +244,7 @@ const PaymentSuccessPage: React.FC = () => {
                 smsCredits: found.smsCredits || found.remainingCredits || 0,
               });
             } catch {}
-            // Persist derived companyId in localStorage so other pages (Profile)
-            // can subscribe to the correct Firestore document. Prefer the
-            // companyId we used to fetch the canonical subscription when
-            // available.
-            try {
-              const persistId =
-                companyIdForPayload ||
-                found.companyId ||
-                found.clientId ||
-                null;
-              if (persistId) {
-                localStorage.setItem("companyId", String(persistId));
-              }
-            } catch (e) {}
+            // No need to persist companyId in localStorage; always use currentUser.uid
             // If the canonical subscription already contains a planId and we
             // have a companyId, there's nothing further for the client to do:
             // the server/webhook already wrote the canonical doc and the
@@ -411,44 +392,36 @@ const PaymentSuccessPage: React.FC = () => {
         // Record prepared payload for debugging
         pushDebug("Prepared server payload", payload);
 
-        // Determine companyId if available or supply userEmail for server-side derivation
-        let derivedCompanyId = null;
-        try {
-          derivedCompanyId = localStorage.getItem("companyId");
-        } catch {}
-        if (!derivedCompanyId && currentUser) {
-          try {
-            const baseLocal = await getSmsServerUrl().catch(() => "");
-            if (baseLocal) {
-              const idToken = await currentUser.getIdToken();
-              const meResp = await fetch(`${baseLocal}/auth/me`, {
-                headers: { Authorization: `Bearer ${idToken}` },
-              });
-              if (meResp.ok) {
-                const meJson = await meResp.json().catch(() => ({}));
-                derivedCompanyId = meJson.companyId || null;
-              }
-            }
-          } catch (e) {
-            console.warn("[PaymentSuccess] getCompanyId (me) failed:", e);
-          }
+        // --- Robust companyId/planId assignment ---
+        // Always use currentUser.uid as companyId for Firestore profile
+        payload.companyId = currentUser?.uid || null;
+        if (!payload.companyId) {
+          console.error(
+            "[PaymentSuccess] ERROR: companyId missing from payload. Aborting POST.",
+            payload
+          );
         }
-
-        if (derivedCompanyId) payload.companyId = derivedCompanyId;
-        // Prefer a companyId we discovered earlier when fetching canonical
-        // subscription (if any). This reduces chances of a server 400.
-        if (!payload.companyId && companyIdForPayload)
-          payload.companyId = companyIdForPayload;
-        // As a last resort, try to use companyId-like values from the found
-        // payload (some variants of the data include clientId/companyId).
-        if (!payload.companyId && typeof found === "object" && found) {
-          payload.companyId = found.companyId || found.clientId || null;
+        if (!payload.planId) {
+          console.error(
+            "[PaymentSuccess] ERROR: planId missing from payload. Aborting POST.",
+            payload
+          );
+        }
+        if (!payload.companyId || !payload.planId) {
+          pushDebug(
+            "ERROR: Required fields missing for POST",
+            payload,
+            "error"
+          );
         }
         if (!payload.companyId && currentUser?.email)
           payload.userEmail = currentUser.email;
-
-        // If a sessionId is present, include it so the server can reconcile via provider API if needed
         if (sessionId) payload.sessionId = sessionId;
+
+        // --- End robust assignment ---
+        // Utility: Call this after account deletion to clear all localStorage keys related to company/profile
+
+        // No longer needed: clearProfileLocalStorage utility (all state is in Firestore)
 
         // Try a client-side Firestore write first (best-effort) so the
         // Profile page can reflect the purchase immediately for this user.
@@ -532,10 +505,7 @@ const PaymentSuccessPage: React.FC = () => {
                   authUid,
                   profilePayload,
                 });
-                try {
-                  localStorage.setItem("companyId", String(authUid));
-                  localStorage.setItem("auth_uid", String(authUid));
-                } catch {}
+                // No need to persist companyId/auth_uid in localStorage
 
                 // Verification read: ensure the document contains the
                 // expected subscription fields so the UI will pick it up.
@@ -564,21 +534,7 @@ const PaymentSuccessPage: React.FC = () => {
                       // Mark a short-lived flag so other tabs/pages (Payment,
                       // Dashboard) can detect that a subscription was just
                       // saved for this user and immediately update their UI.
-                      try {
-                        localStorage.setItem(
-                          "profile_subscription_present",
-                          JSON.stringify({
-                            companyId: String(authUid),
-                            userEmail: currentUser?.email || null,
-                            ts: Date.now(),
-                          })
-                        );
-                        // Clear legacy pending indicators to avoid loops
-                        try {
-                          localStorage.removeItem("pendingPlan");
-                          localStorage.removeItem("subscription");
-                        } catch {}
-                      } catch (e) {}
+                      // No need to persist profile_subscription_present or clear pendingPlan/subscription in localStorage
                     } catch {}
                   } else {
                     console.warn(
@@ -624,12 +580,7 @@ const PaymentSuccessPage: React.FC = () => {
               console.log(
                 `[PaymentSuccess] Also attempted to write canonical subscription to clients/${candidateCompanyId}/profile/main (best-effort)`
               );
-              try {
-                localStorage.setItem(
-                  "serverCompanyId",
-                  String(candidateCompanyId)
-                );
-              } catch {}
+              // No need to persist serverCompanyId in localStorage
 
               // Verification read for server company id (best-effort)
               try {
