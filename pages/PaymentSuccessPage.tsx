@@ -338,29 +338,30 @@ const PaymentSuccessPage: React.FC = () => {
 
         // Determine plan object either from mapping or from found payload
         let plan = effectivePlanId ? planMapping[effectivePlanId] : null;
+        // If not found in mapping, fallback to found object (custom plan), but always resolve a valid planId
         if (!plan && typeof found === "object" && found) {
-          plan = {
-            name:
-              found.planName ||
-              found.name ||
-              String(effectivePlanId || "Custom"),
-            sms: found.smsCredits || found.remainingCredits || 0,
-            months: found.months || 1,
-          } as any;
-          // Keep a syntactic planId when we don't have one
-          if (!effectivePlanId && plan.sms) {
-            effectivePlanId = smsToPlan(plan.sms) || null;
-          }
-        }
-
-        if (!plan) {
-          console.warn(
-            "Unknown plan and no canonical subscription to infer it.",
-            { planId, found }
+          // Try to infer planId from SMS credits or price
+          let inferredPlanId = smsToPlan(
+            found.smsCredits || found.remainingCredits || 0
           );
-          return;
+          if (!inferredPlanId && typeof found.price === "number") {
+            inferredPlanId = priceToPlan[found.price];
+          }
+          if (
+            !inferredPlanId &&
+            typeof found.price === "string" &&
+            !Number.isNaN(Number(found.price))
+          ) {
+            inferredPlanId = priceToPlan[Number(found.price)];
+          }
+          effectivePlanId = inferredPlanId || "starter_1m";
+          plan = planMapping[effectivePlanId];
         }
-
+        // If still no valid planId, fallback to a default valid planId
+        if (!effectivePlanId || !planMapping[effectivePlanId]) {
+          effectivePlanId = "starter_1m";
+          plan = planMapping[effectivePlanId];
+        }
         setPlanInfo({ planName: plan.name, smsCredits: plan.sms });
 
         // As a best-effort we will also write the subscription directly to
@@ -459,14 +460,25 @@ const PaymentSuccessPage: React.FC = () => {
         try {
           const authUid = currentUser?.uid || null;
 
-          // Build a minimal profile object: only planId, planName, status
+          // Build a complete profile object: planId, planName, status, expiry, credits
           const profilePayload: any = {
-            planId: canonicalPlanId || effectivePlanId || plan.name,
+            planId: effectivePlanId, // always a valid planId
             planName: plan.name,
             status: payload.status || "active",
-            // Optionally keep updatedAt for UI freshness
+            smsCredits: plan.sms,
+            remainingCredits: plan.sms,
+            activatedAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           };
+          // Set expiry date based on plan duration
+          if (plan.months && Number(plan.months) > 0) {
+            const months = Number(plan.months);
+            const expiry = new Date();
+            expiry.setMonth(expiry.getMonth() + months);
+            profilePayload.expiryAt = Timestamp.fromDate(expiry);
+          }
+          if (payload.sessionId)
+            profilePayload.paymentSessionId = payload.sessionId;
 
           // Ensure an auth-UID-owned client document exists and write the
           // profile there so the signed-in user can immediately see the
