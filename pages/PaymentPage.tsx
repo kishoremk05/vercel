@@ -109,10 +109,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
               parsed.planId || parsed.planName || parsed.status === "active";
             const hasCredits =
               Number(parsed.remainingCredits || parsed.smsCredits || 0) > 0;
-            // Only trust the local cache when it explicitly belongs to the
-            // same companyId. Do NOT treat email-only matches as
-            // authoritative so recreated accounts with the same email do
-            // not inherit previous subscription state.
             if (companyMatches && (hasPlan || hasCredits)) {
               setAlreadyPaid(true);
               setAlreadyPaidSource("local");
@@ -134,10 +130,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
               pfCompany &&
               currentCompanyId &&
               String(pfCompany) === String(currentCompanyId);
-            // Only accept the short-lived profile flag when it explicitly
-            // states the same companyId. Ignore email-only flags so that a
-            // recreated account with the same email does not get treated
-            // as already-paid.
             if (recent && companyMatches) {
               setAlreadyPaid(true);
               setAlreadyPaidSource("local");
@@ -165,7 +157,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
         const checkUrl = apiBase
           ? `${String(apiBase).replace(
-              /\/+$|$/,
+              /\/+$/,
               ""
             )}/api/subscription?companyId=${currentCompanyId}`
           : `/api/subscription?companyId=${currentCompanyId}`;
@@ -174,9 +166,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => null as any);
         if (!resp || !resp.ok) {
-          // Server doesn't confirm an owned subscription — if our UI was
-          // showing a local cached subscription, clear it to avoid blocking
-          // new customers.
           if (alreadyPaid && alreadyPaidSource === "local") {
             setAlreadyPaid(false);
             setAlreadyPaidSource(null);
@@ -198,14 +187,10 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             existing.status === "active";
           const hasCredits =
             Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
-          // Only honor server subscription when it is explicitly owned by
-          // the same company. Ignore email-only matches so recreated
-          // accounts are treated as new users.
           if (companyMatches && (hasPlan || hasCredits)) {
             setAlreadyPaid(true);
             setAlreadyPaidSource("server");
           } else if (alreadyPaid && alreadyPaidSource === "local") {
-            // Server doesn't confirm ownership — clear local detection
             setAlreadyPaid(false);
             setAlreadyPaidSource(null);
           }
@@ -216,13 +201,19 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     })();
   }, []);
 
+  // Redirect to dashboard if alreadyPaid from server
+  useEffect(() => {
+    if (alreadyPaid && alreadyPaidSource === "server") {
+      window.location.href = "/dashboard";
+    }
+  }, [alreadyPaid, alreadyPaidSource]);
+
   // Get user info from localStorage for display
   const userEmail = localStorage.getItem("userEmail") || "";
   const businessName = localStorage.getItem("businessName") || "Your Business";
 
   const handlePayment = async () => {
     if (alreadyPaid) {
-      // Prefer explicit user navigation to the dashboard when already paid
       window.location.href = "/dashboard";
       return;
     }
@@ -232,7 +223,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       const companyId = localStorage.getItem("companyId");
       const email = localStorage.getItem("userEmail") || "";
       if (!companyId) {
-        // Not authenticated — persist pending plan and send user to auth page
         try {
           localStorage.setItem("pendingPlan", String(selectedPlan.id));
         } catch {}
@@ -242,7 +232,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         return;
       }
 
-      // Re-run a fast server preflight with token to avoid duplicate charges
       let token: string | null = null;
       try {
         token = await waitForAuthToken(5000);
@@ -255,7 +244,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
           const checkUrl = apiBase
             ? `${String(apiBase).replace(
-                /\/+$|$/,
+                /\/+$/,
                 ""
               )}/api/subscription?companyId=${companyId}`
             : `/api/subscription?companyId=${companyId}`;
@@ -277,11 +266,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             const hasCredits =
               existing &&
               Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
-            // Only block checkout when the server confirms the subscription
-            // belongs to the same companyId. Do NOT treat email-only matches
-            // as authoritative to avoid false-positives when accounts are
-            // recreated with the same email or when the caller lacks a
-            // concrete companyId mapping.
             if (companyMatches && (hasPlan || hasCredits)) {
               setAlreadyPaid(true);
               setAlreadyPaidSource("server");
@@ -297,7 +281,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
 
       const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
       const createUrl = apiBase
-        ? `${String(apiBase).replace(/\/+$|$/, "")}/api/payments/create-session`
+        ? `${String(apiBase).replace(/\/+$/, "")}/api/payments/create-session`
         : `/api/payments/create-session`;
 
       const headers: any = {
@@ -341,7 +325,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       if (!data || !data.url)
         throw new Error("No payment URL received from server");
 
-      // Clear pendingPlan now that checkout has been initiated
       try {
         localStorage.removeItem("pendingPlan");
       } catch {}
@@ -387,36 +370,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
               ReputationFlow
             </span>
           </div>
-          <div className="flex items-center gap-6">
-            <button
-              onClick={() => {
-                try {
-                  localStorage.removeItem("pendingPlan");
-                } catch {}
-                window.location.href = "/#pricing";
-              }}
-              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-            >
-              Change plan
-            </button>
-            <button
-              onClick={onBack}
-              className="text-sm text-gray-600 hover:text-gray-900 font-medium"
-            >
-              ← Back
-            </button>
-            <button
-              onClick={() => {
-                try {
-                  localStorage.removeItem("pendingPlan");
-                } catch {}
-                window.location.href = "/dashboard";
-              }}
-              className="text-sm bg-transparent border border-gray-200 px-3 py-1 rounded text-gray-800 hover:bg-gray-50"
-            >
-              Skip for now
-            </button>
-          </div>
+          {/* Removed Change plan, Back, and Skip for now buttons */}
         </div>
       </header>
 
