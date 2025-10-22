@@ -51,7 +51,11 @@ const PaymentSuccessPage: React.FC = () => {
         const currentUser = auth.currentUser;
         if (!currentUser) return;
         const urlParams = new URLSearchParams(window.location.search);
-        const planId = urlParams.get("plan") || undefined;
+        // Try to get planId from URL, then fallback to localStorage
+        let planId = urlParams.get("plan") || undefined;
+        if (!planId) {
+          planId = localStorage.getItem("pendingPlan") || undefined;
+        }
         const sessionId =
           urlParams.get("sessionId") ||
           urlParams.get("subscription_id") ||
