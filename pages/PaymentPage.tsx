@@ -84,6 +84,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     "server" | "local" | null
   >(null);
 
+
   useEffect(() => {
     (async () => {
       try {
@@ -156,10 +157,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
 
         const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
         const checkUrl = apiBase
-          ? `${String(apiBase).replace(
-              /\/+$/,
-              ""
-            )}/api/subscription?companyId=${currentCompanyId}`
+          ? `${String(apiBase).replace(/\/+$/,"")}/api/subscription?companyId=${currentCompanyId}`
           : `/api/subscription?companyId=${currentCompanyId}`;
 
         const resp = await fetch(checkUrl, {
@@ -208,6 +206,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     }
   }, [alreadyPaid, alreadyPaidSource]);
 
+
   // Get user info from localStorage for display
   const userEmail = localStorage.getItem("userEmail") || "";
   const businessName = localStorage.getItem("businessName") || "Your Business";
@@ -226,9 +225,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         try {
           localStorage.setItem("pendingPlan", String(selectedPlan.id));
         } catch {}
-        window.location.href = `/auth?plan=${encodeURIComponent(
-          selectedPlan.id
-        )}`;
+        window.location.href = `/auth?plan=${encodeURIComponent(selectedPlan.id)}`;
         return;
       }
 
@@ -243,10 +240,7 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         try {
           const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
           const checkUrl = apiBase
-            ? `${String(apiBase).replace(
-                /\/+$/,
-                ""
-              )}/api/subscription?companyId=${companyId}`
+            ? `${String(apiBase).replace(/\/+$/, "")}/api/subscription?companyId=${companyId}`
             : `/api/subscription?companyId=${companyId}`;
           const resp = await fetch(checkUrl, {
             headers: { Authorization: `Bearer ${token}` },
@@ -254,18 +248,10 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           if (resp && resp.ok) {
             const json = await resp.json().catch(() => ({} as any));
             const existing = json && json.subscription;
-            const subCompany =
-              existing?.companyId || existing?.clientId || null;
-            const companyMatches =
-              subCompany && String(subCompany) === String(companyId);
-            const hasPlan =
-              existing &&
-              (existing.planId ||
-                existing.planName ||
-                existing.status === "active");
-            const hasCredits =
-              existing &&
-              Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
+            const subCompany = existing?.companyId || existing?.clientId || null;
+            const companyMatches = subCompany && String(subCompany) === String(companyId);
+            const hasPlan = existing && (existing.planId || existing.planName || existing.status === "active");
+            const hasCredits = existing && Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
             if (companyMatches && (hasPlan || hasCredits)) {
               setAlreadyPaid(true);
               setAlreadyPaidSource("server");
@@ -318,12 +304,10 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       }
 
       if (!resp.ok) {
-        const msg =
-          data?.error || data?.message || "Failed to create payment session";
+        const msg = data?.error || data?.message || "Failed to create payment session";
         throw new Error(msg);
       }
-      if (!data || !data.url)
-        throw new Error("No payment URL received from server");
+      if (!data || !data.url) throw new Error("No payment URL received from server");
 
       try {
         localStorage.removeItem("pendingPlan");

@@ -461,10 +461,8 @@ const PaymentSuccessPage: React.FC = () => {
 
           // Build a canonical profile object to save
           const profilePayload: any = {
-            planId: payload.planId,
-            planName: payload.planId
-              ? payload.planId
-              : payload.planName || plan.name,
+            planId: canonicalPlanId || effectivePlanId || plan.name,
+            planName: plan.name,
             status: payload.status || "active",
             activatedAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
