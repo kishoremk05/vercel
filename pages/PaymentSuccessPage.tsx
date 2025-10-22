@@ -856,16 +856,38 @@ const PaymentSuccessPage: React.FC = () => {
 
     const savePromise = saveSubscription();
 
-    // Start the redirect countdown once the save completes or after a
-    // short timeout — this improves the chance the profile shows the
-    // new plan on the dashboard immediately after redirect.
+    // Start the redirect countdown once the save completes or after a short timeout
     const MAX_WAIT_MS = 5000;
+    let cleanupTimer: (() => void) | null = null;
+
+    // Helper: Fetch latest profile from Firestore and update planInfo
+    const fetchLatestProfile = async () => {
+      try {
+        initializeFirebase();
+        const auth = getFirebaseAuth();
+        const currentUser = auth.currentUser;
+        if (!currentUser) return;
+        const latest = await getClientProfile(currentUser.uid).catch(
+          () => null
+        );
+        if (latest && (latest.planId || latest.planName)) {
+          setPlanInfo({
+            planName: latest.planName || latest.planId,
+            smsCredits: latest.smsCredits || latest.remainingCredits || 0,
+          });
+        }
+      } catch {}
+    };
+
     const startRedirectTimer = () => {
-      const timer = setInterval(() => {
+      const timer = setInterval(async () => {
         setCountdown((prev) => {
           if (prev <= 1) {
             clearInterval(timer);
-            window.location.href = "/dashboard";
+            // Fetch latest profile just before redirect
+            fetchLatestProfile().then(() => {
+              window.location.href = "/dashboard";
+            });
             return 0;
           }
           return prev - 1;
@@ -874,7 +896,6 @@ const PaymentSuccessPage: React.FC = () => {
       return () => clearInterval(timer);
     };
 
-    let cleanupTimer: (() => void) | null = null;
     Promise.race([
       savePromise.catch(() => null),
       new Promise((r) => setTimeout(r, MAX_WAIT_MS)),
