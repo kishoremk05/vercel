@@ -229,128 +229,27 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     }
   }, []);
 
-  // Compute a merged display subscription anytime the authoritative
-  // subscriptionData changes or when relevant localStorage keys are
-  // updated (pendingPlan / subscription). Prefer the user's selected
-  // plan (pendingPlan or localStorage.subscription) when Firestore
-  // reports an ambiguous/custom plan or when local data has non-zero
-  // credits while Firestore shows zero (transient race cases).
+  // Always use Firestore subscriptionData for display; never fall back to localStorage
   useEffect(() => {
-    const computeDisplay = () => {
-      try {
-        // Parse legacy/local subscription if present
-        let localSub: any = null;
-        try {
-          const raw = localStorage.getItem("subscription");
-          if (raw) localSub = JSON.parse(raw);
-        } catch (e) {
-          // ignore parse errors
-        }
-
-        // Helper to normalise a plan object from various sources
-        const normalise = (src: any) => {
-          if (!src) return null;
-          const planId = src.planId || src.plan || null;
-          const rawName = src.planName || src.name || planId || null;
-          const mapped = planId && PLAN_METADATA[planId];
-          return {
-            planId: planId || rawName,
-            planName: mapped ? mapped.name : rawName,
-            smsCredits:
-              Number(src.smsCredits || src.remainingCredits || 0) || 0,
-            remainingCredits:
-              Number(src.remainingCredits || src.smsCredits || 0) || 0,
-            price: src.price || (mapped && mapped.price) || undefined,
-            startDate: src.startDate || src.activatedAt || src.savedAt,
-            expiryDate: src.expiryDate || src.expiryAt || src.endDate,
-            paymentSessionId: src.paymentSessionId || src.sessionId || src.id,
-            raw: src,
-          };
-        };
-
-        const server = normalise(subscriptionData);
-        const local = normalise(localSub);
-
-        // Decision heuristics (in order):
-        // 1. If a pendingPlan exists — the user explicitly selected it
-        //    and we should show that while the server reconciles.
-        // 2. If server has a non-ambiguous plan (not 'Custom') use it.
-        // 3. If server shows zero credits but local has >0 prefer local.
-        // 4. If local exists use it.
-        // 5. Fallback to server (may be null).
-        let chosen = null as any;
-
-        if (server && server.planName && server.planName !== "Custom") {
-          chosen = server;
-        } else if (
-          server &&
-          Number(server.smsCredits) === 0 &&
-          local &&
-          Number(local.smsCredits) > 0
-        ) {
-          chosen = local;
-        } else if (local) {
-          chosen = local;
-        } else if (server) {
-          chosen = server;
-        } else {
-          chosen = null;
-        }
-
-        // Ensure chosen has start/expiry dates when possible so Profile
-        // always displays dates even if server omitted them.
-        try {
-          if (chosen) {
-            const PLAN_MONTHS: Record<string, number> = {
-              starter_1m: 1,
-              monthly: 1,
-              growth_3m: 3,
-              quarterly: 3,
-              pro_6m: 6,
-              halfyearly: 6,
-            };
-            if (!chosen.startDate) {
-              chosen.startDate = new Date().toISOString();
-            }
-            if (!chosen.expiryDate) {
-              const months = PLAN_MONTHS[chosen.planId] || 1;
-              try {
-                const d = new Date(chosen.startDate);
-                d.setMonth(d.getMonth() + months);
-                chosen.expiryDate = d.toISOString();
-              } catch {
-                chosen.expiryDate = null;
-              }
-            }
-          }
-        } catch {}
-        setDisplaySubscription(chosen);
-      } catch (e) {
-        console.warn("[Profile] compute display subscription failed:", e);
-        setDisplaySubscription(subscriptionData);
-      }
-    };
-
-    computeDisplay();
-
-    const storageHandler = (ev?: StorageEvent) => {
-      if (!ev || ev.key === "subscription") {
-        computeDisplay();
-      }
-    };
-
-    const subUpdated = () => computeDisplay();
-    window.addEventListener("storage", storageHandler);
-    window.addEventListener("subscription:updated", subUpdated);
-
-    return () => {
-      try {
-        window.removeEventListener("storage", storageHandler);
-      } catch {}
-      try {
-        window.removeEventListener("subscription:updated", subUpdated);
-      } catch {}
-    };
+    if (!subscriptionData) {
+      setDisplaySubscription(null);
+      return;
+    }
+    // Only show if planName/planId is present and not ambiguous
+    const planId = subscriptionData.planId || null;
+    const planName = subscriptionData.planName || null;
+    if (
+      planId &&
+      planName &&
+      planName !== "Custom" &&
+      planName !== "N/A" &&
+      planId !== "custom" &&
+      planId !== "N/A"
+    ) {
+      setDisplaySubscription(subscriptionData);
+    } else {
+      setDisplaySubscription(null);
+    }
   }, [subscriptionData]);
 
   // Load subscription data from Firebase Firestore (cross-device) - PRIMARY SOURCE
