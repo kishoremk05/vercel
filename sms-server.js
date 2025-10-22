@@ -1395,6 +1395,7 @@ app.get("/api/subscription", async (req, res) => {
 });
 
 // Create/update subscription manually (admin/test) – expects { companyId, planId, smsCredits, durationMonths, status }
+
 app.post("/api/subscription", async (req, res) => {
   try {
     if (!firestoreEnabled) {
@@ -1417,69 +1418,30 @@ app.post("/api/subscription", async (req, res) => {
       req.query.companyId ||
       null;
 
-    // If caller provided an Authorization: Bearer <Firebase ID token>, verify
-    // it and derive the uid -> company mapping server-side. This enables the
-    // frontend to POST a subscription without relying on client-side
-    // localStorage-provided companyId.
+    // --- DEBUG LOGGING ---
+    console.log("[api:subscription] Incoming POST /api/subscription");
+    console.log("Body:", req.body);
+    console.log("Headers:", req.headers);
+    console.log("Derived companyId (pre-token):", companyId);
+    console.log("Derived planId (pre-logic):", planId);
+
+    // If caller provided an Authorization: Bearer <Firebase ID token>, verify and always use UID as companyId
     try {
       const authz =
         req.headers.authorization || req.headers.Authorization || "";
-      if (
-        !companyId &&
-        authz &&
-        String(authz).startsWith("Bearer ") &&
-        firebaseAdmin
-      ) {
+      if (authz && String(authz).startsWith("Bearer ") && firebaseAdmin) {
         const idToken = String(authz).slice(7).trim();
         if (idToken) {
           try {
             const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
             const uid = decoded?.uid || decoded?.sub;
             if (uid) {
-              // Prefer new DB mapping (dbV2.getUserById) when available
-              try {
-                if (dbV2 && typeof dbV2.getUserById === "function") {
-                  const userRec = await dbV2.getUserById(uid);
-                  if (userRec && userRec.companyId) {
-                    companyId = userRec.companyId;
-                    console.log(
-                      `[api:subscription] Derived companyId ${companyId} from idToken (uid=${uid})`
-                    );
-                  }
-                }
-              } catch (e) {
-                console.warn(
-                  "[api:subscription] dbV2.getUserById failed:",
-                  e?.message || e
-                );
-              }
-
-              // Fallback: search legacy clients collection by auth_uid
-              if (!companyId) {
-                try {
-                  const clientsRef = firebaseAdmin
-                    .firestore()
-                    .collection("clients");
-                  const q = clientsRef
-                    .where("auth_uid", "==", String(uid))
-                    .limit(1);
-                  const searchSnap = await q.get();
-                  if (!searchSnap.empty) {
-                    companyId = searchSnap.docs[0].id;
-                    console.log(
-                      `[api:subscription] Derived companyId ${companyId} from auth uid ${uid}`
-                    );
-                  }
-                } catch (e) {
-                  console.warn(
-                    "[api:subscription] Failed to derive companyId from auth uid:",
-                    e?.message || e
-                  );
-                }
-              }
+              companyId = uid;
+              console.log(
+                `[api:subscription] Using UID from ID token as companyId: ${companyId}`
+              );
             }
           } catch (tokErr) {
-            // Token verification failed - log and continue to other fallbacks
             console.warn(
               "[api:subscription] ID token verify failed:",
               tokErr?.message || tokErr
@@ -1549,8 +1511,19 @@ app.post("/api/subscription", async (req, res) => {
       );
     }
 
+    // Final debug log before error
     if (!companyId || !planId) {
-      return res.status(400).json({ error: "companyId & planId required" });
+      console.error("[api:subscription] ERROR: Missing companyId or planId");
+      console.error("companyId:", companyId, "planId:", planId);
+      return res.status(400).json({
+        error: "companyId & planId required",
+        debug: {
+          companyId,
+          planId,
+          body: req.body,
+          headers: req.headers,
+        },
+      });
     }
     const firestore = firebaseAdmin.firestore();
     const ref = firestore
