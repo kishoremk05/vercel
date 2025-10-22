@@ -459,31 +459,14 @@ const PaymentSuccessPage: React.FC = () => {
         try {
           const authUid = currentUser?.uid || null;
 
-          // Build a canonical profile object to save
+          // Build a minimal profile object: only planId, planName, status
           const profilePayload: any = {
             planId: canonicalPlanId || effectivePlanId || plan.name,
             planName: plan.name,
             status: payload.status || "active",
-            activatedAt: Timestamp.now(),
+            // Optionally keep updatedAt for UI freshness
             updatedAt: Timestamp.now(),
           };
-          // Only include smsCredits/remainingCredits when we have a positive
-          // value. This prevents the client from writing an explicit 0
-          // (which may be transient) and relies on the server/webhook to
-          // populate canonical credits when appropriate.
-          const smsCreditsNumber = Number(payload.smsCredits || 0);
-          if (Number.isFinite(smsCreditsNumber) && smsCreditsNumber > 0) {
-            profilePayload.smsCredits = smsCreditsNumber;
-            profilePayload.remainingCredits = smsCreditsNumber;
-          }
-          if (payload.durationMonths && Number(payload.durationMonths) > 0) {
-            const months = Number(payload.durationMonths || 1);
-            const expiry = new Date();
-            expiry.setMonth(expiry.getMonth() + months);
-            profilePayload.expiryAt = Timestamp.fromDate(expiry);
-          }
-          if (payload.sessionId)
-            profilePayload.paymentSessionId = payload.sessionId;
 
           // Ensure an auth-UID-owned client document exists and write the
           // profile there so the signed-in user can immediately see the
