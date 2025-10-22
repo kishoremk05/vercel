@@ -1073,10 +1073,16 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                 {(() => {
                   const effective =
                     displaySubscription || subscriptionData || null;
+                  const planSource = effective?.planSource;
                   return (
                     <span className="text-xs text-indigo-700 font-semibold bg-indigo-100 border border-indigo-200 px-4 py-1 rounded-full mb-2">
                       Subscription:{" "}
                       {effective?.planName || user.subscription || "Free"}
+                      {planSource && (
+                        <span className="ml-2 text-xs text-gray-500">
+                          (source: {planSource})
+                        </span>
+                      )}
                     </span>
                   );
                 })()}

@@ -53,8 +53,10 @@ const PaymentSuccessPage: React.FC = () => {
         const urlParams = new URLSearchParams(window.location.search);
         // Try to get planId from URL, then fallback to localStorage
         let planId = urlParams.get("plan") || undefined;
+        let planSource = "url";
         if (!planId) {
           planId = localStorage.getItem("pendingPlan") || undefined;
+          if (planId) planSource = "localStorage";
         }
         const sessionId =
           urlParams.get("sessionId") ||
@@ -87,6 +89,7 @@ const PaymentSuccessPage: React.FC = () => {
             months: plan.months,
             planId,
           });
+          // Also store the plan source in Firestore for debug
           // Write to Firestore
           try {
             const db = getFirebaseDb();
@@ -100,6 +103,7 @@ const PaymentSuccessPage: React.FC = () => {
             const profilePayload: any = {
               planId: planId,
               planName: plan.name,
+              planSource: planSource, // debug: url or localStorage
               status: "active",
               smsCredits: plan.sms,
               remainingCredits: plan.sms,
