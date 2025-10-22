@@ -244,23 +244,23 @@ const PaymentSuccessPage: React.FC = () => {
                 smsCredits: found.smsCredits || found.remainingCredits || 0,
               });
             } catch {}
-            // No need to persist companyId in localStorage; always use currentUser.uid
-            // If the canonical subscription already contains a planId and we
-            // have a companyId, there's nothing further for the client to do:
-            // the server/webhook already wrote the canonical doc and the
-            // Profile page will display it. Skip the POST to avoid 400s.
+            // If the canonical subscription already contains a planId and we have a companyId,
+            // there's nothing further for the client to do: the server/webhook already wrote the canonical doc.
+            // Skip the POST and do NOT write to Firestore from the client.
             if (
               (found.planId || found.plan || found.planName) &&
               (companyIdForPayload || found.companyId)
             ) {
               console.log(
-                "[PaymentSuccess] Canonical subscription already present; will skip server POST but still write to client profile (auth uid)."
+                "[PaymentSuccess] Canonical subscription already present; skipping all client writes and POSTs."
               );
               pushDebug(
-                "Server already has canonical subscription; skipping POST",
+                "Server already has canonical subscription; skipping POST and client Firestore write",
                 found
               );
               skipServerPost = true;
+              // Return early: do not write to Firestore or POST to server
+              return;
             }
           } else {
             console.warn(
