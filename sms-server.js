@@ -338,6 +338,112 @@ try {
       .status(200)
       .json({ ready: firestoreEnabled ? "firestore" : "no-firestore" })
   );
+
+  // --- Account Deletion Endpoint ---
+  // Securely deletes all Firestore data for a user/company (clients/{uid}, subcollections, and optionally users/companies)
+  app.delete("/api/account/delete", async (req, res) => {
+    try {
+      if (!firestoreEnabled) {
+        return res
+          .status(503)
+          .json({ success: false, error: "firestore-disabled" });
+      }
+      const { companyId, auth_uid, userEmail } = req.body || {};
+      // Accept companyId/auth_uid from headers as fallback
+      const cid =
+        companyId ||
+        req.headers["x-company-id"] ||
+        req.headers["x-client-id"] ||
+        null;
+      const uid = auth_uid || req.headers["x-auth-uid"] || null;
+      // Optionally verify Firebase ID token for security
+      let verifiedUid = null;
+      try {
+        const authz =
+          req.headers.authorization || req.headers.Authorization || "";
+        if (authz && String(authz).startsWith("Bearer ") && firebaseAdmin) {
+          const idToken = String(authz).slice(7).trim();
+          if (idToken) {
+            const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+            verifiedUid = decoded?.uid || decoded?.sub || null;
+          }
+        }
+      } catch (e) {
+        // Ignore token errors, but prefer verifiedUid if available
+      }
+      // Use verifiedUid if present
+      const targetUid = verifiedUid || uid;
+      const firestore = firebaseAdmin.firestore();
+      // Helper to recursively delete all subcollections
+      async function deleteCollectionRecursive(ref) {
+        const collections = await ref.listCollections();
+        for (const col of collections) {
+          const snap = await col.get();
+          for (const doc of snap.docs) {
+            await deleteCollectionRecursive(doc.ref);
+            await doc.ref.delete();
+          }
+        }
+      }
+      // Delete /clients/{companyId or uid}
+      let deleted = false;
+      let clientId = cid || targetUid;
+      if (!clientId && userEmail) {
+        // Try to find client by email
+        try {
+          const clientsRef = firestore.collection("clients");
+          const q = await clientsRef
+            .where("email", "==", String(userEmail))
+            .limit(1)
+            .get();
+          if (!q.empty) clientId = q.docs[0].id;
+        } catch {}
+      }
+      if (clientId) {
+        const clientRef = firestore.collection("clients").doc(String(clientId));
+        await deleteCollectionRecursive(clientRef);
+        await clientRef.delete();
+        deleted = true;
+      }
+      // Optionally: delete from /users/{uid} and /companies/{companyId}
+      if (targetUid) {
+        try {
+          const userRef = firestore.collection("users").doc(String(targetUid));
+          await deleteCollectionRecursive(userRef);
+          await userRef.delete();
+        } catch {}
+      }
+      if (clientId) {
+        try {
+          const companyRef = firestore
+            .collection("companies")
+            .doc(String(clientId));
+          await deleteCollectionRecursive(companyRef);
+          await companyRef.delete();
+        } catch {}
+      }
+      // Optionally: delete all feedback/messages for this companyId
+      // (Uncomment if you want to fully wipe all related data)
+      // try {
+      //   const feedbackSnap = await firestore.collection("feedback").where("companyId", "==", String(clientId)).get();
+      //   for (const doc of feedbackSnap.docs) await doc.ref.delete();
+      //   const msgSnap = await firestore.collection("messages").where("companyId", "==", String(clientId)).get();
+      //   for (const doc of msgSnap.docs) await doc.ref.delete();
+      // } catch {}
+      if (deleted) {
+        return res.json({ success: true });
+      } else {
+        return res
+          .status(404)
+          .json({ success: false, error: "No client/user found to delete" });
+      }
+    } catch (e) {
+      console.error("[api/account/delete] error", e);
+      return res
+        .status(500)
+        .json({ success: false, error: e.message || "delete-failed" });
+    }
+  });
 } catch (e) {
   console.error("[firebase] Root init failed:", e.message || e);
   // Fallback minimal express app so server can still start
@@ -2040,13 +2146,11 @@ app.post("/api/payments/create-session", async (req, res) => {
                 console.log(
                   `[Dodo Payment] ownership mismatch: callerCompany=${callerCompanyId} requested=${companyId}`
                 );
-                return res
-                  .status(403)
-                  .json({
-                    success: false,
-                    error:
-                      "Ownership mismatch: cannot create session for another company",
-                  });
+                return res.status(403).json({
+                  success: false,
+                  error:
+                    "Ownership mismatch: cannot create session for another company",
+                });
               }
 
               // If companyId was not provided, derive it from token mapping so
