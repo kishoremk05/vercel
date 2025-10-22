@@ -14,9 +14,16 @@ const PaymentSuccessPage: React.FC = () => {
     months: number;
     planId: string;
   } | null>(null);
+  const [serverPlan, setServerPlan] = useState<{
+    plan?: string;
+    price?: number;
+    companyId?: string;
+    userEmail?: string;
+  } | null>(null);
   const [countdown, setCountdown] = useState(5);
 
   useEffect(() => {
+    // Save selected plan to Firestore and set planInfo
     const saveSubscription = async () => {
       try {
         initializeFirebase();
@@ -115,6 +122,26 @@ const PaymentSuccessPage: React.FC = () => {
       }
     };
     const savePromise = saveSubscription();
+
+    // Fetch server-side subscription plan data (if available)
+    const urlParams = new URLSearchParams(window.location.search);
+    const companyId = urlParams.get("companyId");
+    if (companyId) {
+      fetch(`/api/subscription?companyId=${companyId}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && (data.plan || data.price)) {
+            setServerPlan({
+              plan: data.plan,
+              price: data.price,
+              companyId: data.companyId,
+              userEmail: data.userEmail,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+
     // Start the redirect countdown once the save completes or after a short timeout
     const MAX_WAIT_MS = 5000;
     let cleanupTimer: (() => void) | null = null;
@@ -251,6 +278,28 @@ const PaymentSuccessPage: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span>✅ Dashboard ready</span>
+                </div>
+              </div>
+            )}
+
+            {/* Server-side plan details */}
+            {serverPlan && (
+              <div className="border-t border-green-200 pt-3 mt-3 space-y-2 text-sm text-green-700">
+                <div className="flex justify-between">
+                  <span>🔗 Server Plan:</span>
+                  <span className="font-semibold">{serverPlan.plan}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>💲 Price:</span>
+                  <span className="font-semibold">{serverPlan.price}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>🏢 Company ID:</span>
+                  <span className="font-semibold">{serverPlan.companyId}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>📧 User Email:</span>
+                  <span className="font-semibold">{serverPlan.userEmail}</span>
                 </div>
               </div>
             )}
