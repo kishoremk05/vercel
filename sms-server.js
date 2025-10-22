@@ -18,6 +18,11 @@ import crypto from "crypto";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// --- EXPRESS APP SETUP ---
+let app = global.__APP_INSTANCE__ || express();
+global.__APP_INSTANCE__ = app; // safeguard against double import in dev with ESM
+app.use(express.json()); // <-- Ensure JSON body parsing for all routes
+
 // ------------------------------------------------------------
 // Twilio Global Client (optional env-based)
 // ------------------------------------------------------------
@@ -91,7 +96,6 @@ let db = null;
 let dbV2 = null;
 let firestoreEnabled = false;
 let firebaseProjectId = null;
-let app; // express app reference
 
 try {
   const adminModule = await import("firebase-admin");
