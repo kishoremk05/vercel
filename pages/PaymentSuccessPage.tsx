@@ -56,11 +56,13 @@ const PaymentSuccessPage: React.FC = () => {
         const currentUser = auth.currentUser;
         if (!currentUser) return;
         const urlParams = new URLSearchParams(window.location.search);
-        // Support companyId and planId in URL
+        // Support clientId/companyId and planId in URL
         let planId =
           urlParams.get("plan") || urlParams.get("planId") || undefined;
         let planSource = "url";
-        let companyId = urlParams.get("companyId") || undefined;
+        // Accept both clientId and companyId for flexibility
+        let clientId =
+          urlParams.get("clientId") || urlParams.get("companyId") || undefined;
         if (!planId) {
           planId = localStorage.getItem("pendingPlan") || undefined;
           if (planId) planSource = "localStorage";
@@ -75,11 +77,11 @@ const PaymentSuccessPage: React.FC = () => {
           urlParams.get("session") ||
           undefined;
 
-        // If both companyId and planId are present, fetch canonical plan from server
-        if (companyId && planId) {
+        // If both clientId/companyId and planId are present, fetch canonical plan from server
+        if (clientId && planId) {
           try {
             const resp = await fetch(
-              `/api/subscription?companyId=${encodeURIComponent(companyId)}`
+              `/api/subscription?companyId=${encodeURIComponent(clientId)}`
             );
             if (resp.ok) {
               const j = await resp.json();
@@ -103,7 +105,7 @@ const PaymentSuccessPage: React.FC = () => {
                   matchedPlan.planId ||
                   matchedPlan.plan ||
                   matchedPlan.planName;
-                planSource = "server-companyId";
+                planSource = "server-clientId";
                 const planMapping: Record<
                   string,
                   { name: string; sms: number; months: number }
@@ -115,6 +117,7 @@ const PaymentSuccessPage: React.FC = () => {
                   pro_6m: { name: "Professional", sms: 900, months: 6 },
                   halfyearly: { name: "Professional", sms: 900, months: 6 },
                 };
+                // Always use planId from URL for plan details
                 const plan = planMapping[planId] || {
                   name:
                     matchedPlan.planName ||
@@ -132,20 +135,20 @@ const PaymentSuccessPage: React.FC = () => {
                   planId: planId,
                 });
                 setPlanDebug({ source: planSource, value: planId });
-                // Write to Firestore
+                // Write to Firestore using clientId from URL if present, else currentUser.uid
                 try {
                   const db = getFirebaseDb();
                   const profileRef = doc(
                     db,
                     "clients",
-                    currentUser.uid,
+                    clientId || currentUser.uid,
                     "profile",
                     "main"
                   );
                   const profilePayload: any = {
                     planId: planId,
                     planName: plan.name,
-                    planSource: planSource, // debug: server-companyId
+                    planSource: planSource, // debug: server-clientId
                     status: "active",
                     smsCredits: plan.sms,
                     remainingCredits: plan.sms,
@@ -165,7 +168,7 @@ const PaymentSuccessPage: React.FC = () => {
                     window.localStorage.setItem(
                       "profile_subscription_present",
                       JSON.stringify({
-                        companyId: currentUser.uid,
+                        companyId: clientId || currentUser.uid,
                         ts: Date.now(),
                       })
                     );
@@ -297,13 +300,13 @@ const PaymentSuccessPage: React.FC = () => {
               months: plan.months,
               planId,
             });
-            // Write to Firestore
+            // Write to Firestore using clientId from URL if present, else currentUser.uid
             try {
               const db = getFirebaseDb();
               const profileRef = doc(
                 db,
                 "clients",
-                currentUser.uid,
+                clientId || currentUser.uid,
                 "profile",
                 "main"
               );
@@ -329,7 +332,10 @@ const PaymentSuccessPage: React.FC = () => {
               try {
                 window.localStorage.setItem(
                   "profile_subscription_present",
-                  JSON.stringify({ companyId: currentUser.uid, ts: Date.now() })
+                  JSON.stringify({
+                    companyId: clientId || currentUser.uid,
+                    ts: Date.now(),
+                  })
                 );
               } catch {}
               try {
