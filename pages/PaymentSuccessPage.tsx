@@ -55,7 +55,10 @@ const PaymentSuccessPage: React.FC = () => {
 
         const currentUser = auth.currentUser;
         const urlParams = new URLSearchParams(window.location.search);
-        const planIdParam = urlParams.get("plan") || urlParams.get("planId");
+        const planIdParam =
+          urlParams.get("plan") ||
+          urlParams.get("planId") ||
+          urlParams.get("plan_id");
         const pending = localStorage.getItem("pendingPlan");
         let planId =
           (planIdParam as string) || (pending as string) || undefined;
@@ -65,7 +68,10 @@ const PaymentSuccessPage: React.FC = () => {
           ? "localStorage"
           : "unknown";
         const clientId =
-          urlParams.get("clientId") || urlParams.get("companyId") || undefined;
+          urlParams.get("clientId") ||
+          urlParams.get("companyId") ||
+          urlParams.get("client_id") ||
+          undefined;
         const sessionId =
           urlParams.get("sessionId") ||
           urlParams.get("subscription_id") ||

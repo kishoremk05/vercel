@@ -2181,7 +2181,12 @@ app.post("/api/payments/create-session", async (req, res) => {
       process.env.FRONTEND_URL ||
       process.env.VITE_API_BASE ||
       "https://vercel-swart-chi-29.vercel.app";
-    const successUrl = `${baseUrl.replace(/\/$/, "")}/payment-success`;
+    const successUrl = `${baseUrl.replace(
+      /\/$/,
+      ""
+    )}/payment-success?client_id=${encodeURIComponent(
+      companyId || "unknown"
+    )}&plan_id=${encodeURIComponent(plan)}`;
 
     // Subscription payload matching your working server.js
     const payload = {
