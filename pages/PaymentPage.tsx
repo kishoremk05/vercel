@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   waitForAuthToken,
   getFirebaseDb,
@@ -89,36 +89,23 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     "server" | "local" | null
   >(null);
 
+  // --- Subscription check that re-runs on auth state changes ---
+  const authListenerRef = useRef<any>(null);
   useEffect(() => {
-    (async () => {
+    let unsub: any = null;
+    const checkSubscription = async (user: any) => {
       try {
-        // Always fetch latest profile from Firestore after login
-        const auth = getFirebaseAuth();
-        const db = getFirebaseDb();
-        let currentUser = auth.currentUser;
-        if (!currentUser) {
-          await new Promise((resolve) => {
-            const unsub = auth.onAuthStateChanged((user) => {
-              if (user) {
-                currentUser = user;
-                unsub();
-                resolve(null);
-              }
-            });
-            setTimeout(() => {
-              unsub();
-              resolve(null);
-            }, 5000);
-          });
+        if (!user) {
+          setAlreadyPaid(false);
+          setAlreadyPaidSource(null);
+          return;
         }
-        if (!currentUser) return;
-        const companyId = localStorage.getItem("companyId") || currentUser.uid;
-        // Fetch profile from Firestore
+        const db = getFirebaseDb();
+        const companyId = localStorage.getItem("companyId") || user.uid;
         const profileRef = doc(db, "clients", companyId, "profile", "main");
         const snap = await getDoc(profileRef);
         if (snap.exists()) {
           const data = snap.data();
-          // Save to localStorage for fast reloads
           try {
             localStorage.setItem(
               "subscription",
@@ -135,13 +122,29 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
             return;
           }
         }
-        // Fallback to previous local checks if needed
         setAlreadyPaid(false);
         setAlreadyPaidSource(null);
       } catch (e) {
         console.warn("[Payment] Profile fetch failed", e);
       }
-    })();
+    };
+
+    const auth = getFirebaseAuth();
+    // Initial check
+    checkSubscription(auth.currentUser);
+    // Listen for auth state changes
+    unsub = auth.onAuthStateChanged((user) => {
+      checkSubscription(user);
+    });
+    authListenerRef.current = unsub;
+    return () => {
+      if (authListenerRef.current) {
+        try {
+          authListenerRef.current();
+        } catch {}
+        authListenerRef.current = null;
+      }
+    };
   }, []);
 
   // Redirect to dashboard if alreadyPaid from server
