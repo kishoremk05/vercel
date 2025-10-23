@@ -6,6 +6,7 @@ import {
   getFirebaseDb,
 } from "../lib/firebaseClient";
 import { fetchClientProfile } from "../lib/dashboardFirebase";
+import { waitForAuthToken } from "../lib/firebaseClient";
 
 const PaymentSuccessPage: React.FC = () => {
   const [planInfo, setPlanInfo] = useState<{
@@ -123,11 +124,174 @@ const PaymentSuccessPage: React.FC = () => {
             }
             if (sessionId) profilePayload.paymentSessionId = sessionId;
             await setDoc(profileRef, profilePayload, { merge: true });
+            // Notify client that subscription was updated so ProfilePage refreshes
+            try {
+              window.localStorage.setItem(
+                "profile_subscription_present",
+                JSON.stringify({ companyId: currentUser.uid, ts: Date.now() })
+              );
+            } catch {}
+            try {
+              window.dispatchEvent(new Event("subscription:updated"));
+            } catch {}
           } catch (e) {
             console.warn(
               "[PaymentSuccess] Failed to write selected plan to Firestore profile:",
               e
             );
+          }
+        }
+
+        // If we have a dodo session/subscription id, attempt to call the server
+        // claim endpoint so the server webhook/fallback logic can reconcile and
+        // persist the canonical subscription (clients/{companyId}/profile/main).
+        if (sessionId) {
+          try {
+            // Try to get an ID token to allow the server to derive ownership
+            let token: string | null = null;
+            try {
+              token = await waitForAuthToken(5000);
+            } catch {}
+
+            const claimHeaders: any = { "Content-Type": "application/json" };
+            if (token) claimHeaders.Authorization = `Bearer ${token}`;
+
+            // POST /api/subscription/claim { sessionId }
+            await fetch(`/api/subscription/claim`, {
+              method: "POST",
+              headers: claimHeaders,
+              body: JSON.stringify({ sessionId }),
+            }).catch(() => null);
+
+            // After attempting claim, notify UI to refresh subscription info
+            try {
+              window.dispatchEvent(new Event("subscription:updated"));
+            } catch {}
+
+            // Poll the server subscription endpoint for the sessionId (or companyId)
+            // This helps when webhook processing is slightly delayed.
+            const pollForSubscription = async (
+              sid: string | undefined,
+              cid?: string
+            ) => {
+              if (!sid && !cid) return null;
+              const base = ""; // relative URL works with same origin
+              const timeoutMs = 15000; // total wait time
+              const intervalMs = 1000;
+              const maxTries = Math.ceil(timeoutMs / intervalMs);
+              let tries = 0;
+              while (tries < maxTries) {
+                try {
+                  const q = sid
+                    ? `/api/subscription?sessionId=${encodeURIComponent(sid)}`
+                    : cid
+                    ? `/api/subscription?companyId=${encodeURIComponent(cid)}`
+                    : ``;
+                  const resp = await fetch(q).catch(() => null as any);
+                  if (resp && resp.ok) {
+                    const j = await resp.json().catch(() => ({} as any));
+                    const sub =
+                      j && (j.subscription || j.session || j.data || null);
+                    // Some endpoints return { success:true, subscription: {...} }
+                    if (
+                      j &&
+                      (j.subscription || (j.success && j.subscription))
+                    ) {
+                      const s = j.subscription;
+                      // update serverPlan and planInfo to display immediately
+                      setServerPlan({
+                        plan: s.planName || s.planId || s.plan || null,
+                        price: s.price || s.amount || null,
+                        companyId: j.companyId || s.companyId || cid || null,
+                        userEmail: j.userEmail || s.userEmail || null,
+                      });
+                      try {
+                        // merge into planInfo if not already set
+                        if (!planInfo || !planInfo.planId) {
+                          setPlanInfo((prev) => ({
+                            planName:
+                              s.planName ||
+                              s.planId ||
+                              (prev && prev.planName) ||
+                              "",
+                            smsCredits:
+                              s.smsCredits ||
+                              s.remainingCredits ||
+                              (prev && prev.smsCredits) ||
+                              0,
+                            months: s.durationMonths || prev?.months || 1,
+                            planId: s.planId || s.plan || prev?.planId || "",
+                          }));
+                        }
+                      } catch {}
+                      try {
+                        localStorage.setItem(
+                          "profile_subscription_present",
+                          JSON.stringify({
+                            companyId:
+                              j.companyId || s.companyId || cid || null,
+                            ts: Date.now(),
+                          })
+                        );
+                      } catch {}
+                      try {
+                        window.dispatchEvent(new Event("subscription:updated"));
+                      } catch {}
+                      return s;
+                    }
+                    // Some servers return subscription directly at top-level
+                    if (j && (j.plan || j.planId || j.planName)) {
+                      const s = j;
+                      setServerPlan({
+                        plan: s.planName || s.planId || s.plan || null,
+                        price: s.price || s.amount || null,
+                        companyId: s.companyId || cid || null,
+                        userEmail: s.userEmail || null,
+                      });
+                      try {
+                        setPlanInfo((prev) => ({
+                          planName:
+                            s.planName ||
+                            s.planId ||
+                            (prev && prev.planName) ||
+                            "",
+                          smsCredits:
+                            s.smsCredits ||
+                            s.remainingCredits ||
+                            (prev && prev.smsCredits) ||
+                            0,
+                          months: s.durationMonths || prev?.months || 1,
+                          planId: s.planId || s.plan || prev?.planId || "",
+                        }));
+                      } catch {}
+                      try {
+                        localStorage.setItem(
+                          "profile_subscription_present",
+                          JSON.stringify({
+                            companyId: s.companyId || cid || null,
+                            ts: Date.now(),
+                          })
+                        );
+                      } catch {}
+                      try {
+                        window.dispatchEvent(new Event("subscription:updated"));
+                      } catch {}
+                      return s;
+                    }
+                  }
+                } catch (e) {
+                  // ignore and retry
+                }
+                tries++;
+                await new Promise((r) => setTimeout(r, intervalMs));
+              }
+              return null;
+            };
+
+            // Start polling but don't block the UI flow
+            pollForSubscription(sessionId, currentUser.uid).catch(() => null);
+          } catch (e) {
+            // non-fatal
           }
         }
       } catch (error) {
