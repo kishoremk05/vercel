@@ -33,41 +33,39 @@ const PaymentSuccessPage: React.FC = () => {
       try {
         initializeFirebase();
         const auth = getFirebaseAuth();
-        // Wait for auth
-        const waitForAuth = (authObj: any, timeoutMs = 15000) =>
-          new Promise<void>((resolve) => {
-            if (authObj.currentUser) return resolve();
-            const unsubscribe = authObj.onAuthStateChanged((user: any) => {
-              if (user) {
-                try {
-                  unsubscribe();
-                } catch {}
-                return resolve();
-              }
-            });
-            setTimeout(() => {
+
+        // wait for auth readiness (but do not block forever)
+        await new Promise<void>((resolve) => {
+          if (auth.currentUser) return resolve();
+          const unsub = auth.onAuthStateChanged((u: any) => {
+            if (u) {
               try {
-                unsubscribe();
+                unsub();
               } catch {}
               return resolve();
-            }, timeoutMs);
+            }
           });
-        await waitForAuth(auth, 10000);
+          setTimeout(() => {
+            try {
+              unsub();
+            } catch {}
+            resolve();
+          }, 10000);
+        });
+
         const currentUser = auth.currentUser;
-        if (!currentUser) return;
         const urlParams = new URLSearchParams(window.location.search);
-        // Support clientId/companyId and planId in URL
+        const planIdParam = urlParams.get("plan") || urlParams.get("planId");
+        const pending = localStorage.getItem("pendingPlan");
         let planId =
-          urlParams.get("plan") || urlParams.get("planId") || undefined;
-        let planSource = "url";
-        // Accept both clientId and companyId for flexibility
-        let clientId =
+          (planIdParam as string) || (pending as string) || undefined;
+        let planSource = planIdParam
+          ? "url"
+          : pending
+          ? "localStorage"
+          : "unknown";
+        const clientId =
           urlParams.get("clientId") || urlParams.get("companyId") || undefined;
-        if (!planId) {
-          planId = localStorage.getItem("pendingPlan") || undefined;
-          if (planId) planSource = "localStorage";
-        }
-        // Always get sessionId/subscription_id from URL
         const sessionId =
           urlParams.get("sessionId") ||
           urlParams.get("subscription_id") ||
@@ -77,243 +75,74 @@ const PaymentSuccessPage: React.FC = () => {
           urlParams.get("session") ||
           undefined;
 
-        // If both clientId/companyId and planId are present, fetch canonical plan from server
-        if (clientId && planId) {
-          try {
-            const resp = await fetch(
-              `/api/subscription?companyId=${encodeURIComponent(clientId)}`
-            );
-            if (resp.ok) {
-              const j = await resp.json();
-              const s = j.subscription || j.session || j.data || j;
-              // Find the plan in the response that matches planId, or just use the returned plan
-              let matchedPlan = s;
-              if (Array.isArray(s) && planId) {
-                matchedPlan =
-                  s.find(
-                    (p: any) =>
-                      p.planId === planId ||
-                      p.plan === planId ||
-                      p.planName === planId
-                  ) || s[0];
-              }
-              if (
-                matchedPlan &&
-                (matchedPlan.planId || matchedPlan.planName || matchedPlan.plan)
-              ) {
-                planId =
-                  matchedPlan.planId ||
-                  matchedPlan.plan ||
-                  matchedPlan.planName;
-                planSource = "server-clientId";
-                const planMapping: Record<
-                  string,
-                  { name: string; sms: number; months: number }
-                > = {
-                  starter_1m: { name: "Starter", sms: 250, months: 1 },
-                  monthly: { name: "Starter", sms: 250, months: 1 },
-                  growth_3m: { name: "Growth", sms: 600, months: 3 },
-                  quarterly: { name: "Growth", sms: 600, months: 3 },
-                  pro_6m: { name: "Professional", sms: 900, months: 6 },
-                  halfyearly: { name: "Professional", sms: 900, months: 6 },
-                };
-                // Always use planId from URL for plan details
-                const plan = planMapping[planId] || {
-                  name:
-                    matchedPlan.planName ||
-                    matchedPlan.planId ||
-                    matchedPlan.plan ||
-                    "",
-                  sms:
-                    matchedPlan.smsCredits || matchedPlan.remainingCredits || 0,
-                  months: matchedPlan.durationMonths || 1,
-                };
-                setPlanInfo({
-                  planName: plan.name,
-                  smsCredits: plan.sms,
-                  months: plan.months,
-                  planId: planId,
-                });
-                setPlanDebug({ source: planSource, value: planId });
-                // Write to Firestore using clientId from URL if present, else currentUser.uid
-                try {
-                  const db = getFirebaseDb();
-                  const profileRef = doc(
-                    db,
-                    "clients",
-                    clientId || currentUser.uid,
-                    "profile",
-                    "main"
-                  );
-                  const profilePayload: any = {
-                    planId: planId,
-                    planName: plan.name,
-                    planSource: planSource, // debug: server-clientId
-                    status: "active",
-                    smsCredits: plan.sms,
-                    remainingCredits: plan.sms,
-                    activatedAt: Timestamp.now(),
-                    updatedAt: Timestamp.now(),
-                  };
-                  if (plan.months && Number(plan.months) > 0) {
-                    const months = Number(plan.months);
-                    const expiry = new Date();
-                    expiry.setMonth(expiry.getMonth() + months);
-                    profilePayload.expiryAt = Timestamp.fromDate(expiry);
-                  }
-                  if (sessionId) profilePayload.paymentSessionId = sessionId;
-                  await setDoc(profileRef, profilePayload, { merge: true });
-                  // Notify client that subscription was updated so ProfilePage refreshes
-                  try {
-                    window.localStorage.setItem(
-                      "profile_subscription_present",
-                      JSON.stringify({
-                        companyId: clientId || currentUser.uid,
-                        ts: Date.now(),
-                      })
-                    );
-                  } catch {}
-                  try {
-                    window.dispatchEvent(new Event("subscription:updated"));
-                  } catch {}
-                } catch (e) {
-                  console.warn(
-                    "[PaymentSuccess] Failed to write fetched plan to Firestore profile:",
-                    e
-                  );
-                }
-              }
-            }
-          } catch (e) {
-            // ignore
-          }
-        } else if (!planId && sessionId) {
-          // If planId is missing but sessionId is present, fetch plan details from server
-          try {
-            const resp = await fetch(
-              `/api/subscription?sessionId=${encodeURIComponent(sessionId)}`
-            );
-            if (resp.ok) {
-              const j = await resp.json();
-              const s = j.subscription || j.session || j.data || j;
-              if (s && (s.planId || s.planName || s.plan)) {
-                planId = s.planId || s.plan || s.planName;
-                planSource = "server";
-                // Map planId to plan details
-                const planMapping: Record<
-                  string,
-                  { name: string; sms: number; months: number }
-                > = {
-                  starter_1m: { name: "Starter", sms: 250, months: 1 },
-                  monthly: { name: "Starter", sms: 250, months: 1 },
-                  growth_3m: { name: "Growth", sms: 600, months: 3 },
-                  quarterly: { name: "Growth", sms: 600, months: 3 },
-                  pro_6m: { name: "Professional", sms: 900, months: 6 },
-                  halfyearly: { name: "Professional", sms: 900, months: 6 },
-                };
-                const plan = planMapping[planId] || {
-                  name: s.planName || s.planId || s.plan || "",
-                  sms: s.smsCredits || s.remainingCredits || 0,
-                  months: s.durationMonths || 1,
-                };
-                setPlanInfo({
-                  planName: plan.name,
-                  smsCredits: plan.sms,
-                  months: plan.months,
-                  planId: planId,
-                });
-                setPlanDebug({ source: planSource, value: planId });
-                // Write to Firestore
-                try {
-                  const db = getFirebaseDb();
-                  const profileRef = doc(
-                    db,
-                    "clients",
-                    currentUser.uid,
-                    "profile",
-                    "main"
-                  );
-                  const profilePayload: any = {
-                    planId: planId,
-                    planName: plan.name,
-                    planSource: planSource, // debug: server
-                    status: "active",
-                    smsCredits: plan.sms,
-                    remainingCredits: plan.sms,
-                    activatedAt: Timestamp.now(),
-                    updatedAt: Timestamp.now(),
-                  };
-                  if (plan.months && Number(plan.months) > 0) {
-                    const months = Number(plan.months);
-                    const expiry = new Date();
-                    expiry.setMonth(expiry.getMonth() + months);
-                    profilePayload.expiryAt = Timestamp.fromDate(expiry);
-                  }
-                  if (sessionId) profilePayload.paymentSessionId = sessionId;
-                  await setDoc(profileRef, profilePayload, { merge: true });
-                  // Notify client that subscription was updated so ProfilePage refreshes
-                  try {
-                    window.localStorage.setItem(
-                      "profile_subscription_present",
-                      JSON.stringify({
-                        companyId: currentUser.uid,
-                        ts: Date.now(),
-                      })
-                    );
-                  } catch {}
-                  try {
-                    window.dispatchEvent(new Event("subscription:updated"));
-                  } catch {}
-                } catch (e) {
-                  console.warn(
-                    "[PaymentSuccess] Failed to write fetched plan to Firestore profile:",
-                    e
-                  );
-                }
-              }
-            }
-          } catch (e) {
-            // ignore
-          }
-        } else {
-          setPlanDebug({ source: planSource, value: planId });
-          if (planId) {
-            const planMapping: Record<
-              string,
-              { name: string; sms: number; months: number }
-            > = {
-              starter_1m: { name: "Starter", sms: 250, months: 1 },
-              monthly: { name: "Starter", sms: 250, months: 1 },
-              growth_3m: { name: "Growth", sms: 600, months: 3 },
-              quarterly: { name: "Growth", sms: 600, months: 3 },
-              pro_6m: { name: "Professional", sms: 900, months: 6 },
-              halfyearly: { name: "Professional", sms: 900, months: 6 },
-            };
-            const plan = planMapping[planId] || {
-              name: planId,
-              sms: 0,
-              months: 1,
-            };
-            setPlanInfo({
-              planName: plan.name,
-              smsCredits: plan.sms,
-              months: plan.months,
-              planId,
-            });
-            // Write to Firestore using clientId from URL if present, else currentUser.uid
+        const planMapping: Record<
+          string,
+          { name: string; sms: number; months: number }
+        > = {
+          starter_1m: { name: "Starter", sms: 250, months: 1 },
+          monthly: { name: "Starter", sms: 250, months: 1 },
+          growth_3m: { name: "Growth", sms: 600, months: 3 },
+          quarterly: { name: "Growth", sms: 600, months: 3 },
+          pro_6m: { name: "Professional", sms: 900, months: 6 },
+          halfyearly: { name: "Professional", sms: 900, months: 6 },
+        };
+
+        // Helper: poll server for subscription by sessionId
+        const pollForSubscription = async (sid?: string) => {
+          if (!sid) return null;
+          const timeoutMs = 15000;
+          const intervalMs = 1000;
+          const maxTries = Math.ceil(timeoutMs / intervalMs);
+          let tries = 0;
+          while (tries < maxTries) {
             try {
+              const q = `/api/subscription?sessionId=${encodeURIComponent(
+                sid
+              )}`;
+              const resp = await fetch(q).catch(() => null as any);
+              if (resp && resp.ok) {
+                const j = await resp.json().catch(() => ({} as any));
+                const s = j.subscription || j.session || j.data || j;
+                if (s && (s.planId || s.plan || s.planName || j.subscription)) {
+                  return s;
+                }
+              }
+            } catch {}
+            tries++;
+            await new Promise((r) => setTimeout(r, intervalMs));
+          }
+          return null;
+        };
+
+        // If we already know planId, show it and write to Firestore (if authenticated)
+        if (planId) {
+          const plan = planMapping[planId] || {
+            name: planId,
+            sms: 0,
+            months: 1,
+          };
+          setPlanInfo({
+            planName: plan.name,
+            smsCredits: plan.sms,
+            months: plan.months,
+            planId,
+          });
+          setPlanDebug({ source: planSource, value: planId });
+          if (currentUser) {
+            try {
+              const writeClientId = clientId || currentUser.uid;
               const db = getFirebaseDb();
               const profileRef = doc(
                 db,
                 "clients",
-                clientId || currentUser.uid,
+                writeClientId,
                 "profile",
                 "main"
               );
               const profilePayload: any = {
-                planId: planId,
+                planId,
                 planName: plan.name,
-                planSource: planSource, // debug: url or localStorage
+                planSource,
                 status: "active",
                 smsCredits: plan.sms,
                 remainingCredits: plan.sms,
@@ -328,14 +157,10 @@ const PaymentSuccessPage: React.FC = () => {
               }
               if (sessionId) profilePayload.paymentSessionId = sessionId;
               await setDoc(profileRef, profilePayload, { merge: true });
-              // Notify client that subscription was updated so ProfilePage refreshes
               try {
-                window.localStorage.setItem(
+                localStorage.setItem(
                   "profile_subscription_present",
-                  JSON.stringify({
-                    companyId: clientId || currentUser.uid,
-                    ts: Date.now(),
-                  })
+                  JSON.stringify({ companyId: writeClientId, ts: Date.now() })
                 );
               } catch {}
               try {
@@ -343,163 +168,119 @@ const PaymentSuccessPage: React.FC = () => {
               } catch {}
             } catch (e) {
               console.warn(
-                "[PaymentSuccess] Failed to write selected plan to Firestore profile:",
+                "[PaymentSuccess] Failed to write selected plan:",
                 e
               );
             }
+            return;
           }
+
+          // Not authenticated: persist pending plan and clientId so the app can
+          // complete the write after the user signs in (App auth listener will
+          // propagate and Profile page listens for subscription:updated).
+          try {
+            if (planId) localStorage.setItem("pendingPlan", planId);
+            if (clientId) localStorage.setItem("pendingClientId", clientId);
+          } catch {}
+          return;
         }
 
-        // If we have a dodo session/subscription id, attempt to call the server
-        // claim endpoint so the server webhook/fallback logic can reconcile and
-        // persist the canonical subscription (clients/{companyId}/profile/main).
-        if (sessionId) {
+        // If no planId but we have a sessionId, attempt to claim and poll the server for canonical subscription
+        if (!planId && sessionId) {
           try {
-            // Try to get an ID token to allow the server to derive ownership
             let token: string | null = null;
             try {
               token = await waitForAuthToken(5000);
             } catch {}
-
             const claimHeaders: any = { "Content-Type": "application/json" };
             if (token) claimHeaders.Authorization = `Bearer ${token}`;
-
-            // POST /api/subscription/claim { sessionId }
             await fetch(`/api/subscription/claim`, {
               method: "POST",
               headers: claimHeaders,
               body: JSON.stringify({ sessionId }),
             }).catch(() => null);
 
-            // After attempting claim, notify UI to refresh subscription info
-            try {
-              window.dispatchEvent(new Event("subscription:updated"));
-            } catch {}
-
-            // Poll the server subscription endpoint for the sessionId (or companyId)
-            // This helps when webhook processing is slightly delayed.
-            const pollForSubscription = async (
-              sid: string | undefined,
-              cid?: string
-            ) => {
-              if (!sid && !cid) return null;
-              const base = ""; // relative URL works with same origin
-              const timeoutMs = 15000; // total wait time
-              const intervalMs = 1000;
-              const maxTries = Math.ceil(timeoutMs / intervalMs);
-              let tries = 0;
-              while (tries < maxTries) {
-                try {
-                  const q = sid
-                    ? `/api/subscription?sessionId=${encodeURIComponent(sid)}`
-                    : cid
-                    ? `/api/subscription?companyId=${encodeURIComponent(cid)}`
-                    : ``;
-                  const resp = await fetch(q).catch(() => null as any);
-                  if (resp && resp.ok) {
-                    const j = await resp.json().catch(() => ({} as any));
-                    const sub =
-                      j && (j.subscription || j.session || j.data || null);
-                    // Some endpoints return { success:true, subscription: {...} }
-                    if (
-                      j &&
-                      (j.subscription || (j.success && j.subscription))
-                    ) {
-                      const s = j.subscription;
-                      // update serverPlan and planInfo to display immediately
-                      setServerPlan({
-                        plan: s.planName || s.planId || s.plan || null,
-                        price: s.price || s.amount || null,
-                        companyId: j.companyId || s.companyId || cid || null,
-                        userEmail: j.userEmail || s.userEmail || null,
-                      });
-                      try {
-                        // merge into planInfo if not already set
-                        if (!planInfo || !planInfo.planId) {
-                          setPlanInfo((prev) => ({
-                            planName:
-                              s.planName ||
-                              s.planId ||
-                              (prev && prev.planName) ||
-                              "",
-                            smsCredits:
-                              s.smsCredits ||
-                              s.remainingCredits ||
-                              (prev && prev.smsCredits) ||
-                              0,
-                            months: s.durationMonths || prev?.months || 1,
-                            planId: s.planId || s.plan || prev?.planId || "",
-                          }));
-                        }
-                      } catch {}
-                      try {
-                        localStorage.setItem(
-                          "profile_subscription_present",
-                          JSON.stringify({
-                            companyId:
-                              j.companyId || s.companyId || cid || null,
-                            ts: Date.now(),
-                          })
-                        );
-                      } catch {}
-                      try {
-                        window.dispatchEvent(new Event("subscription:updated"));
-                      } catch {}
-                      return s;
+            const s = await pollForSubscription(sessionId);
+            if (s) {
+              const serverCompanyId = s.companyId || s.clientId || undefined;
+              const serverPlanId =
+                s.planId || s.plan || s.planName || undefined;
+              const serverStatus = s.status || undefined;
+              if (serverPlanId) {
+                const plan = planMapping[serverPlanId] || {
+                  name: s.planName || serverPlanId,
+                  sms: s.smsCredits || 0,
+                  months: s.durationMonths || 1,
+                };
+                setPlanInfo({
+                  planName: plan.name,
+                  smsCredits: plan.sms,
+                  months: plan.months,
+                  planId: serverPlanId,
+                });
+                setPlanDebug({ source: "server", value: serverPlanId });
+                setServerPlan({
+                  plan: plan.name,
+                  price: s.price || s.amount || null,
+                  companyId: serverCompanyId,
+                  userEmail: s.userEmail || null,
+                });
+                // write to Firestore if we have an authenticated user or a serverCompanyId
+                const writeClientId = serverCompanyId || currentUser?.uid;
+                if (writeClientId) {
+                  try {
+                    const db = getFirebaseDb();
+                    const profileRef = doc(
+                      db,
+                      "clients",
+                      writeClientId,
+                      "profile",
+                      "main"
+                    );
+                    const profilePayload: any = {
+                      planId: serverPlanId,
+                      planName: plan.name,
+                      planSource: "server",
+                      status:
+                        serverStatus === "active" || serverStatus === "paid"
+                          ? "active"
+                          : "active",
+                      smsCredits: plan.sms,
+                      remainingCredits: plan.sms,
+                      activatedAt: Timestamp.now(),
+                      updatedAt: Timestamp.now(),
+                    };
+                    if (plan.months && Number(plan.months) > 0) {
+                      const months = Number(plan.months);
+                      const expiry = new Date();
+                      expiry.setMonth(expiry.getMonth() + months);
+                      profilePayload.expiryAt = Timestamp.fromDate(expiry);
                     }
-                    // Some servers return subscription directly at top-level
-                    if (j && (j.plan || j.planId || j.planName)) {
-                      const s = j;
-                      setServerPlan({
-                        plan: s.planName || s.planId || s.plan || null,
-                        price: s.price || s.amount || null,
-                        companyId: s.companyId || cid || null,
-                        userEmail: s.userEmail || null,
-                      });
-                      try {
-                        setPlanInfo((prev) => ({
-                          planName:
-                            s.planName ||
-                            s.planId ||
-                            (prev && prev.planName) ||
-                            "",
-                          smsCredits:
-                            s.smsCredits ||
-                            s.remainingCredits ||
-                            (prev && prev.smsCredits) ||
-                            0,
-                          months: s.durationMonths || prev?.months || 1,
-                          planId: s.planId || s.plan || prev?.planId || "",
-                        }));
-                      } catch {}
-                      try {
-                        localStorage.setItem(
-                          "profile_subscription_present",
-                          JSON.stringify({
-                            companyId: s.companyId || cid || null,
-                            ts: Date.now(),
-                          })
-                        );
-                      } catch {}
-                      try {
-                        window.dispatchEvent(new Event("subscription:updated"));
-                      } catch {}
-                      return s;
-                    }
+                    if (sessionId) profilePayload.paymentSessionId = sessionId;
+                    await setDoc(profileRef, profilePayload, { merge: true });
+                    try {
+                      localStorage.setItem(
+                        "profile_subscription_present",
+                        JSON.stringify({
+                          companyId: writeClientId,
+                          ts: Date.now(),
+                        })
+                      );
+                    } catch {}
+                    try {
+                      window.dispatchEvent(new Event("subscription:updated"));
+                    } catch {}
+                  } catch (e) {
+                    console.warn(
+                      "[PaymentSuccess] Failed to write server plan:",
+                      e
+                    );
                   }
-                } catch (e) {
-                  // ignore and retry
                 }
-                tries++;
-                await new Promise((r) => setTimeout(r, intervalMs));
               }
-              return null;
-            };
-
-            // Start polling but don't block the UI flow
-            pollForSubscription(sessionId, currentUser.uid).catch(() => null);
+            }
           } catch (e) {
-            // non-fatal
+            // ignore
           }
         }
       } catch (error) {
