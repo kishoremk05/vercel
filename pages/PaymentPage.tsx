@@ -101,15 +101,15 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           return;
         }
         const db = getFirebaseDb();
-        const companyId = localStorage.getItem("companyId") || user.uid;
-        const profileRef = doc(db, "clients", companyId, "profile", "main");
+        // Always use the logged-in user's UID for the profile check
+        const profileRef = doc(db, "clients", user.uid, "profile", "main");
         const snap = await getDoc(profileRef);
         if (snap.exists()) {
           const data = snap.data();
           try {
             localStorage.setItem(
               "subscription",
-              JSON.stringify({ ...data, companyId })
+              JSON.stringify({ ...data, companyId: user.uid })
             );
           } catch {}
           const hasPlan =
