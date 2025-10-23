@@ -115,6 +115,12 @@ const App: React.FC = () => {
                   localStorage.setItem("userEmail", user.email || "");
                 } catch {}
               }
+              // Always set companyId/clientId/auth_uid to current user's UID for consistency
+              if (user.uid) {
+                localStorage.setItem("companyId", user.uid);
+                localStorage.setItem("clientId", user.uid);
+                localStorage.setItem("auth_uid", user.uid);
+              }
             } catch (e) {
               console.warn("[App] getUserClientId error:", e);
             }

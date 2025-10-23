@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { waitForAuthToken } from "../lib/firebaseClient";
+import {
+  waitForAuthToken,
+  getFirebaseDb,
+  getFirebaseAuth,
+} from "../lib/firebaseClient";
+import { doc, getDoc } from "firebase/firestore";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 
 interface PaymentPageProps {
@@ -84,117 +89,57 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     "server" | "local" | null
   >(null);
 
-
   useEffect(() => {
     (async () => {
       try {
-        const currentCompanyId =
-          localStorage.getItem("companyId") ||
-          localStorage.getItem("auth_uid") ||
-          "";
-        const currentEmail = (
-          localStorage.getItem("userEmail") || ""
-        ).toLowerCase();
-
-        // 1) Quick local cache check (fast, may be stale)
-        try {
-          const raw = localStorage.getItem("subscription");
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            const subCompany = parsed.companyId || parsed.clientId || null;
-            const companyMatches =
-              subCompany &&
-              currentCompanyId &&
-              String(subCompany) === String(currentCompanyId);
-            const hasPlan =
-              parsed.planId || parsed.planName || parsed.status === "active";
-            const hasCredits =
-              Number(parsed.remainingCredits || parsed.smsCredits || 0) > 0;
-            if (companyMatches && (hasPlan || hasCredits)) {
-              setAlreadyPaid(true);
-              setAlreadyPaidSource("local");
-            }
-          }
-        } catch (e) {
-          // ignore parse errors
+        // Always fetch latest profile from Firestore after login
+        const auth = getFirebaseAuth();
+        const db = getFirebaseDb();
+        let currentUser = auth.currentUser;
+        if (!currentUser) {
+          await new Promise((resolve) => {
+            const unsub = auth.onAuthStateChanged((user) => {
+              if (user) {
+                currentUser = user;
+                unsub();
+                resolve(null);
+              }
+            });
+            setTimeout(() => {
+              unsub();
+              resolve(null);
+            }, 5000);
+          });
         }
-
-        // 2) Short-lived profile flag written by PaymentSuccess (cross-tab sync)
-        try {
-          const rawFlag = localStorage.getItem("profile_subscription_present");
-          if (rawFlag) {
-            const flag = JSON.parse(rawFlag || "{}");
-            const pfCompany = flag.companyId || null;
-            const pfTs = Number(flag.ts || 0);
-            const recent = Date.now() - pfTs < 1000 * 60 * 10; // 10 minutes
-            const companyMatches =
-              pfCompany &&
-              currentCompanyId &&
-              String(pfCompany) === String(currentCompanyId);
-            if (recent && companyMatches) {
-              setAlreadyPaid(true);
-              setAlreadyPaidSource("local");
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
-
-        // 3) Server pre-flight (ownership-aware) — try to obtain a token
-        let token: string | null = null;
-        try {
-          token = await waitForAuthToken(5000);
-        } catch (e) {
-          token = null;
-        }
-
-        if (!token) {
-          console.log(
-            "[Payment] No auth token available; skipping server subscription preflight to avoid false-positive active subscription"
-          );
-          return;
-        }
-
-        const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
-        const checkUrl = apiBase
-          ? `${String(apiBase).replace(/\/+$/,"")}/api/subscription?companyId=${currentCompanyId}`
-          : `/api/subscription?companyId=${currentCompanyId}`;
-
-        const resp = await fetch(checkUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => null as any);
-        if (!resp || !resp.ok) {
-          if (alreadyPaid && alreadyPaidSource === "local") {
-            setAlreadyPaid(false);
-            setAlreadyPaidSource(null);
-          }
-          return;
-        }
-
-        const json = await resp.json().catch(() => ({} as any));
-        const existing = json && json.subscription;
-        if (existing) {
-          const subCompany = existing.companyId || existing.clientId || null;
-          const companyMatches =
-            subCompany &&
-            currentCompanyId &&
-            String(subCompany) === String(currentCompanyId);
+        if (!currentUser) return;
+        const companyId = localStorage.getItem("companyId") || currentUser.uid;
+        // Fetch profile from Firestore
+        const profileRef = doc(db, "clients", companyId, "profile", "main");
+        const snap = await getDoc(profileRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          // Save to localStorage for fast reloads
+          try {
+            localStorage.setItem(
+              "subscription",
+              JSON.stringify({ ...data, companyId })
+            );
+          } catch {}
           const hasPlan =
-            existing.planId ||
-            existing.planName ||
-            existing.status === "active";
+            data.planId || data.planName || data.status === "active";
           const hasCredits =
-            Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
-          if (companyMatches && (hasPlan || hasCredits)) {
+            Number(data.remainingCredits || data.smsCredits || 0) > 0;
+          if (hasPlan || hasCredits) {
             setAlreadyPaid(true);
             setAlreadyPaidSource("server");
-          } else if (alreadyPaid && alreadyPaidSource === "local") {
-            setAlreadyPaid(false);
-            setAlreadyPaidSource(null);
+            return;
           }
         }
+        // Fallback to previous local checks if needed
+        setAlreadyPaid(false);
+        setAlreadyPaidSource(null);
       } catch (e) {
-        console.warn("[Payment] Preflight failed", e);
+        console.warn("[Payment] Profile fetch failed", e);
       }
     })();
   }, []);
@@ -205,7 +150,6 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       window.location.href = "/dashboard";
     }
   }, [alreadyPaid, alreadyPaidSource]);
-
 
   // Get user info from localStorage for display
   const userEmail = localStorage.getItem("userEmail") || "";
@@ -225,7 +169,9 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         try {
           localStorage.setItem("pendingPlan", String(selectedPlan.id));
         } catch {}
-        window.location.href = `/auth?plan=${encodeURIComponent(selectedPlan.id)}`;
+        window.location.href = `/auth?plan=${encodeURIComponent(
+          selectedPlan.id
+        )}`;
         return;
       }
 
@@ -240,7 +186,10 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         try {
           const apiBase = (await getSmsServerUrl().catch(() => "")) || "";
           const checkUrl = apiBase
-            ? `${String(apiBase).replace(/\/+$/, "")}/api/subscription?companyId=${companyId}`
+            ? `${String(apiBase).replace(
+                /\/+$/,
+                ""
+              )}/api/subscription?companyId=${companyId}`
             : `/api/subscription?companyId=${companyId}`;
           const resp = await fetch(checkUrl, {
             headers: { Authorization: `Bearer ${token}` },
@@ -248,10 +197,18 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
           if (resp && resp.ok) {
             const json = await resp.json().catch(() => ({} as any));
             const existing = json && json.subscription;
-            const subCompany = existing?.companyId || existing?.clientId || null;
-            const companyMatches = subCompany && String(subCompany) === String(companyId);
-            const hasPlan = existing && (existing.planId || existing.planName || existing.status === "active");
-            const hasCredits = existing && Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
+            const subCompany =
+              existing?.companyId || existing?.clientId || null;
+            const companyMatches =
+              subCompany && String(subCompany) === String(companyId);
+            const hasPlan =
+              existing &&
+              (existing.planId ||
+                existing.planName ||
+                existing.status === "active");
+            const hasCredits =
+              existing &&
+              Number(existing.remainingCredits || existing.smsCredits || 0) > 0;
             if (companyMatches && (hasPlan || hasCredits)) {
               setAlreadyPaid(true);
               setAlreadyPaidSource("server");
@@ -304,10 +261,12 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
       }
 
       if (!resp.ok) {
-        const msg = data?.error || data?.message || "Failed to create payment session";
+        const msg =
+          data?.error || data?.message || "Failed to create payment session";
         throw new Error(msg);
       }
-      if (!data || !data.url) throw new Error("No payment URL received from server");
+      if (!data || !data.url)
+        throw new Error("No payment URL received from server");
 
       try {
         localStorage.removeItem("pendingPlan");
