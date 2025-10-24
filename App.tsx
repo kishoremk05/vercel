@@ -10,6 +10,7 @@ import QuickFeedbackPage from "./pages/QuickFeedbackPage";
 import ProfilePage from "./pages/ProfilePage";
 import AuthPage from "./pages/AuthPage";
 import SignupPage from "./pages/SignupPage";
+// Admin page (canonical)
 import AdminPage from "./pages/AdminPage";
 import AdminAuthPage from "./pages/AdminAuthPage";
 import CredentialsPage from "./pages/CredentialsPage";
