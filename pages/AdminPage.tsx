@@ -182,164 +182,179 @@ const AdminPage: React.FC<AdminPageProps> = ({
   // a non-blocking banner (near the header) when admin privileges are
   // lost so the page remains visible and does not flash to blank.
 
-  // Load global admin credentials on mount
-  useEffect(() => {
-    const loadCredentials = async () => {
-      try {
-        const base = await getSmsServerUrl();
-        const url = `${base}/admin/credentials`;
+  // Move credential and admin-data loaders into callbacks so we can retry
+  // when the ID token changes (for example, after an admin claim is set).
+  const loadCredentials = React.useCallback(async () => {
+    try {
+      const base = await getSmsServerUrl();
+      const url = `${base}/admin/credentials`;
 
-        // Use fetchWithTokenRefresh for automatic token refresh
-        const response = await fetchWithTokenRefresh(url);
+      // Use fetchWithTokenRefresh for automatic token refresh
+      const response = await fetchWithTokenRefresh(url);
 
-        if (response.ok) {
-          const data = await response.json();
-          const creds = data?.credentials || {};
-          if (creds.accountSid) setLocalTwilioSid(creds.accountSid);
-          if (creds.authToken) setLocalTwilioToken(creds.authToken);
-          if (creds.phoneNumber) setLocalTwilioPhone(creds.phoneNumber);
-          if (creds.messagingServiceSid)
-            setLocalMessagingServiceSid(creds.messagingServiceSid);
-          if (creds.feedbackPageUrl) setFeedbackPageUrl(creds.feedbackPageUrl);
-          if (creds.smsServerPort) setSmsServerPort(creds.smsServerPort);
-          // propagate up for current session use
-          if (creds.accountSid) setTwilioAccountSid(creds.accountSid);
-          if (creds.authToken) setTwilioAuthToken(creds.authToken);
-          if (creds.phoneNumber) setTwilioPhoneNumber(creds.phoneNumber);
-          try {
-            sessionStorage.setItem("admin_creds", JSON.stringify(creds));
-          } catch (e) {}
-        } else {
-          const body = await response.json().catch(() => ({}));
-          console.error("Failed to load credentials:", response.status, body);
-          // If server indicates insufficient privileges, show a friendly banner
-          if (
-            response.status === 401 &&
-            body &&
-            String(body.error || "")
-              .toLowerCase()
-              .includes("insufficient")
-          ) {
-            setAdminPrivLost(true);
-            setErrorMessage(
-              "Insufficient privileges: admin role required. Please re-login with an admin account."
-            );
-            setShowError(true);
-            return;
-          }
+      if (response.ok) {
+        const data = await response.json();
+        const creds = data?.credentials || {};
+        if (creds.accountSid) setLocalTwilioSid(creds.accountSid);
+        if (creds.authToken) setLocalTwilioToken(creds.authToken);
+        if (creds.phoneNumber) setLocalTwilioPhone(creds.phoneNumber);
+        if (creds.messagingServiceSid)
+          setLocalMessagingServiceSid(creds.messagingServiceSid);
+        if (creds.feedbackPageUrl) setFeedbackPageUrl(creds.feedbackPageUrl);
+        if (creds.smsServerPort) setSmsServerPort(creds.smsServerPort);
+        // propagate up for current session use
+        if (creds.accountSid) setTwilioAccountSid(creds.accountSid);
+        if (creds.authToken) setTwilioAuthToken(creds.authToken);
+        if (creds.phoneNumber) setTwilioPhoneNumber(creds.phoneNumber);
+        try {
+          sessionStorage.setItem("admin_creds", JSON.stringify(creds));
+        } catch (e) {}
+      } else {
+        const body = await response.json().catch(() => ({}));
+        console.error("Failed to load credentials:", response.status, body);
+        // If server indicates insufficient privileges, show a friendly banner
+        if (
+          response.status === 401 &&
+          body &&
+          String(body.error || "")
+            .toLowerCase()
+            .includes("insufficient")
+        ) {
+          setAdminPrivLost(true);
+          setErrorMessage(
+            "Insufficient privileges: admin role required. Please re-login with an admin account."
+          );
+          setShowError(true);
+          return;
         }
-      } catch (error) {
-        console.error("Error loading credentials:", error);
       }
-    };
-
-    loadCredentials();
+    } catch (error) {
+      console.error("Error loading credentials:", error);
+    }
   }, [setTwilioAccountSid, setTwilioAuthToken, setTwilioPhoneNumber]);
 
-  // Load global stats and users list
-  useEffect(() => {
-    const loadAdminData = async () => {
-      try {
-        const base = await getSmsServerUrl();
-        const statsUrl = `${base}/admin/global-stats`;
-        const usersUrl = `${base}/admin/firebase-users`;
+  const loadAdminData = React.useCallback(async () => {
+    try {
+      const base = await getSmsServerUrl();
+      const statsUrl = `${base}/admin/global-stats`;
+      const usersUrl = `${base}/admin/firebase-users`;
 
-        // Use fetchWithTokenRefresh for both requests
-        const [statsRes, usersRes] = await Promise.all([
-          fetchWithTokenRefresh(statsUrl),
-          fetchWithTokenRefresh(usersUrl),
-        ]);
+      // Use fetchWithTokenRefresh for both requests
+      const [statsRes, usersRes] = await Promise.all([
+        fetchWithTokenRefresh(statsUrl),
+        fetchWithTokenRefresh(usersUrl),
+      ]);
 
-        if (statsRes.ok) {
-          let data: any = null;
+      if (statsRes.ok) {
+        let data: any = null;
+        try {
+          data = await statsRes.json();
+        } catch (parseErr: any) {
+          console.error("Failed to parse /admin/global-stats JSON", parseErr);
+        }
+        setStats(data?.stats || null);
+        try {
+          sessionStorage.setItem(
+            "admin_stats",
+            JSON.stringify(data?.stats || null)
+          );
+        } catch (e) {}
+      } else {
+        const body = await statsRes.json().catch(() => null);
+        console.error(
+          "Failed to fetch /admin/global-stats",
+          statsRes.status,
+          body
+        );
+        if (
+          statsRes.status === 401 &&
+          body &&
+          String(body.error || "")
+            .toLowerCase()
+            .includes("insufficient")
+        ) {
+          setAdminPrivLost(true);
+          setErrorMessage(
+            "Insufficient privileges: admin role required. Please re-login with an admin account."
+          );
+          setShowError(true);
+          return;
+        }
+      }
+
+      if (usersRes.ok) {
+        let data: any = null;
+        try {
+          data = await usersRes.json();
+        } catch (parseErr: any) {
+          console.error("Failed to parse /admin/firebase-users JSON", parseErr);
+        }
+        if (data?.success && Array.isArray(data.users)) {
+          setUsers(data.users);
           try {
-            data = await statsRes.json();
-          } catch (parseErr: any) {
-            console.error("Failed to parse /admin/global-stats JSON", parseErr);
-          }
-          setStats(data?.stats || null);
-          try {
-            sessionStorage.setItem(
-              "admin_stats",
-              JSON.stringify(data?.stats || null)
-            );
+            sessionStorage.setItem("admin_users", JSON.stringify(data.users));
           } catch (e) {}
         } else {
-          const body = await statsRes.json().catch(() => null);
-          console.error(
-            "Failed to fetch /admin/global-stats",
-            statsRes.status,
-            body
-          );
-          if (
-            statsRes.status === 401 &&
-            body &&
-            String(body.error || "")
-              .toLowerCase()
-              .includes("insufficient")
-          ) {
-            setAdminPrivLost(true);
-            setErrorMessage(
-              "Insufficient privileges: admin role required. Please re-login with an admin account."
-            );
-            setShowError(true);
-            return;
-          }
-        }
-
-        if (usersRes.ok) {
-          let data: any = null;
-          try {
-            data = await usersRes.json();
-          } catch (parseErr: any) {
-            console.error(
-              "Failed to parse /admin/firebase-users JSON",
-              parseErr
-            );
-          }
-          if (data?.success && Array.isArray(data.users)) {
-            setUsers(data.users);
-            try {
-              sessionStorage.setItem("admin_users", JSON.stringify(data.users));
-            } catch (e) {}
-          } else {
-            setUsers([]);
-          }
-        } else {
-          const body = await usersRes.json().catch(() => null);
-          console.error(
-            "Failed to fetch /admin/firebase-users",
-            usersRes.status,
-            body
-          );
-          if (
-            usersRes.status === 401 &&
-            body &&
-            String(body.error || "")
-              .toLowerCase()
-              .includes("insufficient")
-          ) {
-            setAdminPrivLost(true);
-            setErrorMessage(
-              "Insufficient privileges: admin role required. Please re-login with an admin account."
-            );
-            setShowError(true);
-            setTimeout(() => setShowError(false), 10000);
-            return;
-          }
           setUsers([]);
-          setErrorMessage("Failed to load Firebase users (see console)");
-          setShowError(true);
-          setTimeout(() => setShowError(false), 6000);
         }
-      } catch (e) {
-        console.error("Failed to load admin data", e);
+      } else {
+        const body = await usersRes.json().catch(() => null);
+        console.error(
+          "Failed to fetch /admin/firebase-users",
+          usersRes.status,
+          body
+        );
+        if (
+          usersRes.status === 401 &&
+          body &&
+          String(body.error || "")
+            .toLowerCase()
+            .includes("insufficient")
+        ) {
+          setAdminPrivLost(true);
+          setErrorMessage(
+            "Insufficient privileges: admin role required. Please re-login with an admin account."
+          );
+          setShowError(true);
+          setTimeout(() => setShowError(false), 10000);
+          return;
+        }
+        setUsers([]);
+        setErrorMessage("Failed to load Firebase users (see console)");
+        setShowError(true);
+        setTimeout(() => setShowError(false), 6000);
       }
-    };
-    // If Firebase user isn't ready yet, wait for auth state once then run
-    // TODO: Replace with new DB auth logic. For now, just load admin data directly.
-    loadAdminData();
+    } catch (e) {
+      console.error("Failed to load admin data", e);
+    }
   }, []);
+
+  // Initial load on mount
+  useEffect(() => {
+    loadCredentials();
+    loadAdminData();
+  }, [loadCredentials, loadAdminData]);
+
+  // Re-run admin data loads when ID token changes (e.g., after claim is set)
+  useEffect(() => {
+    const auth = getFirebaseAuth();
+    if (!auth || !auth.onIdTokenChanged) return;
+    const unsubscribe = auth.onIdTokenChanged(async (user) => {
+      if (user) {
+        // clear the admin-priv-lost state and try again (token may now contain the claim)
+        setAdminPrivLost(false);
+        setErrorMessage("");
+        setShowError(false);
+        try {
+          await loadCredentials();
+          await loadAdminData();
+        } catch (e) {
+          // ignore - errors are handled inside loaders
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [loadCredentials, loadAdminData]);
 
   const handleSuspend = (uid: string) => {
     setUsers((prev) =>
