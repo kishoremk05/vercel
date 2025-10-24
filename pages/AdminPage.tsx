@@ -69,9 +69,6 @@ const AdminPage: React.FC<AdminPageProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingUrls, setIsSavingUrls] = useState(false);
 
-  // Network / API error visible to the UI (e.g. blocked by ad-blocker)
-  const [networkError, setNetworkError] = useState<string | null>(null);
-
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 3;
@@ -107,22 +104,14 @@ const AdminPage: React.FC<AdminPageProps> = ({
           if (creds.authToken) setTwilioAuthToken(creds.authToken);
           if (creds.phoneNumber) setTwilioPhoneNumber(creds.phoneNumber);
         } else {
-          const text = await response.text().catch(() => "");
-          console.error("Failed to load credentials:", response.status, text);
-          setNetworkError(
-            "Failed to load admin credentials (network error or blocked by browser extension)."
+          console.error(
+            "Failed to load credentials:",
+            response.status,
+            await response.json()
           );
         }
-      } catch (error: any) {
+      } catch (error) {
         console.error("Error loading credentials:", error);
-        setNetworkError(
-          error?.message ||
-            "Error loading admin credentials (network error or blocked)."
-        );
-      }
-      // Clear network error if we managed to set credentials successfully
-      if (localTwilioSid || localTwilioToken || localTwilioPhone) {
-        setNetworkError(null);
       }
     };
 
@@ -152,14 +141,11 @@ const AdminPage: React.FC<AdminPageProps> = ({
           }
           setStats(data?.stats || null);
         } else {
-          const text = await statsRes.text().catch(() => "");
+          const text = await statsRes.text();
           console.error(
             "Failed to fetch /admin/global-stats",
             statsRes.status,
             text?.slice(0, 500)
-          );
-          setNetworkError(
-            "Failed to load admin statistics (network error or blocked by client)."
           );
         }
 
@@ -179,7 +165,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
             setUsers([]);
           }
         } else {
-          const text = await usersRes.text().catch(() => "");
+          const text = await usersRes.text();
           console.error(
             "Failed to fetch /admin/firebase-users",
             usersRes.status,
@@ -189,19 +175,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
           setErrorMessage("Failed to load Firebase users (see console)");
           setShowError(true);
           setTimeout(() => setShowError(false), 6000);
-          setNetworkError(
-            "Failed to load Firebase users (network error or blocked by client)."
-          );
         }
-      } catch (e: any) {
+      } catch (e) {
         console.error("Failed to load admin data", e);
-        setNetworkError(
-          e?.message || "Failed to load admin data (network error)."
-        );
-      }
-      // Clear network error if we successfully loaded users and stats
-      if (Array.isArray(users) && users.length > 0 && stats) {
-        setNetworkError(null);
       }
     };
     // If Firebase user isn't ready yet, wait for auth state once then run
@@ -300,32 +276,6 @@ const AdminPage: React.FC<AdminPageProps> = ({
 
   return (
     <div className="min-h-screen grid-pattern relative overflow-hidden">
-      {/* Network / API error banner */}
-      {networkError && (
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-4">
-          <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-lg">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-red-800">
-                  Network error
-                </p>
-                <p className="mt-1 text-xs text-red-700">
-                  {networkError} If you're using an ad-blocker or privacy
-                  extension, try disabling it for this site and reload the page.
-                </p>
-              </div>
-              <div className="shrink-0">
-                <button
-                  className="text-red-700 underline text-xs"
-                  onClick={() => setNetworkError(null)}
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
         {/* Header Section */}
         <div className="mb-6 sm:mb-8 lg:mb-10">
