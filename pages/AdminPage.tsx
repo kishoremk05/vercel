@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getSmsServerUrl } from "../lib/firebaseConfig"; // dynamic API base
+import { getFirebaseAuth } from "../lib/firebaseClient";
 // Token refresh helpers removed from Admin page; token management is handled elsewhere
 // (keep module import removed to avoid unused references)
 import {
@@ -80,8 +81,20 @@ const AdminPage: React.FC<AdminPageProps> = ({
         const base = await getSmsServerUrl();
         const url = `${base}/admin/credentials`;
 
-        // Plain fetch; do not force id-token refresh here. Surface 401 to the UI.
-        const response = await fetch(url);
+        // Include current ID token (non-forced) in Authorization header so server can verify claims
+        const auth = getFirebaseAuth();
+        let token: string | null = null;
+        try {
+          token = auth?.currentUser
+            ? await auth.currentUser.getIdToken()
+            : null;
+        } catch (e) {
+          token = null;
+        }
+
+        const response = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
 
         if (response.status === 401) {
           const body = await response.json().catch(() => ({}));
@@ -130,17 +143,38 @@ const AdminPage: React.FC<AdminPageProps> = ({
         const statsUrl = `${base}/admin/global-stats`;
         const usersUrl = `${base}/admin/firebase-users`;
 
-        // Plain fetch for stats and users; handle 401s without forcing token refresh
+        // Include current ID token (non-forced) in Authorization header for both requests
+        const auth = getFirebaseAuth();
+        let token: string | null = null;
+        try {
+          token = auth?.currentUser
+            ? await auth.currentUser.getIdToken()
+            : null;
+        } catch (e) {
+          token = null;
+        }
+
+        const headers = token
+          ? { Authorization: `Bearer ${token}` }
+          : undefined;
+
+        // Plain fetch for stats and users
         const [statsRes, usersRes] = await Promise.all([
-          fetch(statsUrl),
-          fetch(usersUrl),
+          fetch(statsUrl, { headers }),
+          fetch(usersUrl, { headers }),
         ]);
 
-        if (statsRes.status === 401) {
-          const body = await statsRes.json().catch(() => null);
-          setErrorMessage(body?.error || "Unauthorized: failed to load stats");
+        // If either response is 401, surface privilege error and stop further parsing
+        if (statsRes.status === 401 || usersRes.status === 401) {
+          const res = statsRes.status === 401 ? statsRes : usersRes;
+          const body = await res.json().catch(() => null);
+          setErrorMessage(
+            body?.error || "Unauthorized: insufficient admin privileges"
+          );
           setShowError(true);
           setTimeout(() => setShowError(false), 6000);
+          setUsers([]);
+          return;
         }
 
         if (statsRes.ok) {
@@ -219,10 +253,21 @@ const AdminPage: React.FC<AdminPageProps> = ({
     try {
       const base = await getSmsServerUrl();
 
-      // Plain fetch POST — do not attempt client-side token refresh here.
+      // Include current ID token in Authorization header for POST
+      const auth = getFirebaseAuth();
+      let token: string | null = null;
+      try {
+        token = auth?.currentUser ? await auth.currentUser.getIdToken() : null;
+      } catch (e) {
+        token = null;
+      }
+
       const response = await fetch(`${base}/admin/credentials`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           accountSid: localTwilioSid,
           authToken: localTwilioToken,
@@ -266,10 +311,23 @@ const AdminPage: React.FC<AdminPageProps> = ({
     try {
       const base = await getSmsServerUrl();
 
-      // Plain fetch POST for feedback URLs
+      // Include current ID token in Authorization header for POST
+      const auth2 = getFirebaseAuth();
+      let token2: string | null = null;
+      try {
+        token2 = auth2?.currentUser
+          ? await auth2.currentUser.getIdToken()
+          : null;
+      } catch (e) {
+        token2 = null;
+      }
+
       const response = await fetch(`${base}/admin/feedback-urls`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token2 ? { Authorization: `Bearer ${token2}` } : {}),
+        },
         body: JSON.stringify({
           feedbackPageUrl,
           smsServerPort,
