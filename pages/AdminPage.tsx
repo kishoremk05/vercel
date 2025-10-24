@@ -68,7 +68,11 @@ const AdminPage: React.FC<AdminPageProps> = ({
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [adminPrivError, setAdminPrivError] = useState(false);
+  // When admin privileges are lost (e.g. refreshed token lost custom claim)
+  // we keep showing the UI (so the page doesn't go blank) but disable
+  // admin actions and surface a persistent banner. This provides a
+  // better UX while indicating the user must re-login or fix claims.
+  const [adminPrivLost, setAdminPrivLost] = useState(false);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagResult, setDiagResult] = useState<any | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -84,39 +88,39 @@ const AdminPage: React.FC<AdminPageProps> = ({
     return cleanup; // Cleanup on unmount
   }, []);
 
-  // If we detected insufficient admin privileges, render a safe fallback
-  // immediately to avoid rendering complex child components that may
-  // rely on admin-only APIs and cause a white/blank screen.
-  if (adminPrivError) {
-    return (
-      <div className="min-h-screen grid-pattern relative overflow-hidden">
-        <div className="mx-auto max-w-3xl px-4 py-10">
-          <div className="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800 p-6 rounded-lg">
-            <h2 className="text-lg font-bold mb-2">Admin access required</h2>
-            <p className="mb-4">
-              {errorMessage ||
-                "Your account lacks the admin role. Please sign out and sign in with an admin account."}
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  try {
-                    localStorage.removeItem("adminSession");
-                    localStorage.removeItem("adminEmail");
-                    localStorage.removeItem("adminToken");
-                  } catch {}
-                  onLogout();
-                }}
-                className="px-4 py-2 bg-yellow-500 text-white rounded font-semibold"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Load cached admin data (if any) so the UI can show something if
+  // the refreshed token later loses admin privileges.
+  useEffect(() => {
+    try {
+      const cachedUsers = sessionStorage.getItem("admin_users");
+      const cachedStats = sessionStorage.getItem("admin_stats");
+      const cachedCreds = sessionStorage.getItem("admin_creds");
+      if (cachedUsers) {
+        setUsers(JSON.parse(cachedUsers));
+      }
+      if (cachedStats) setStats(JSON.parse(cachedStats));
+      if (cachedCreds) {
+        try {
+          const creds = JSON.parse(cachedCreds);
+          if (creds.accountSid) setLocalTwilioSid(creds.accountSid);
+          if (creds.authToken) setLocalTwilioToken(creds.authToken);
+          if (creds.phoneNumber) setLocalTwilioPhone(creds.phoneNumber);
+          if (creds.messagingServiceSid)
+            setLocalMessagingServiceSid(creds.messagingServiceSid);
+          if (creds.feedbackPageUrl) setFeedbackPageUrl(creds.feedbackPageUrl);
+          if (creds.smsServerPort) setSmsServerPort(creds.smsServerPort);
+        } catch (e) {
+          console.warn("Failed to parse cached admin_creds", e);
+        }
+      }
+    } catch (e) {
+      // sessionStorage may be blocked in some environments; ignore
+    }
+  }, []);
+
+  // NOTE: we intentionally avoid an early return here. Instead we render
+  // a non-blocking banner (near the header) when admin privileges are
+  // lost so the page remains visible and does not flash to blank.
 
   // Load global admin credentials on mount
   useEffect(() => {
@@ -142,6 +146,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
           if (creds.accountSid) setTwilioAccountSid(creds.accountSid);
           if (creds.authToken) setTwilioAuthToken(creds.authToken);
           if (creds.phoneNumber) setTwilioPhoneNumber(creds.phoneNumber);
+          try {
+            sessionStorage.setItem("admin_creds", JSON.stringify(creds));
+          } catch (e) {}
         } else {
           const body = await response.json().catch(() => ({}));
           console.error("Failed to load credentials:", response.status, body);
@@ -153,7 +160,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
               .toLowerCase()
               .includes("insufficient")
           ) {
-            setAdminPrivError(true);
+            setAdminPrivLost(true);
             setErrorMessage(
               "Insufficient privileges: admin role required. Please re-login with an admin account."
             );
@@ -191,6 +198,12 @@ const AdminPage: React.FC<AdminPageProps> = ({
             console.error("Failed to parse /admin/global-stats JSON", parseErr);
           }
           setStats(data?.stats || null);
+          try {
+            sessionStorage.setItem(
+              "admin_stats",
+              JSON.stringify(data?.stats || null)
+            );
+          } catch (e) {}
         } else {
           const body = await statsRes.json().catch(() => null);
           console.error(
@@ -205,12 +218,11 @@ const AdminPage: React.FC<AdminPageProps> = ({
               .toLowerCase()
               .includes("insufficient")
           ) {
-            setAdminPrivError(true);
+            setAdminPrivLost(true);
             setErrorMessage(
               "Insufficient privileges: admin role required. Please re-login with an admin account."
             );
             setShowError(true);
-            setUsers([]);
             return;
           }
         }
@@ -227,6 +239,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
           }
           if (data?.success && Array.isArray(data.users)) {
             setUsers(data.users);
+            try {
+              sessionStorage.setItem("admin_users", JSON.stringify(data.users));
+            } catch (e) {}
           } else {
             setUsers([]);
           }
@@ -244,12 +259,11 @@ const AdminPage: React.FC<AdminPageProps> = ({
               .toLowerCase()
               .includes("insufficient")
           ) {
-            setAdminPrivError(true);
+            setAdminPrivLost(true);
             setErrorMessage(
               "Insufficient privileges: admin role required. Please re-login with an admin account."
             );
             setShowError(true);
-            setUsers([]);
             setTimeout(() => setShowError(false), 10000);
             return;
           }
@@ -274,6 +288,15 @@ const AdminPage: React.FC<AdminPageProps> = ({
   };
 
   const handleSaveCredentials = async () => {
+    if (adminPrivLost) {
+      setErrorMessage(
+        "You no longer have admin privileges. Sign out and sign in with an admin account."
+      );
+      setShowError(true);
+      setTimeout(() => setShowError(false), 6000);
+      return;
+    }
+
     setIsSaving(true);
     setShowError(false);
     setShowSuccess(false);
@@ -319,6 +342,15 @@ const AdminPage: React.FC<AdminPageProps> = ({
   };
 
   const handleSaveFeedbackUrls = async () => {
+    if (adminPrivLost) {
+      setErrorMessage(
+        "You no longer have admin privileges. Sign out and sign in with an admin account."
+      );
+      setShowError(true);
+      setTimeout(() => setShowError(false), 6000);
+      return;
+    }
+
     setIsSavingUrls(true);
     setShowError(false);
     setShowSuccess(false);
@@ -395,7 +427,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
                   </p>
                 </div>
                 {/* Admin privilege error banner */}
-                {adminPrivError && (
+                {adminPrivLost && (
                   <div className="w-full md:w-auto mt-3 md:mt-0">
                     <div className="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800 p-3 rounded-lg">
                       <div className="flex items-start justify-between gap-3">
@@ -774,9 +806,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
                 )}
                 <button
                   onClick={handleSaveCredentials}
-                  disabled={isSaving}
+                  disabled={isSaving || adminPrivLost}
                   className={`px-6 py-3 rounded-xl font-semibold shadow-md transition-colors inline-flex items-center gap-2 ${
-                    isSaving
+                    isSaving || adminPrivLost
                       ? "bg-gray-400 cursor-not-allowed"
                       : "bg-gray-900 hover:bg-gray-800 text-white"
                   }`}
@@ -887,9 +919,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
             <div className="mt-6 flex justify-end">
               <button
                 onClick={handleSaveFeedbackUrls}
-                disabled={isSavingUrls}
+                disabled={isSavingUrls || adminPrivLost}
                 className={`px-6 py-3 rounded-xl font-semibold shadow-md transition-colors inline-flex items-center gap-2 ${
-                  isSavingUrls
+                  isSavingUrls || adminPrivLost
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-indigo-600 hover:bg-indigo-700 text-white"
                 }`}
@@ -1145,13 +1177,23 @@ const AdminPage: React.FC<AdminPageProps> = ({
                           <td className="px-6 py-4 whitespace-nowrap text-center">
                             <button
                               className={`inline-flex items-center gap-1 px-4 py-1.5 rounded-lg font-semibold text-xs shadow transition-all duration-150 ${
-                                !user.disabled
+                                adminPrivLost
+                                  ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                                  : !user.disabled
                                   ? "bg-red-500 text-white hover:bg-red-600"
                                   : "bg-green-500 text-white hover:bg-green-600"
                               }`}
-                              onClick={() => handleSuspend(user.uid)}
+                              onClick={() => {
+                                if (adminPrivLost) return;
+                                handleSuspend(user.uid);
+                              }}
+                              disabled={adminPrivLost}
                               title={
-                                !user.disabled ? "Disable user" : "Enable user"
+                                adminPrivLost
+                                  ? "Admin privileges required"
+                                  : !user.disabled
+                                  ? "Disable user"
+                                  : "Enable user"
                               }
                             >
                               {!user.disabled ? "Disable" : "Enable"}

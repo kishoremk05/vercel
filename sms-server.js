@@ -3091,11 +3091,80 @@ async function verifyFirebaseAdmin(req) {
     }
     if (!firestoreEnabled)
       return { ok: false, error: "Firestore not configured" };
-    const user = await dbV2.getUserById(uid);
-    const role = String(user?.role || "").toLowerCase();
+    // First try uid-based lookup in new users table
+    let user = null;
+    try {
+      user = await dbV2.getUserById(uid);
+    } catch (e) {
+      console.warn(
+        "[verifyFirebaseAdmin] dbV2.getUserById failed",
+        e?.message || e
+      );
+    }
+    let role = String(user?.role || "").toLowerCase();
     if (role === "admin" || role === "superadmin") {
       return { ok: true, uid, decoded, user };
     }
+
+    // FALLBACK: if uid lookup failed to find an admin and the token contains
+    // an email, try to locate the user record by email. This helps in cases
+    // where tokens are issued by a different Firebase project or uid mapping
+    // differs after migration but email remains constant. We only perform
+    // this lookup when Firestore is enabled.
+    try {
+      const email = decoded?.email || null;
+      if (email) {
+        console.log(
+          "[verifyFirebaseAdmin] uid lookup did not return admin; trying email fallback for",
+          email
+        );
+        // Prefer dbV2 helper if available
+        if (dbV2 && typeof dbV2.getUserByEmail === "function") {
+          try {
+            const byEmail = await dbV2.getUserByEmail(String(email));
+            if (byEmail) {
+              const r = String(byEmail.role || "").toLowerCase();
+              if (r === "admin" || r === "superadmin") {
+                return { ok: true, uid, decoded, user: byEmail };
+              }
+            }
+          } catch (e) {
+            console.warn(
+              "[verifyFirebaseAdmin] dbV2.getUserByEmail failed",
+              e?.message || e
+            );
+          }
+        }
+
+        // As a final fallback, query Firestore directly for legacy users collection
+        try {
+          const firestore = firebaseAdmin.firestore();
+          const q = await firestore
+            .collection("users")
+            .where("email", "==", String(email))
+            .limit(1)
+            .get();
+          if (!q.empty) {
+            const doc = q.docs[0].data();
+            const r = String(doc?.role || "").toLowerCase();
+            if (r === "admin" || r === "superadmin") {
+              return { ok: true, uid, decoded, user: doc };
+            }
+          }
+        } catch (e) {
+          console.warn(
+            "[verifyFirebaseAdmin] direct Firestore email lookup failed",
+            e?.message || e
+          );
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[verifyFirebaseAdmin] email fallback failed",
+        e?.message || e
+      );
+    }
+
     return { ok: false, error: "Insufficient privileges (need admin role)" };
   } catch (e) {
     return { ok: false, error: e?.message || String(e) };
