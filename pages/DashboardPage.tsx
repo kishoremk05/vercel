@@ -29,17 +29,6 @@ import { Customer, ActivityLog, CustomerStatus } from "../types";
 // } from "../lib/dashboardFirebase";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 import {
-  initializeFirebase,
-  getFirebaseAuth,
-  getFirebaseDb,
-} from "../lib/firebaseClient";
-import { doc, onSnapshot } from "firebase/firestore";
-import {
-  getClientProfile,
-  getClientByAuthUid,
-  getClientBillingSubscription,
-} from "../lib/firestoreClient";
-import {
   PlusIcon,
   MessageIcon,
   PaperAirplaneIcon,
@@ -71,527 +60,9 @@ interface DashboardStats {
   };
 }
 
-const SubscriptionDebugView: React.FC = () => {
-  const [apiData, setApiData] = useState<any>(null);
-  const [apiError, setApiError] = useState<string | null>(null);
-  const [fsProfile, setFsProfile] = useState<any>(null);
-  const [fsError, setFsError] = useState<string | null>(null);
-  const [localSub, setLocalSub] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-
-  const fetchDebug = useCallback(async () => {
-    setLoading(true);
-    setApiData(null);
-    setApiError(null);
-    setFsProfile(null);
-    setFsError(null);
-    setLocalSub(null);
-    try {
-      const companyId =
-        localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
-
-      // API check
-      if (companyId) {
-        try {
-          const base = await getSmsServerUrl().catch(() => "");
-          const url = base
-            ? `${base}/api/subscription?companyId=${companyId}`
-            : `/api/subscription?companyId=${companyId}`;
-          const res = await fetch(url);
-          let json = null;
-          try {
-            json = await res.json();
-          } catch {}
-          setApiData({ status: res.status, ok: res.ok, body: json });
-        } catch (e) {
-          setApiError(String(e));
-        }
-      } else {
-        setApiError("No companyId found in localStorage");
-      }
-
-      // Firestore profile fallback
-      try {
-        let profile: any = null;
-        if (companyId) {
-          profile = await getClientProfile(companyId).catch(() => null);
-        }
-        if (!profile) {
-          initializeFirebase();
-          const auth = getFirebaseAuth();
-          const user = await new Promise<any>((resolve) => {
-            if (auth.currentUser) return resolve(auth.currentUser);
-            const unsub = auth.onAuthStateChanged((u: any) => {
-              if (u) {
-                try {
-                  unsub();
-                } catch {}
-                return resolve(u);
-              }
-            });
-            setTimeout(() => resolve(auth.currentUser || null), 5000);
-          });
-          if (user && user.uid) {
-            profile = await getClientProfile(user.uid).catch(() => null);
-          }
-        }
-        if (profile) setFsProfile(profile);
-        else setFsError("No profile found or permission denied");
-      } catch (e) {
-        setFsError(String(e));
-      }
-
-      // localStorage subscription
-      try {
-        const raw = localStorage.getItem("subscription");
-        if (raw) setLocalSub(JSON.parse(raw));
-        else setLocalSub(null);
-      } catch (e) {
-        setLocalSub({ error: String(e) });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchDebug();
-  }, [fetchDebug]);
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4 shadow-sm text-xs">
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="text-sm font-semibold">Subscription Debug</h4>
-        <div className="flex gap-2 items-center">
-          <button
-            onClick={fetchDebug}
-            className="text-xs px-2 py-1 border rounded bg-gray-50 hover:bg-gray-100"
-          >
-            Refresh
-          </button>
-          <button
-            onClick={() => {
-              try {
-                localStorage.removeItem("subscription");
-                setLocalSub(null);
-                alert("Cleared local subscription");
-              } catch {}
-            }}
-            className="text-xs px-2 py-1 border rounded bg-red-50 text-red-700"
-          >
-            Clear local
-          </button>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <div className="text-[11px] font-medium mb-1">API</div>
-          {loading ? (
-            <div>Loading...</div>
-          ) : apiError ? (
-            <pre className="text-red-600">{apiError}</pre>
-          ) : (
-            <pre className="whitespace-pre-wrap max-h-48 overflow-auto">
-              {JSON.stringify(apiData, null, 2)}
-            </pre>
-          )}
-        </div>
-        <div>
-          <div className="text-[11px] font-medium mb-1">Firestore Profile</div>
-          {loading ? (
-            <div>Loading...</div>
-          ) : fsError ? (
-            <pre className="text-red-600">{fsError}</pre>
-          ) : (
-            <pre className="whitespace-pre-wrap max-h-48 overflow-auto">
-              {JSON.stringify(fsProfile, null, 2)}
-            </pre>
-          )}
-        </div>
-        <div>
-          <div className="text-[11px] font-medium mb-1">
-            localStorage.subscription
-          </div>
-          <pre className="whitespace-pre-wrap max-h-48 overflow-auto">
-            {JSON.stringify(localSub, null, 2)}
-          </pre>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // Inline lock component for customer list
-// Prefer Firestore profile data (clients/{companyId}/profile/main or
-// clients/{authUid}/profile/main) before falling back to the API and
-// finally legacy localStorage. This ensures payment data written by the
-// hosted checkout is honored immediately after redirect.
-const SubscriptionCustomerLock: React.FC = () => {
-  const [locked, setLocked] = React.useState<boolean>(true);
-  const unsubProfileListenerRef = React.useRef<(() => void) | null>(null);
-
-  React.useEffect(() => {
-    let mounted = true;
-
-    const waitForAuth = (authObj: any, timeoutMs = 5000) =>
-      new Promise<any>((resolve) => {
-        if (authObj.currentUser) return resolve(authObj.currentUser);
-        const unsub = authObj.onAuthStateChanged((user: any) => {
-          if (user) {
-            try {
-              unsub();
-            } catch {}
-            return resolve(user);
-          }
-        });
-        setTimeout(() => resolve(authObj.currentUser || null), timeoutMs);
-      });
-
-    // store unsubscribe callback in ref to ensure cleanup can access it
-    const evalLock = async () => {
-      try {
-        let companyId =
-          localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
-
-        // Quick UI shortcut: if ProfilePage recently set a local flag indicating
-        // a Firestore profile had a plan, use that to unlock the UI immediately
-        // (the server/Firestore remains authoritative for actual send).
-        try {
-          const rawFlag = localStorage.getItem("profile_subscription_present");
-          if (rawFlag) {
-            const parsed = JSON.parse(rawFlag || "{}");
-            const age = Date.now() - (parsed.ts || 0);
-            // honor the flag only when it's fresh (e.g., 60s)
-            if (age >= 0 && age < 60 * 1000) {
-              // If companyId is present in flag and differs from current
-              // companyId, still honor it because ProfilePage reflects the
-              // authenticated user's doc
-              if (mounted) setLocked(false);
-              return;
-            }
-          }
-        } catch {}
-
-        // If no companyId in localStorage, try to derive it from Firebase auth
-        if (!companyId) {
-          try {
-            initializeFirebase();
-            const auth = getFirebaseAuth();
-            const user = await waitForAuth(auth, 5000).catch(() => null);
-            if (user && user.uid) {
-              companyId = user.uid;
-              try {
-                // Persist so subsequent checks are faster
-                localStorage.setItem("companyId", companyId);
-              } catch {}
-            }
-          } catch (e) {
-            // ignore and fall through to other checks
-            console.debug("[SubscriptionCustomerLock] auth derive failed:", e);
-          }
-        }
-
-        // 1) Auth-owned profile realtime listener (most authoritative for
-        // hosted-checkout flows). If the authenticated user's profile has
-        // plan info, unlock immediately and skip other checks.
-        try {
-          initializeFirebase();
-          const auth = getFirebaseAuth();
-          const user = await waitForAuth(auth).catch(() => null);
-          if (user && user.uid) {
-            try {
-              const db = getFirebaseDb();
-              // Try a direct read first so we can unlock immediately if profile exists
-              try {
-                const profileRead = await getClientProfile(user.uid).catch(
-                  () => null
-                );
-                if (profileRead) {
-                  const hasPlanRead = Boolean(
-                    profileRead.planId ||
-                      profileRead.plan ||
-                      profileRead.planName
-                  );
-                  if (hasPlanRead) {
-                    if (mounted) setLocked(false);
-                    return;
-                  }
-                }
-              } catch (readErr) {
-                console.debug(
-                  "[SubscriptionCustomerLock] auth profile direct read failed:",
-                  readErr
-                );
-              }
-
-              const profileRef = doc(
-                db,
-                "clients",
-                user.uid,
-                "profile",
-                "main"
-              );
-              const unsubProfile = onSnapshot(
-                profileRef,
-                (snap) => {
-                  if (snap && snap.exists()) {
-                    const profile = snap.data();
-                    const hasPlan = Boolean(
-                      profile.planId || profile.plan || profile.planName
-                    );
-                    if (hasPlan) {
-                      if (mounted) setLocked(false);
-                    }
-                  }
-                },
-                (err) => {
-                  console.debug(
-                    "[SubscriptionCustomerLock] auth profile onSnapshot error:",
-                    err
-                  );
-                }
-              );
-              unsubProfileListenerRef.current = unsubProfile;
-              // If we were able to derive companyId from the auth user, use it
-              if (!companyId) {
-                companyId = user.uid;
-                try {
-                  localStorage.setItem("companyId", companyId);
-                } catch {}
-              }
-              // Ensure we unsubscribe this listener when the component unmounts
-              // by storing it in `unsubProfileListener`.
-              unsubProfileListenerRef.current = unsubProfile;
-              // If profile document exists and has a plan, the onSnapshot
-              // handler will setLocked(false) and we can return early.
-            } catch (authSnapErr) {
-              console.debug(
-                "[SubscriptionCustomerLock] auth profile subscribe failed:",
-                authSnapErr
-              );
-            }
-          }
-        } catch (fsErr) {
-          console.debug(
-            "[SubscriptionCustomerLock] Firestore auth listener failed:",
-            fsErr
-          );
-        }
-
-        // 2) API check (fallback)
-        try {
-          const base = await getSmsServerUrl().catch(() => "");
-          const url = base
-            ? `${base}/api/subscription?companyId=${companyId}`
-            : `/api/subscription?companyId=${companyId}`;
-          const resp = await fetch(url);
-          const data = await resp.json().catch(() => ({}));
-          if (data && data.success && data.subscription) {
-            const s = data.subscription;
-            const hasPlan = Boolean(s.planId || s.plan || s.planName);
-            const hasRemaining =
-              typeof s.remainingCredits !== "undefined" ||
-              typeof s.smsCredits !== "undefined";
-            if (hasPlan) {
-              if (mounted) setLocked(false);
-              return;
-            }
-            if (hasRemaining) {
-              const status = String(s.status || "").toLowerCase();
-              const active =
-                status === "active" ||
-                status === "paid" ||
-                status === "trialing";
-              const remaining = Number(s.remainingCredits ?? s.smsCredits ?? 0);
-              const isLocked = !(active && remaining > 0);
-              if (mounted) setLocked(Boolean(isLocked));
-              return;
-            }
-
-            // API returned a subscription but it's inconclusive (no plan
-            // and no remaining fields). Consult Firestore and finally
-            // localStorage before deciding the locked state.
-            try {
-              // Try profile for companyId first
-              try {
-                const p = companyId
-                  ? await getClientProfile(companyId).catch(() => null)
-                  : null;
-                if (p && (p.planId || p.plan || p.planName)) {
-                  if (mounted) setLocked(false);
-                  return;
-                }
-              } catch {}
-
-              // Try auth-derived mapping and auth-owned doc
-              try {
-                initializeFirebase();
-                const auth = getFirebaseAuth();
-                const waitForAuth = (timeoutMs = 3000) =>
-                  new Promise<any>((resolve) => {
-                    if (auth.currentUser) return resolve(auth.currentUser);
-                    const unsub = auth.onAuthStateChanged((u: any) => {
-                      if (u) {
-                        try {
-                          unsub();
-                        } catch {}
-                        return resolve(u);
-                      }
-                    });
-                    setTimeout(
-                      () => resolve(auth.currentUser || null),
-                      timeoutMs
-                    );
-                  });
-                const user = await waitForAuth().catch(() => null);
-                if (user && user.uid) {
-                  try {
-                    const p2 = await getClientProfile(user.uid).catch(
-                      () => null
-                    );
-                    if (p2 && (p2.planId || p2.plan || p2.planName)) {
-                      if (mounted) setLocked(false);
-                      return;
-                    }
-                  } catch {}
-
-                  try {
-                    const mapped = await getClientByAuthUid(user.uid).catch(
-                      () => null
-                    );
-                    if (mapped && mapped.id) {
-                      const p3 = await getClientProfile(mapped.id).catch(
-                        () => null
-                      );
-                      if (p3 && (p3.planId || p3.plan || p3.planName)) {
-                        try {
-                          localStorage.setItem("companyId", mapped.id);
-                        } catch {}
-                        if (mounted) setLocked(false);
-                        return;
-                      }
-                      const b3 = await getClientBillingSubscription(
-                        mapped.id
-                      ).catch(() => null);
-                      if (b3 && (b3.planId || b3.plan || b3.planName)) {
-                        if (mounted) setLocked(false);
-                        return;
-                      }
-                    }
-                  } catch {}
-                }
-              } catch (e) {
-                console.debug(
-                  "[SubscriptionCustomerLock] Firestore inconclusive fallback failed:",
-                  e
-                );
-              }
-
-              // Final fallback: localStorage
-              try {
-                const raw = localStorage.getItem("subscription");
-                if (!raw) {
-                  if (mounted) setLocked(true);
-                  return;
-                }
-                const sub = JSON.parse(raw);
-                const hasPlanLocal = Boolean(
-                  sub.planId || sub.plan || sub.planName
-                );
-                const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
-                if (hasPlanLocal || creditsOk) {
-                  if (mounted) setLocked(false);
-                  return;
-                }
-                if (mounted) setLocked(true);
-                return;
-              } catch (e2) {
-                if (mounted) setLocked(true);
-                return;
-              }
-            } catch (apiToFsErr) {
-              console.debug(
-                "[SubscriptionCustomerLock] API inconclusive -> Firestore check failed:",
-                apiToFsErr
-              );
-            }
-          }
-        } catch (apiErr) {
-          console.debug("[SubscriptionCustomerLock] API check failed:", apiErr);
-        }
-
-        // 3) Final fallback: localStorage (legacy behavior)
-        try {
-          const raw = localStorage.getItem("subscription");
-          if (!raw) {
-            if (mounted) setLocked(true);
-            return;
-          }
-          const sub = JSON.parse(raw);
-          const hasPlan = Boolean(sub.planId || sub.plan || sub.planName);
-          if (hasPlan) {
-            if (mounted) setLocked(false);
-            return;
-          }
-          const active =
-            sub.status === "active" &&
-            sub.endDate &&
-            new Date(sub.endDate).getTime() > Date.now();
-          const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
-          if (mounted) setLocked(!(active && creditsOk));
-          return;
-        } catch (e2) {
-          if (mounted) setLocked(true);
-          return;
-        }
-      } catch (outer) {
-        console.warn("[SubscriptionCustomerLock] unexpected error:", outer);
-        if (mounted) setLocked(true);
-      }
-    };
-
-    evalLock();
-    const id = setInterval(evalLock, 5000);
-
-    const onSubUpdated = () => evalLock();
-    window.addEventListener("subscription:updated", onSubUpdated);
-    window.addEventListener("storage", onSubUpdated);
-    window.addEventListener("auth:ready", onSubUpdated);
-
-    return () => {
-      mounted = false;
-      clearInterval(id);
-      window.removeEventListener("subscription:updated", onSubUpdated);
-      window.removeEventListener("storage", onSubUpdated);
-    };
-  }, []);
-
-  if (!locked) return null;
-  // Payments are always enabled — remove feature-flagged disabled state.
-
-  return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/85 backdrop-blur-sm border-2 border-dashed border-indigo-300">
-      <div className="text-center px-6 py-8">
-        <h4 className="text-xl font-bold text-gray-900 mb-2">
-          Activate Your Plan
-        </h4>
-        <p className="text-gray-600 mb-4 max-w-xs">
-          Subscribe to unlock customer import and bulk SMS sending.
-        </p>
-        <button
-          onClick={() => {
-            try {
-              window.location.href = "/payment";
-            } catch {}
-          }}
-          className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-500"
-        >
-          Choose a Plan
-        </button>
-      </div>
-    </div>
-  );
-};
+// SubscriptionCustomerLock removed — payment concept disabled
+const SubscriptionCustomerLock: React.FC = () => null;
 
 // Custom hook to fetch dashboard stats from Firebase
 const useDashboardStats = () => {
@@ -928,273 +399,31 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
 
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const SubscriptionCustomerLock: React.FC = () => {
-    const [locked, setLocked] = React.useState<boolean>(true);
-    const unsubProfileListenerRef = React.useRef<(() => void) | null>(null);
-
+    const [locked, setLocked] = React.useState(false);
     React.useEffect(() => {
-      let mounted = true;
-
-      const evalLock = async () => {
+      const evalLock = () => {
         try {
-          const companyId =
-            localStorage.getItem("companyId") ||
-            localStorage.getItem("auth_uid");
-          if (!companyId) {
-            if (mounted) setLocked(true);
-            return;
-          }
-
-          // Prefer server-side subscription (Firestore via API)
-          try {
-            const base = await getSmsServerUrl().catch(() => "");
-            const url = base
-              ? `${base}/api/subscription?companyId=${companyId}`
-              : `/api/subscription?companyId=${companyId}`;
-            const resp = await fetch(url);
-            const data = await resp.json().catch(() => ({}));
-            if (data && data.success && data.subscription) {
-              const s = data.subscription;
-              const hasPlan = Boolean(s.planId || s.plan || s.planName);
-              const hasRemaining =
-                typeof s.remainingCredits !== "undefined" ||
-                typeof s.smsCredits !== "undefined";
-              if (hasPlan) {
-                if (mounted) setLocked(false);
-                return;
-              }
-              if (hasRemaining) {
-                const status = String(s.status || "").toLowerCase();
-                const active =
-                  status === "active" ||
-                  status === "paid" ||
-                  status === "trialing";
-                const remaining = Number(
-                  s.remainingCredits ?? s.smsCredits ?? 0
-                );
-                const isLocked = !(active && remaining > 0);
-                if (mounted) setLocked(Boolean(isLocked));
-                return;
-              }
-
-              // Inconclusive API response: consult Firestore and localStorage
-              try {
-                try {
-                  const p = companyId
-                    ? await getClientProfile(companyId).catch(() => null)
-                    : null;
-                  if (p && (p.planId || p.plan || p.planName)) {
-                    if (mounted) setLocked(false);
-                    return;
-                  }
-                } catch {}
-
-                try {
-                  initializeFirebase();
-                  const auth = getFirebaseAuth();
-                  const waitForAuth = (timeoutMs = 3000) =>
-                    new Promise<any>((resolve) => {
-                      if (auth.currentUser) return resolve(auth.currentUser);
-                      const unsub = auth.onAuthStateChanged((u: any) => {
-                        if (u) {
-                          try {
-                            unsub();
-                          } catch {}
-                          return resolve(u);
-                        }
-                      });
-                      setTimeout(
-                        () => resolve(auth.currentUser || null),
-                        timeoutMs
-                      );
-                    });
-                  const user = await waitForAuth().catch(() => null);
-                  if (user && user.uid) {
-                    const p2 = await getClientProfile(user.uid).catch(
-                      () => null
-                    );
-                    if (p2 && (p2.planId || p2.plan || p2.planName)) {
-                      if (mounted) setLocked(false);
-                      return;
-                    }
-                    const mapped = await getClientByAuthUid(user.uid).catch(
-                      () => null
-                    );
-                    if (mapped && mapped.id) {
-                      const p3 = await getClientProfile(mapped.id).catch(
-                        () => null
-                      );
-                      if (p3 && (p3.planId || p3.plan || p3.planName)) {
-                        try {
-                          localStorage.setItem("companyId", mapped.id);
-                        } catch {}
-                        if (mounted) setLocked(false);
-                        return;
-                      }
-                      const b3 = await getClientBillingSubscription(
-                        mapped.id
-                      ).catch(() => null);
-                      if (b3 && (b3.planId || b3.plan || b3.planName)) {
-                        if (mounted) setLocked(false);
-                        return;
-                      }
-                    }
-                  }
-                } catch (e) {
-                  console.debug(
-                    "[SubscriptionCustomerLock] Firestore inconclusive fallback failed:",
-                    e
-                  );
-                }
-
-                // Final fallback: localStorage
-                try {
-                  const raw = localStorage.getItem("subscription");
-                  if (!raw) {
-                    if (mounted) setLocked(true);
-                    return;
-                  }
-                  const sub = JSON.parse(raw);
-                  const hasPlanLocal = Boolean(
-                    sub.planId || sub.plan || sub.planName
-                  );
-                  const creditsOk =
-                    (sub.remainingCredits ?? sub.smsCredits) > 0;
-                  if (hasPlanLocal || creditsOk) {
-                    if (mounted) setLocked(false);
-                    return;
-                  }
-                  if (mounted) setLocked(true);
-                  return;
-                } catch (e2) {
-                  if (mounted) setLocked(true);
-                  return;
-                }
-              } catch (err) {
-                console.debug(
-                  "[SubscriptionCustomerLock] API inconclusive -> fallback error:",
-                  err
-                );
-              }
-            }
-          } catch (e) {
-            // API failed — try Firestore (auth-owned profile) before falling
-            // back to localStorage. This covers the payment redirect case
-            // where the subscription is written to clients/{authUid}/profile/main
-            console.debug(
-              "[SubscriptionCustomerLock] API check failed, trying Firestore fallback:",
-              e
-            );
-            try {
-              // Ensure Firebase is initialized and wait briefly for auth
-              initializeFirebase();
-              const auth = getFirebaseAuth();
-              const waitForAuth = (timeoutMs = 5000) =>
-                new Promise<any>((resolve) => {
-                  if (auth.currentUser) return resolve(auth.currentUser);
-                  const unsub = auth.onAuthStateChanged((u: any) => {
-                    if (u) {
-                      try {
-                        unsub();
-                      } catch {}
-                      return resolve(u);
-                    }
-                  });
-                  setTimeout(
-                    () => resolve(auth.currentUser || null),
-                    timeoutMs
-                  );
-                });
-
-              const user = await waitForAuth().catch(() => null);
-              if (user && user.uid) {
-                const profile = await getClientProfile(user.uid).catch(
-                  () => null
-                );
-                if (profile) {
-                  // If the Firestore profile contains any plan information,
-                  // unlock the dashboard immediately. This matches the
-                  // behavior used elsewhere that treats a profile-written
-                  // plan as authoritative for the UI.
-                  const hasPlan = Boolean(
-                    profile.planId || profile.plan || profile.planName
-                  );
-                  if (hasPlan) {
-                    if (mounted) setLocked(false);
-                    return;
-                  }
-                  const status = String(profile.status || "").toLowerCase();
-                  const active =
-                    status === "active" ||
-                    status === "paid" ||
-                    status === "trialing";
-                  const remaining = Number(
-                    profile.remainingCredits ?? profile.smsCredits ?? 0
-                  );
-                  const isLocked = !(active && remaining > 0);
-                  if (mounted) setLocked(Boolean(isLocked));
-                  return;
-                }
-              }
-            } catch (fsErr) {
-              console.debug(
-                "[SubscriptionCustomerLock] Firestore fallback failed:",
-                fsErr
-              );
-            }
-
-            // Final fallback: localStorage (legacy behavior)
-            try {
-              const raw = localStorage.getItem("subscription");
-              if (!raw) {
-                if (mounted) setLocked(true);
-                return;
-              }
-              const sub = JSON.parse(raw);
-              const hasPlan = Boolean(sub.planId || sub.plan || sub.planName);
-              if (hasPlan) {
-                if (mounted) setLocked(false);
-                return;
-              }
-              const active =
-                sub.status === "active" &&
-                sub.endDate &&
-                new Date(sub.endDate).getTime() > Date.now();
-              const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
-              if (mounted) setLocked(!(active && creditsOk));
-              return;
-            } catch (e2) {
-              if (mounted) setLocked(true);
-              return;
-            }
-          }
-        } catch (outer) {
-          console.warn("[SubscriptionCustomerLock] unexpected error:", outer);
-          if (mounted) setLocked(true);
+          const raw = localStorage.getItem("subscription");
+          if (!raw) return setLocked(true);
+          const sub = JSON.parse(raw);
+          const active =
+            sub.status === "active" &&
+            sub.endDate &&
+            new Date(sub.endDate).getTime() > Date.now();
+          const creditsOk = (sub.remainingCredits ?? sub.smsCredits) > 0;
+          setLocked(!(active && creditsOk));
+        } catch {
+          setLocked(true);
         }
       };
-
-      // initial check
       evalLock();
       const id = setInterval(evalLock, 5000);
-
-      // Refresh when subscription updates are dispatched or storage changes
-      const onSubUpdated = () => evalLock();
-      window.addEventListener("subscription:updated", onSubUpdated);
-      window.addEventListener("storage", onSubUpdated);
-
+      window.addEventListener("storage", evalLock);
       return () => {
-        mounted = false;
-        try {
-          if (unsubProfileListenerRef.current)
-            unsubProfileListenerRef.current();
-        } catch {}
         clearInterval(id);
-        window.removeEventListener("subscription:updated", onSubUpdated);
-        window.removeEventListener("storage", onSubUpdated);
-        window.removeEventListener("auth:ready", onSubUpdated);
+        window.removeEventListener("storage", evalLock);
       };
     }, []);
-
     if (!locked) return null;
     return (
       <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/85 backdrop-blur-sm border-2 border-dashed border-indigo-300">
@@ -1208,12 +437,14 @@ const SentimentChart: React.FC<{ stats: DashboardStats | null }> = ({
           <button
             onClick={() => {
               try {
-                window.location.href = "/payment";
-              } catch (e) {
-                try {
-                  window.location.href = "/#pricing";
-                } catch {}
-              }
+                localStorage.setItem("pendingPlan", "growth_3m");
+              } catch {}
+              // Payments removed: inform the user how to proceed
+              try {
+                alert(
+                  "Payments are currently disabled in this build. Contact the admin to enable subscription plans."
+                );
+              } catch {}
             }}
             className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-500"
           >
@@ -1275,15 +506,15 @@ const SentimentChartWrapper: React.FC = () => {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-6 animate-pulse">
         <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
-        <div className="h-48 bg-gray-200 rounded"></div>
+        <div className="h-64 bg-gray-200 rounded"></div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 text-red-600">
-        <p className="font-semibold">Error loading sentiment chart</p>
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-red-600">
+        <p className="font-semibold">Error loading sentiment data</p>
         <p className="text-sm">{error}</p>
       </div>
     );
@@ -1291,10 +522,491 @@ const SentimentChartWrapper: React.FC = () => {
 
   return <SentimentChart stats={stats} />;
 };
-// NOTE: removed an accidentally duplicated JSX block that was inserted here by
-// a previous edit. The CustomerTable and related components are defined later
-// in this file; keeping this duplicate caused stray JSX to exist outside any
-// component scope and produced parse errors.
+
+// Dashboard Overview cards (top summary) – counts sent based on logs first, fallback to status.
+const DashboardOverview: React.FC<{
+  customers: Customer[];
+  activityLogs: ActivityLog[];
+}> = ({ customers, activityLogs }) => {
+  // Count sends from logs (preferred accurate source)
+  const sentLogCount = activityLogs.filter((log) => {
+    const a = log.action.toLowerCase();
+    return (
+      a.includes("sent sms") ||
+      a.includes("resend sms") ||
+      a.includes("sent review request")
+    );
+  }).length;
+  // Fallback to status derived
+  const statusDerivedSent = customers
+    .filter((c) => c.id !== "public-feedback")
+    .filter(
+      (c) =>
+        c.status === "Sent" || c.status === "Clicked" || c.status === "Reviewed"
+    ).length;
+  const messagesSent = sentLogCount > 0 ? sentLogCount : statusDerivedSent;
+
+  const reviewRedirects = customers.filter(
+    (c) => c.status === "Clicked" || c.status === "Reviewed"
+  ).length;
+
+  const conversionRate =
+    messagesSent > 0 ? (reviewRedirects / messagesSent) * 100 : 0;
+
+  const Card = ({
+    value,
+    label,
+    colorClass = "text-gray-900",
+  }: {
+    value: string;
+    label: string;
+    colorClass?: string;
+  }) => {
+    let bgColor = "bg-gray-50";
+    let iconColor = "text-gray-400";
+    let iconBg = "bg-gray-100";
+    let iconPath =
+      "M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4";
+
+    if (colorClass.includes("green")) {
+      bgColor = "bg-emerald-50";
+      iconColor = "text-emerald-600";
+      iconBg = "bg-emerald-100";
+      iconPath = "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z";
+    } else if (colorClass.includes("red")) {
+      bgColor = "bg-red-50";
+      iconColor = "text-red-600";
+      iconBg = "bg-red-100";
+      iconPath =
+        "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z";
+    }
+
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 lg:p-6 hover:shadow-lg hover:border-gray-300 transition-all duration-200">
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="text-[10px] sm:text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 sm:mb-3">
+              {label}
+            </div>
+            <div className={`text-2xl sm:text-3xl font-bold ${colorClass}`}>
+              {value}
+            </div>
+          </div>
+          <div className={`${iconBg} p-2 sm:p-3 rounded-xl`}>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className={`h-5 w-5 ${iconColor}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d={iconPath}
+              />
+            </svg>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Count positive/negative reviews from all feedback
+  const allFeedback = customers.flatMap((c) => c.feedback || []);
+  const positiveCount = allFeedback.filter(
+    (f) => f.sentiment === "positive"
+  ).length;
+  const negativeCount = allFeedback.filter(
+    (f) => f.sentiment === "negative"
+  ).length;
+
+  return (
+    <div className="mb-0">
+      <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold text-gray-900 mb-3 sm:mb-4 lg:mb-6">
+        Overview
+      </h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
+        <Card value={messagesSent.toLocaleString()} label="Messages Sent" />
+        <Card
+          value={positiveCount.toLocaleString()}
+          label="Positive Reviews"
+          colorClass="text-green-600"
+        />
+        <Card
+          value={negativeCount.toLocaleString()}
+          label="Negative Reviews"
+          colorClass="text-red-600"
+        />
+      </div>
+    </div>
+  );
+};
+// (Small card component for negative comments removed per UI request)
+// Props for NegativeFeedbackSection
+// Section to show only negative feedback comments FROM FIREBASE
+type NegativeFeedbackSectionProps = {
+  comments: Array<{
+    id: string;
+    companyId: string;
+    customerPhone: string;
+    commentText: string;
+    rating: number;
+    createdAt: any;
+  }>;
+  loading: boolean;
+  onDelete: (commentId: string) => void;
+  onExport?: () => void;
+  onClearAll?: () => void;
+  businessName?: string;
+  feedbackPageLink?: string;
+  deletingIds?: string[];
+};
+const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
+  comments,
+  loading,
+  onDelete,
+  onExport,
+  onClearAll,
+  businessName,
+  feedbackPageLink,
+  deletingIds = [],
+}) => {
+  // Pagination and search state (table style like Customer List)
+  const pageSize = 2;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => setCurrentPage(1), [searchQuery, comments]);
+
+  // Local helper for WhatsApp support-style message (kept inside component scope)
+  function getSupportWaMessage(customerName: string) {
+    const reviewLink = feedbackPageLink || window.location.href;
+    const tmpl =
+      "Hi [Customer Name], sorry for your bad experience. We'll sort the issue as soon as possible.";
+    return tmpl
+      .replace(/\[Customer Name\]/g, customerName || "Customer")
+      .replace(/\[Review Link\]/g, reviewLink || "");
+  }
+
+  // Build a deduplicated list of comments (fingerprint: phone|text|createdAt)
+  const uniqueComments = React.useMemo(() => {
+    const map: Record<string, any> = {};
+    (comments || []).forEach((c) => {
+      if (!c) return;
+      const phone = (c.customerPhone || "").replace(/\s+/g, "");
+      const text = String(c.commentText || "").replace(/\r?\n/g, " ");
+
+      // Safe date conversion with validation
+      let createdAtIso: string;
+      try {
+        if (c.createdAt?.toDate) {
+          const d = new Date(c.createdAt.toDate());
+          createdAtIso = !isNaN(d.getTime())
+            ? d.toISOString()
+            : new Date().toISOString();
+        } else if (c.createdAt) {
+          const d = new Date(c.createdAt);
+          createdAtIso = !isNaN(d.getTime())
+            ? d.toISOString()
+            : new Date().toISOString();
+        } else {
+          createdAtIso = new Date().toISOString();
+        }
+      } catch {
+        createdAtIso = new Date().toISOString();
+      }
+
+      const key = `${phone}||${text}||${createdAtIso}`;
+      const existing = map[key];
+      if (!existing) map[key] = { ...c, createdAtIso };
+      else {
+        try {
+          const cur = Date.parse(
+            existing.createdAtIso || existing.createdAt || ""
+          );
+          const nowTs = Date.parse(createdAtIso || "");
+          if (nowTs > cur) map[key] = { ...c, createdAtIso };
+        } catch {
+          // ignore
+        }
+      }
+    });
+    return Object.values(map).sort((a: any, b: any) => {
+      const ta = Date.parse(a.createdAtIso || a.createdAt || "");
+      const tb = Date.parse(b.createdAtIso || b.createdAt || "");
+      return tb - ta;
+    });
+  }, [comments]);
+  // Filter by search query (name or phone or text)
+  const filtered = React.useMemo(() => {
+    const q = String(searchQuery || "")
+      .trim()
+      .toLowerCase();
+    if (!q) return uniqueComments;
+    return uniqueComments.filter((c) => {
+      const phone = String(c.customerPhone || "").toLowerCase();
+      const text = String(c.commentText || "").toLowerCase();
+      return phone.includes(q) || text.includes(q);
+    });
+  }, [uniqueComments, searchQuery]);
+  if (loading) {
+    return (
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 mt-2">
+        <h3 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-2">
+          <div className="bg-red-100 p-1.5 rounded-full">
+            <XCircleIcon className="h-5 w-5 text-red-600" />
+          </div>
+          Negative Comments
+        </h3>
+        <p className="text-gray-500 text-center py-4">Loading comments...</p>
+      </div>
+    );
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 mt-2">
+        <h3 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-2">
+          <div className="bg-red-100 p-1.5 rounded-full">
+            <XCircleIcon className="h-5 w-5 text-red-600" />
+          </div>
+          Negative Comments
+        </h3>
+        <p className="text-gray-500 text-center py-8">
+          No negative comments yet. Feedback will appear here automatically.
+        </p>
+      </div>
+    );
+  }
+  // New: render table-style layout similar to Customer List
+  return (
+    <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg transition-all duration-300 hover:shadow-xl rounded-2xl p-4 sm:p-5 lg:p-6">
+      <div className="mb-4 sm:mb-6 flex items-center justify-between">
+        <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-0 flex items-center gap-2">
+          <div className="bg-red-100 p-1.5 rounded-full">
+            <XCircleIcon className="h-5 w-5 text-red-600" />
+          </div>
+          Negative Comments
+          <span className="text-xs leading-4 font-bold text-gray-600 bg-gray-100 border border-gray-200 px-3 py-1 rounded-full">
+            {uniqueComments.length} total
+          </span>
+        </h3>
+        <div className="w-full">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <input
+                type="text"
+                placeholder="Search by phone or text..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-3 pr-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white text-gray-900 shadow-sm text-sm sm:text-base"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => onExport && onExport()}
+                className="px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 text-sm"
+              >
+                Export
+              </button>
+              <button
+                type="button"
+                onClick={() => onClearAll && onClearAll()}
+                className="px-3 py-2 bg-red-50 border border-red-100 text-red-700 rounded-xl hover:bg-red-100 text-sm"
+              >
+                Clear data
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        {/* Desktop/table view (show on sm and larger) */}
+        <div className="hidden sm:block overflow-x-auto">
+          <table className="w-full text-sm text-left text-gray-500">
+            <thead className="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0 z-10">
+              <tr>
+                <th className="px-3 sm:px-6 py-3 font-medium">Phone</th>
+                <th className="px-3 sm:px-6 py-3 font-medium">Comment</th>
+
+                <th className="px-3 sm:px-6 py-3 text-right font-medium">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const start = (currentPage - 1) * pageSize;
+                const rows = filtered.slice(start, start + pageSize);
+                return rows.map((c) => (
+                  <tr key={c.id} className="bg-white border-b hover:bg-gray-50">
+                    <td className="px-3 sm:px-6 py-3">{c.customerPhone}</td>
+                    <td className="px-3 sm:px-6 py-3">{c.commentText}</td>
+
+                    <td className="px-6 py-3 text-right">
+                      <div className="flex items-center gap-2 justify-end">
+                        <a
+                          onClick={(e) => {
+                            e.preventDefault();
+                            const phone = (c.customerPhone || "").replace(
+                              /\D/g,
+                              ""
+                            );
+                            if (!phone) return;
+                            const msg = encodeURIComponent(
+                              getSupportWaMessage(c.customerPhone || "Customer")
+                            );
+                            window.open(
+                              `https://wa.me/${phone}?text=${msg}`,
+                              "_blank",
+                              "noopener,noreferrer"
+                            );
+                          }}
+                          className="p-3 rounded-md hover:bg-green-50 text-green-700 inline-flex items-center justify-center"
+                          href="#"
+                          title="Reply via WhatsApp"
+                        >
+                          <svg
+                            className="h-6 w-6"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                            aria-hidden
+                          >
+                            <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .02 5.36 0 12c0 2.11.55 4.18 1.6 6.01L0 24l6.12-1.59A11.95 11.95 0 0012 24c6.63 0 12-5.37 12-12 0-3.2-1.25-6.2-3.48-8.52zM12 21.5c-1.8 0-3.55-.46-5.1-1.33l-.36-.19-3.64.94.98-3.55-.23-.37A9.5 9.5 0 012.5 12c0-5.24 4.26-9.5 9.5-9.5 2.54 0 4.92.99 6.72 2.79A9.45 9.45 0 0121.5 12c0 5.24-4.26 9.5-9.5 9.5z" />
+                          </svg>
+                        </a>
+                        <button
+                          onClick={() => onDelete(c.id)}
+                          className="p-3 rounded-md hover:bg-red-50 text-red-600 inline-flex items-center justify-center"
+                          disabled={(deletingIds || []).includes(c.id)}
+                          title="Delete comment"
+                        >
+                          {(deletingIds || []).includes(c.id) ? (
+                            <span className="text-xs text-gray-500">
+                              Deleting...
+                            </span>
+                          ) : (
+                            <TrashIcon className="h-5 w-5" />
+                          )}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile stacked card view (show on xs only) */}
+        <div className="block sm:hidden space-y-3">
+          {(() => {
+            const start = (currentPage - 1) * pageSize;
+            const rows = filtered.slice(start, start + pageSize);
+            return rows.map((c) => (
+              <div
+                key={c.id}
+                className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-gray-900 truncate">
+                        {c.customerPhone || "—"}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {c.createdAt?.toDate
+                          ? new Date(c.createdAt.toDate()).toLocaleString()
+                          : new Date(c.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="mt-2 text-sm text-gray-700 whitespace-pre-line break-words">
+                      {c.commentText}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      const phone = (c.customerPhone || "").replace(/\D/g, "");
+                      if (!phone) return;
+                      const msg = encodeURIComponent(
+                        getSupportWaMessage(c.customerPhone || "Customer")
+                      );
+                      window.open(
+                        `https://wa.me/${phone}?text=${msg}`,
+                        "_blank",
+                        "noopener,noreferrer"
+                      );
+                    }}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-green-50 text-green-700 text-sm font-semibold hover:bg-green-100"
+                    title="Reply via WhatsApp"
+                  >
+                    Reply
+                  </button>
+                  <button
+                    onClick={() => onDelete(c.id)}
+                    disabled={(deletingIds || []).includes(c.id)}
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm font-semibold hover:bg-red-100"
+                    title="Delete comment"
+                  >
+                    {(deletingIds || []).includes(c.id) ? (
+                      <span className="text-xs text-gray-500">Deleting...</span>
+                    ) : (
+                      <TrashIcon className="h-4 w-4" />
+                    )}
+                    <span className="hidden sm:inline">Delete</span>
+                  </button>
+                </div>
+              </div>
+            ));
+          })()}
+        </div>
+      </div>
+
+      {/* Pagination */}
+      {(() => {
+        const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+        return (
+          <div className="flex justify-center items-center mt-4 gap-2">
+            <button
+              className="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-900 font-medium hover:bg-gray-50 disabled:opacity-50"
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+            >
+              Prev
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              <button
+                key={p}
+                onClick={() => setCurrentPage(p)}
+                className={`px-3 py-1 rounded-full font-medium ${
+                  p === currentPage
+                    ? "bg-gray-900 text-white"
+                    : "bg-white border text-gray-700"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              className="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-900 font-medium hover:bg-gray-50 disabled:opacity-50"
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+            >
+              Next
+            </button>
+          </div>
+        );
+      })()}
+    </div>
+  );
+};
 // (imports moved to top)
 
 declare var XLSX: any;
@@ -1556,158 +1268,6 @@ const FunnelAnalytics: React.FC<{ customers: Customer[] }> = ({
             </div>
           )}
         </div>
-      </div>
-    </div>
-  );
-};
-
-// Negative feedback section (simplified)
-type NegativeFeedbackSectionProps = {
-  comments: Array<{
-    id: string;
-    companyId: string;
-    customerPhone: string;
-    commentText: string;
-    rating: number;
-    createdAt: any;
-  }>;
-  loading: boolean;
-  onDelete: (commentId: string) => void;
-  onExport?: () => void;
-  onClearAll?: () => void;
-  businessName?: string;
-  feedbackPageLink?: string;
-  deletingIds?: string[];
-};
-
-const NegativeFeedbackSection: React.FC<NegativeFeedbackSectionProps> = ({
-  comments,
-  loading,
-  onDelete,
-  onExport,
-  onClearAll,
-  businessName,
-  feedbackPageLink,
-  deletingIds = [],
-}) => {
-  const [searchQuery, setSearchQuery] = useState("");
-
-  useEffect(() => {
-    // reset pagination/search when comments change
-  }, [comments]);
-
-  function getSupportWaMessage(customerName: string) {
-    const reviewLink = feedbackPageLink || window.location.href;
-    const tmpl =
-      "Hi [Customer Name], sorry for your bad experience. We'll sort the issue as soon as possible.";
-    return tmpl.replace(/\[Customer Name\]/g, customerName || "Customer");
-  }
-
-  if (loading) {
-    return (
-      <div className="bg-white p-6 rounded-2xl border border-gray-200 mt-2">
-        <h3 className="text-lg font-bold text-gray-900 mb-5">
-          Negative Comments
-        </h3>
-        <p className="text-gray-500">Loading comments...</p>
-      </div>
-    );
-  }
-
-  if (!comments || comments.length === 0) {
-    return (
-      <div className="bg-white p-6 rounded-2xl border border-gray-200 mt-2">
-        <h3 className="text-lg font-bold text-gray-900 mb-5">
-          Negative Comments
-        </h3>
-        <p className="text-gray-500">
-          No negative comments yet. Feedback will appear here automatically.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg transition-all duration-300 hover:shadow-xl rounded-2xl p-4 sm:p-5 lg:p-6">
-      <div className="mb-4 sm:mb-6 flex items-center justify-between">
-        <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-0">
-          Negative Comments
-        </h3>
-        <div className="flex gap-2">
-          <button
-            onClick={() => onExport && onExport()}
-            className="px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 text-sm"
-          >
-            Export
-          </button>
-          <button
-            onClick={() => onClearAll && onClearAll()}
-            className="px-3 py-2 bg-red-50 border border-red-100 text-red-700 rounded-xl hover:bg-red-100 text-sm"
-          >
-            Clear data
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        {comments.map((c) => (
-          <div
-            key={c.id}
-            className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-gray-900 truncate">
-                  {c.customerPhone || "—"}
-                </div>
-                <div className="mt-2 text-sm text-gray-700 whitespace-pre-line break-words">
-                  {c.commentText}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <a
-                  onClick={(e) => {
-                    e.preventDefault();
-                    const phone = (c.customerPhone || "").replace(/\D/g, "");
-                    if (!phone) return;
-                    const msg = encodeURIComponent(
-                      getSupportWaMessage(c.customerPhone || "Customer")
-                    );
-                    window.open(
-                      `https://wa.me/${phone}?text=${msg}`,
-                      "_blank",
-                      "noopener,noreferrer"
-                    );
-                  }}
-                  className="p-3 rounded-md hover:bg-green-50 text-green-700 inline-flex items-center justify-center"
-                  href="#"
-                  title="Reply via WhatsApp"
-                >
-                  <svg
-                    className="h-6 w-6"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    aria-hidden
-                  >
-                    <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .02 5.36 0 12c0 2.11.55 4.18 1.6 6.01L0 24l6.12-1.59A11.95 11.95 0 0012 24c6.63 0 12-5.37 12-12 0-3.2-1.25-6.2-3.48-8.52zM12 21.5c-1.8 0-3.55-.46-5.1-1.33l-.36-.19-3.64.94.98-3.55-.23-.37A9.5 9.5 0 012.5 12c0-5.24 4.26-9.5 9.5-9.5 2.54 0 4.92.99 6.72 2.79A9.45 9.45 0 0121.5 12c0 5.24-4.26 9.5-9.5 9.5z" />
-                  </svg>
-                </a>
-                <button
-                  onClick={() => onDelete(c.id)}
-                  className="p-3 rounded-md hover:bg-red-50 text-red-600 inline-flex items-center justify-center"
-                  disabled={(deletingIds || []).includes(c.id)}
-                  title="Delete comment"
-                >
-                  {(deletingIds || []).includes(c.id) ? (
-                    <span className="text-xs text-gray-500">Deleting...</span>
-                  ) : (
-                    <TrashIcon className="h-5 w-5" />
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -2191,9 +1751,6 @@ const CustomerTable: React.FC<CustomerTableProps> = ({
   onUploadCustomers,
   onOpenAddCustomer,
 }) => {
-  // Local toggle for showing the temporary subscription debug panel
-  const [showSubscriptionDebug, setShowSubscriptionDebug] =
-    useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -2379,16 +1936,7 @@ const CustomerTable: React.FC<CustomerTableProps> = ({
             </span>
           </h3>
           {/* Inline subscription lock overlay (reads from localStorage) */}
-          <div className="flex items-center justify-end gap-3 mb-3">
-            <button
-              onClick={() => setShowSubscriptionDebug((v) => !v)}
-              className="text-xs px-2 py-1 rounded-md border bg-gray-50 hover:bg-gray-100"
-            >
-              {showSubscriptionDebug ? "Hide" : "Show"} Subscription Debug
-            </button>
-          </div>
-          {/* Subscription lock removed — show upload UI unblocked */}
-          {showSubscriptionDebug && <SubscriptionDebugView />}
+          <SubscriptionCustomerLock />
           <div className="flex flex-col gap-3">
             <div className="w-full flex flex-col sm:flex-row items-center gap-2">
               <div className="relative w-full sm:flex-1">
@@ -2756,7 +2304,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const [sendMessagesSelectedCount, setSendMessagesSelectedCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sendBanner, setSendBanner] = useState<string | null>(null);
-
   // Signal the SendMessagesCard to select all after an upload completes
   const [selectAllSignal, setSelectAllSignal] = useState(0);
   // If an upload just happened, wait for customers prop to update and trigger selection again
@@ -3862,7 +3409,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                         Messages Sent
                       </div>
                       <div className="text-4xl sm:text-5xl font-extrabold text-blue-600 mb-2">
-                        {messagesSentThisMonth}
+                        {messageCount}
                       </div>
                       <div className="bg-blue-100 p-2 rounded-lg inline-flex">
                         <svg
