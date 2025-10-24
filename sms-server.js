@@ -3573,6 +3573,31 @@ app.get("/admin/check-token", async (req, res) => {
   }
 });
 
+// Admin: expose non-sensitive server info to help debug Firebase/service-account
+app.get("/admin/server-info", async (req, res) => {
+  try {
+    const candidateFiles = [
+      "firebase-service-account.json",
+      "firebase-service-account1.json",
+      "firebase-service-account2.json",
+    ].map((f) => ({ file: f, exists: fs.existsSync(path.join(__dirname, f)) }));
+
+    const envHas = !!process.env.FIREBASE_ADMIN_JSON;
+    const info = {
+      firestoreEnabled: !!firestoreEnabled,
+      firebaseProjectId: firebaseProjectId || null,
+      serviceAccountCandidates: candidateFiles,
+      envFirebaseAdminJson: envHas,
+      nodeEnv: process.env.NODE_ENV || null,
+    };
+    return res.json({ success: true, info });
+  } catch (e) {
+    return res
+      .status(500)
+      .json({ success: false, error: e?.message || String(e) });
+  }
+});
+
 // Admin: list all users with their companies (original client logins)
 app.get("/admin/users", async (req, res) => {
   try {
