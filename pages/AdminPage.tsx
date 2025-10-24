@@ -81,6 +81,40 @@ const AdminPage: React.FC<AdminPageProps> = ({
     return cleanup; // Cleanup on unmount
   }, []);
 
+  // If we detected insufficient admin privileges, render a safe fallback
+  // immediately to avoid rendering complex child components that may
+  // rely on admin-only APIs and cause a white/blank screen.
+  if (adminPrivError) {
+    return (
+      <div className="min-h-screen grid-pattern relative overflow-hidden">
+        <div className="mx-auto max-w-3xl px-4 py-10">
+          <div className="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800 p-6 rounded-lg">
+            <h2 className="text-lg font-bold mb-2">Admin access required</h2>
+            <p className="mb-4">
+              {errorMessage ||
+                "Your account lacks the admin role. Please sign out and sign in with an admin account."}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  try {
+                    localStorage.removeItem("adminSession");
+                    localStorage.removeItem("adminEmail");
+                    localStorage.removeItem("adminToken");
+                  } catch {}
+                  onLogout();
+                }}
+                className="px-4 py-2 bg-yellow-500 text-white rounded font-semibold"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Load global admin credentials on mount
   useEffect(() => {
     const loadCredentials = async () => {
