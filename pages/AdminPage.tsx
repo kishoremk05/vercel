@@ -36,8 +36,27 @@ const AdminPage: React.FC<AdminPageProps> = ({
   setTwilioPhoneNumber,
   onLogout,
 }) => {
-  const [users, setUsers] = useState<
-    Array<{
+  const [users, setUsers] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem("admin_users");
+      if (cached)
+        return JSON.parse(cached) as Array<{
+          uid: string;
+          email: string | null;
+          firestoreEmail?: string | null;
+          phoneNumber: string | null;
+          displayName: string | null;
+          disabled: boolean;
+          emailVerified: boolean;
+          createdAt: string;
+          lastSignInAt: string | null;
+          role?: string;
+          company?: { companyName?: string };
+        }>;
+    } catch (e) {
+      // ignore
+    }
+    return [] as Array<{
       uid: string;
       email: string | null;
       firestoreEmail?: string | null;
@@ -47,21 +66,62 @@ const AdminPage: React.FC<AdminPageProps> = ({
       emailVerified: boolean;
       createdAt: string;
       lastSignInAt: string | null;
-      role?: string; // will be normalized to lowercase on mapping
+      role?: string;
       company?: { companyName?: string };
-    }>
-  >([]);
+    }>;
+  });
   const [search, setSearch] = useState("");
-  const [stats, setStats] = useState<{
-    totalCompanies: number;
-    totalUsers: number;
-    totalMessages: number;
-    totalFeedback: number;
-  } | null>(null);
+  const [stats, setStats] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem("admin_stats");
+      if (cached)
+        return JSON.parse(cached) as {
+          totalCompanies: number;
+          totalUsers: number;
+          totalMessages: number;
+          totalFeedback: number;
+        };
+    } catch (e) {
+      // ignore
+    }
+    return null as {
+      totalCompanies: number;
+      totalUsers: number;
+      totalMessages: number;
+      totalFeedback: number;
+    } | null;
+  });
 
-  const [localTwilioSid, setLocalTwilioSid] = useState(twilioAccountSid);
-  const [localTwilioToken, setLocalTwilioToken] = useState(twilioAuthToken);
-  const [localTwilioPhone, setLocalTwilioPhone] = useState(twilioPhoneNumber);
+  const [localTwilioSid, setLocalTwilioSid] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem("admin_creds");
+      if (cached) {
+        const c = JSON.parse(cached);
+        return c.accountSid || twilioAccountSid;
+      }
+    } catch (e) {}
+    return twilioAccountSid;
+  });
+  const [localTwilioToken, setLocalTwilioToken] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem("admin_creds");
+      if (cached) {
+        const c = JSON.parse(cached);
+        return c.authToken || twilioAuthToken;
+      }
+    } catch (e) {}
+    return twilioAuthToken;
+  });
+  const [localTwilioPhone, setLocalTwilioPhone] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem("admin_creds");
+      if (cached) {
+        const c = JSON.parse(cached);
+        return c.phoneNumber || twilioPhoneNumber;
+      }
+    } catch (e) {}
+    return twilioPhoneNumber;
+  });
   const [localMessagingServiceSid, setLocalMessagingServiceSid] = useState("");
   const [feedbackPageUrl, setFeedbackPageUrl] = useState("");
   const [smsServerPort, setSmsServerPort] = useState("3002");
