@@ -5,6 +5,7 @@ import {
   fetchWithTokenRefresh,
   setupAutoTokenRefresh,
 } from "../lib/tokenRefresh";
+import { getFirebaseAuth } from "../lib/firebaseClient";
 import {
   LineChart,
   Line,
@@ -68,6 +69,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [adminPrivError, setAdminPrivError] = useState(false);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagResult, setDiagResult] = useState<any | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingUrls, setIsSavingUrls] = useState(false);
 
@@ -423,6 +426,65 @@ const AdminPage: React.FC<AdminPageProps> = ({
                   </div>
                 )}
                 <div className="flex gap-1.5 sm:gap-2 items-center flex-wrap">
+                  <button
+                    onClick={async () => {
+                      try {
+                        setDiagLoading(true);
+                        setDiagResult(null);
+                        const base = await getSmsServerUrl();
+                        const res = await fetchWithTokenRefresh(
+                          `${base}/admin/check-token`
+                        );
+                        let json = null;
+                        try {
+                          json = await res.json();
+                        } catch (e) {
+                          json = { error: "Failed to parse response" };
+                        }
+                        setDiagResult(json);
+                      } catch (e: any) {
+                        setDiagResult({ error: e?.message || String(e) });
+                      } finally {
+                        setDiagLoading(false);
+                      }
+                    }}
+                    className="px-2 py-1 rounded-md bg-gray-100 text-sm text-gray-700 border border-gray-200 mr-1"
+                    title="Check token and server-side claims"
+                  >
+                    {diagLoading ? "Checking…" : "Check token & claims"}
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      try {
+                        setDiagLoading(true);
+                        setDiagResult(null);
+                        const auth = getFirebaseAuth();
+                        const user = auth?.currentUser;
+                        if (!user) {
+                          setDiagResult({ error: "No signed-in user" });
+                        } else {
+                          // Force refresh to ensure latest custom claims are present
+                          const tokenResult = await (
+                            user as any
+                          ).getIdTokenResult(true);
+                          setDiagResult({
+                            fromClient: true,
+                            claims: tokenResult.claims,
+                          });
+                        }
+                      } catch (e: any) {
+                        setDiagResult({ error: e?.message || String(e) });
+                      } finally {
+                        setDiagLoading(false);
+                      }
+                    }}
+                    className="px-2 py-1 rounded-md bg-gray-100 text-sm text-gray-700 border border-gray-200"
+                    title="Show local token claims"
+                  >
+                    Show local claims
+                  </button>
+
                   <span className="inline-block bg-green-100 text-green-700 font-semibold px-2 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs border border-green-200">
                     <span className="hidden sm:inline">System </span>Healthy
                   </span>
@@ -471,6 +533,19 @@ const AdminPage: React.FC<AdminPageProps> = ({
                   <h3 className="text-base sm:text-lg font-bold text-gray-900">
                     Logged-in User
                   </h3>
+                  {/* Diagnostics output (shows decoded token / server-side user doc when requested) */}
+                  {diagResult && (
+                    <div className="mb-4 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-800">
+                        <strong>Diagnostics:</strong>
+                        <pre className="mt-2 text-xs whitespace-pre-wrap">
+                          {JSON.stringify(diagResult, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Logged-in User Details */}
                   <p className="text-sm text-gray-600 mt-0.5">
                     This is the account currently authenticated as admin.
                   </p>

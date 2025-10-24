@@ -3456,6 +3456,54 @@ app.get("/admin/server-config", async (req, res) => {
   }
 });
 
+// DEBUG: Inspect token claims and Firestore user record for the provided Bearer token.
+// Helpful when custom claims were recently changed and you need to confirm propagation.
+app.get("/admin/check-token", async (req, res) => {
+  try {
+    const authz = req.headers.authorization || req.headers.Authorization || "";
+    if (!authz.startsWith("Bearer "))
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing Bearer token" });
+
+    const idToken = String(authz).slice(7).trim();
+    if (!firebaseAdmin) {
+      return res
+        .status(503)
+        .json({ success: false, error: "Firebase Admin SDK not configured" });
+    }
+
+    try {
+      // Verify the token signature and decode claims
+      const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
+
+      // Optionally fetch Firestore users doc for this uid (if DB enabled)
+      let userDoc = null;
+      if (
+        firestoreEnabled &&
+        decoded?.uid &&
+        typeof dbV2?.getUserById === "function"
+      ) {
+        try {
+          userDoc = await dbV2.getUserById(decoded.uid);
+        } catch (e) {
+          userDoc = { error: String(e?.message || e) };
+        }
+      }
+
+      return res.json({ success: true, decoded, userDoc });
+    } catch (e) {
+      return res
+        .status(400)
+        .json({ success: false, error: e?.message || String(e) });
+    }
+  } catch (e) {
+    return res
+      .status(500)
+      .json({ success: false, error: e?.message || String(e) });
+  }
+});
+
 // Admin: list all users with their companies (original client logins)
 app.get("/admin/users", async (req, res) => {
   try {
