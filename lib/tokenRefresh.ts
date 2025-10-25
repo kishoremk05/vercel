@@ -16,15 +16,9 @@ export async function getFreshIdToken(forceRefresh = false): Promise<string | nu
     const user = auth?.currentUser;
     
     if (!user) {
-      // No firebase client-side user available. Fall back to any token stored
-      // in localStorage (useful for demo/local dev flows where we store a
-      // token manually). This is a safe fallback for dev only.
-      const fallback = localStorage.getItem('adminToken') || null;
-      if (fallback) {
-        console.warn('[tokenRefresh] No authenticated user found - using localStorage fallback token');
-        return fallback;
-      }
-      console.warn('[tokenRefresh] No authenticated user found');
+      // No firebase client-side user available. Do NOT fallback to localStorage
+      // in production; return null so callers know there's no authenticated user.
+      console.warn('[tokenRefresh] No authenticated user found (no firebase currentUser)');
       return null;
     }
 
@@ -55,13 +49,9 @@ export async function getAdminIdToken(forceRefresh = false): Promise<string | nu
     const user = auth?.currentUser;
 
     if (!user) {
-      // Fallback to localStorage token for dev/demo flows
-      const fallback = localStorage.getItem('adminToken') || null;
-      if (fallback) {
-        console.warn('[tokenRefresh] No authenticated admin user - using localStorage fallback token');
-        return fallback;
-      }
-      console.warn('[tokenRefresh] No authenticated admin user found');
+      // No firebase client-side user available. Do NOT fallback to localStorage
+      // for admin tokens; return null so admin flows fail fast and securely.
+      console.warn('[tokenRefresh] No authenticated admin user found (no firebase currentUser)');
       return null;
     }
 
