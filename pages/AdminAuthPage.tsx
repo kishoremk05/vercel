@@ -48,8 +48,8 @@ const AdminAuthPage: React.FC<AdminAuthPageProps> = ({ onAuthSuccess }) => {
         email,
         password
       );
-      // Get the ID token for API requests
-      const idToken = await userCredential.user.getIdToken();
+      // Get the ID token for API requests - force refresh to get latest claims
+      const idToken = await userCredential.user.getIdToken(true);
       // Store the token for admin API requests
       localStorage.setItem("adminToken", idToken);
       localStorage.setItem("adminEmail", email);

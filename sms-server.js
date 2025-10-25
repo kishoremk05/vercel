@@ -6257,31 +6257,31 @@ app.get("/admin/firebase-users", verifyAdminToken, async (req, res) => {
   }
 });
 
-// Temporary setup endpoint - REMOVE AFTER INITIAL SETUP
-app.post("/setup-admin", async (req, res) => {
-  try {
-    const { email, secretKey } = req.body || {};
-    if (!process.env.ADMIN_SETUP_SECRET) {
-      return res
-        .status(500)
-        .json({ success: false, error: "ADMIN_SETUP_SECRET not configured" });
-    }
-    if (secretKey !== process.env.ADMIN_SETUP_SECRET) {
-      return res
-        .status(403)
-        .json({ success: false, error: "Invalid secret key" });
-    }
-    if (!email)
-      return res.status(400).json({ success: false, error: "email required" });
-    const result = await setAdminClaim(email);
-    return res.json(result);
-  } catch (e) {
-    console.error("[setup-admin] error", e?.message || e);
-    return res
-      .status(500)
-      .json({ success: false, error: e?.message || String(e) });
-  }
-});
+// Temporary setup endpoint - REMOVED AFTER INITIAL SETUP
+// app.post("/setup-admin", async (req, res) => {
+//   try {
+//     const { email, secretKey } = req.body || {};
+//     if (!process.env.ADMIN_SETUP_SECRET) {
+//       return res
+//         .status(500)
+//         .json({ success: false, error: "ADMIN_SETUP_SECRET not configured" });
+//     }
+//     if (secretKey !== process.env.ADMIN_SETUP_SECRET) {
+//       return res
+//         .status(403)
+//         .json({ success: false, error: "Invalid secret key" });
+//     }
+//     if (!email)
+//       return res.status(400).json({ success: false, error: "email required" });
+//     const result = await setAdminClaim(email);
+//     return res.json(result);
+//   } catch (e) {
+//     console.error("[setup-admin] error", e?.message || e);
+//     return res
+//       .status(500)
+//       .json({ success: false, error: e?.message || String(e) });
+//   }
+// });
 
 // Static file serving for SPA (must be AFTER all API routes)
 app.use(express.static(path.join(__dirname, "dist")));
