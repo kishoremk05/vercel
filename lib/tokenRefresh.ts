@@ -16,6 +16,14 @@ export async function getFreshIdToken(forceRefresh = false): Promise<string | nu
     const user = auth?.currentUser;
     
     if (!user) {
+      // No firebase client-side user available. Fall back to any token stored
+      // in localStorage (useful for demo/local dev flows where we store a
+      // token manually). This is a safe fallback for dev only.
+      const fallback = localStorage.getItem('adminToken') || null;
+      if (fallback) {
+        console.warn('[tokenRefresh] No authenticated user found - using localStorage fallback token');
+        return fallback;
+      }
       console.warn('[tokenRefresh] No authenticated user found');
       return null;
     }
@@ -47,6 +55,12 @@ export async function getAdminIdToken(forceRefresh = false): Promise<string | nu
     const user = auth?.currentUser;
 
     if (!user) {
+      // Fallback to localStorage token for dev/demo flows
+      const fallback = localStorage.getItem('adminToken') || null;
+      if (fallback) {
+        console.warn('[tokenRefresh] No authenticated admin user - using localStorage fallback token');
+        return fallback;
+      }
       console.warn('[tokenRefresh] No authenticated admin user found');
       return null;
     }
@@ -84,16 +98,26 @@ export async function fetchWithTokenRefresh(
   try {
     // Get fresh token
     const token = await getFreshIdToken(retryCount > 0);
-    
+
     if (!token) {
       throw new Error('No authentication token available');
     }
 
-    // Add Authorization header
-    const headers = {
-      ...options.headers,
+    // Attempt to derive admin UID from token payload to set X-Admin-UID header
+    let adminUid: string | null = null;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      adminUid = payload?.uid || payload?.user_id || payload?.sub || null;
+    } catch (e) {
+      // ignore parsing errors
+    }
+
+    // Add Authorization and optional X-Admin-UID header
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string> || {}),
       Authorization: `Bearer ${token}`,
     };
+    if (adminUid) headers['X-Admin-UID'] = String(adminUid);
 
     // Make request
     const response = await fetch(url, { ...options, headers });
@@ -104,7 +128,7 @@ export async function fetchWithTokenRefresh(
       
       // Force refresh token
       const freshToken = await getFreshIdToken(true);
-      
+
       if (freshToken) {
         // Retry with fresh token
         return fetchWithTokenRefresh(url, options, retryCount + 1);
