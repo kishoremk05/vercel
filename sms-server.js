@@ -6108,12 +6108,10 @@ async function verifyAdminToken(req, res, next) {
     const isAdmin =
       decoded && (decoded.admin === true || decoded.admin === "true");
     if (!isAdmin) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          error: "Insufficient privileges (need admin role)",
-        });
+      return res.status(401).json({
+        success: false,
+        error: "Insufficient privileges (need admin role)",
+      });
     }
 
     req.user = decoded;
@@ -6161,8 +6159,10 @@ async function checkUserClaims(userEmail) {
   }
 }
 
-// Protect all /admin/* routes with the middleware by default
-app.use("/admin/*", verifyAdminToken);
+// Protect all /admin routes and their subpaths with the middleware by default
+// Use '/admin' (prefix) instead of '/admin/*' because path-to-regexp used by
+// recent Express versions rejects the explicit '*' token (causes a PathError).
+app.use("/admin", verifyAdminToken);
 
 // Example admin endpoints
 app.get("/admin/credentials", verifyAdminToken, async (req, res) => {
