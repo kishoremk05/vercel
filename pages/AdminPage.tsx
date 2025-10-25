@@ -1,10 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getSmsServerUrl } from "../lib/firebaseConfig"; // dynamic API base
 import {
-  fetchWithTokenRefresh,
-  setupAutoTokenRefresh,
-} from "../lib/tokenRefresh";
-import {
   LineChart,
   Line,
   XAxis,
@@ -14,7 +10,8 @@ import {
   ResponsiveContainer,
   Area,
 } from "recharts";
-import { fetchWithAdminToken } from "../lib/api";
+// Temporarily avoid tokenRefresh flow for admin page (dev/demo only)
+// We'll read the admin token directly from localStorage for API calls.
 
 interface AdminPageProps {
   twilioAccountSid: string;
@@ -82,10 +79,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
   const itemsPerPage = 3;
 
   // Setup automatic token refresh on component mount
-  useEffect(() => {
-    const cleanup = setupAutoTokenRefresh();
-    return cleanup; // Cleanup on unmount
-  }, []);
+  // NOTE: Temporarily disabled token auto-refresh for dev/demo so the
+  // admin page can load using a token stored in localStorage.
+  // (Re-enable setupAutoTokenRefresh when using the full tokenRefresh flow.)
 
   // Load global admin credentials on mount
   useEffect(() => {
@@ -93,8 +89,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
       try {
         const base = await getSmsServerUrl();
         const url = `${base}/admin/credentials`;
-        // Use fetchWithTokenRefresh for automatic token refresh
-        const response = await fetchWithTokenRefresh(url);
+        // Use temporary fetch helper that reads admin token from localStorage
+        const response = await fetchWithAdminUid(url);
 
         if (response.ok) {
           const data = await response.json();
@@ -129,19 +125,22 @@ const AdminPage: React.FC<AdminPageProps> = ({
     loadCredentials();
   }, [setTwilioAccountSid, setTwilioAuthToken, setTwilioPhoneNumber]);
 
-  // Replace fetchWithTokenRefresh with a custom fetch function that includes the UID
+  // Temporary fetch used by AdminPage while tokenRefresh is disabled.
+  // Reads admin token from localStorage (dev/demo convenience) and adds
+  // both Authorization and X-Admin-UID headers. Returns the raw Response
+  // so callers can inspect response.ok/status as before.
   const fetchWithAdminUid = async (url: string, options: RequestInit = {}) => {
-    const adminUid = "QctSsDd8KydRnqkwE9YTczp86Xc2"; // Admin UID
+    const adminUid = "QctSsDd8KydRnqkwE9YTczp86Xc2"; // Admin UID (dev-only)
 
-    const headers = new Headers(options.headers);
+    const headers = new Headers(options.headers || {});
     headers.set("X-Admin-UID", adminUid);
 
-    const response = await fetch(url, { ...options, headers });
-
-    if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`);
+    const token = localStorage.getItem("adminToken");
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
     }
 
+    const response = await fetch(url, { ...options, headers });
     return response;
   };
 
@@ -159,8 +158,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
         // Use authenticated fetch so Authorization: Bearer <ID_TOKEN> is sent.
         // fetchWithTokenRefresh will automatically refresh ID tokens as needed.
         const [statsRes, usersRes] = await Promise.all([
-          fetchWithTokenRefresh(statsUrl),
-          fetchWithTokenRefresh(usersUrl),
+          fetchWithAdminUid(statsUrl),
+          fetchWithAdminUid(usersUrl),
         ]);
 
         // Handle 401 errors - user lacks admin privileges
@@ -237,19 +236,16 @@ const AdminPage: React.FC<AdminPageProps> = ({
     try {
       const base = await getSmsServerUrl();
       // Use fetchWithTokenRefresh with POST method
-      const response = await fetchWithTokenRefresh(
-        `${base}/admin/credentials`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountSid: localTwilioSid,
-            authToken: localTwilioToken,
-            phoneNumber: localTwilioPhone,
-            messagingServiceSid: localMessagingServiceSid,
-          }),
-        }
-      );
+      const response = await fetchWithAdminUid(`${base}/admin/credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountSid: localTwilioSid,
+          authToken: localTwilioToken,
+          phoneNumber: localTwilioPhone,
+          messagingServiceSid: localMessagingServiceSid,
+        }),
+      });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -281,17 +277,14 @@ const AdminPage: React.FC<AdminPageProps> = ({
     try {
       const base = await getSmsServerUrl();
       // Use fetchWithTokenRefresh with POST method
-      const response = await fetchWithTokenRefresh(
-        `${base}/admin/feedback-urls`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            feedbackPageUrl,
-            smsServerPort,
-          }),
-        }
-      );
+      const response = await fetchWithAdminUid(`${base}/admin/feedback-urls`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedbackPageUrl,
+          smsServerPort,
+        }),
+      });
 
       if (!response.ok) {
         const errorData = await response.json();
