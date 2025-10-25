@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   Area,
 } from "recharts";
+import { fetchWithTokenRefresh } from "../lib/tokenRefresh";
 // Temporarily avoid tokenRefresh flow for admin page (dev/demo only)
 // We'll read the admin token directly from localStorage for API calls.
 
@@ -110,7 +111,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
         const base = await getSmsServerUrl();
         const url = `${base}/admin/credentials`;
         // Use temporary fetch helper that reads admin token from localStorage
-        const response = await fetchWithAdminUid(url);
+        const response = await fetchWithTokenRefresh(url);
 
         if (response.ok) {
           const data = await response.json();
@@ -145,24 +146,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
     loadCredentials();
   }, [setTwilioAccountSid, setTwilioAuthToken, setTwilioPhoneNumber]);
 
-  // Temporary fetch used by AdminPage while tokenRefresh is disabled.
-  // Reads admin token from localStorage (dev/demo convenience) and adds
-  // both Authorization and X-Admin-UID headers. Returns the raw Response
-  // so callers can inspect response.ok/status as before.
-  const fetchWithAdminUid = async (url: string, options: RequestInit = {}) => {
-    const adminUid = "QctSsDd8KydRnqkwE9YTczp86Xc2"; // Admin UID (dev-only)
-
-    const headers = new Headers(options.headers || {});
-    headers.set("X-Admin-UID", adminUid);
-
-    const token = localStorage.getItem("adminToken");
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
-
-    const response = await fetch(url, { ...options, headers });
-    return response;
-  };
+  // Use fetchWithTokenRefresh (refreshes tokens automatically).
 
   // Load global stats and users list with comprehensive error handling
   useEffect(() => {
@@ -178,8 +162,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
         // Use authenticated fetch so Authorization: Bearer <ID_TOKEN> is sent.
         // fetchWithTokenRefresh will automatically refresh ID tokens as needed.
         const [statsRes, usersRes] = await Promise.all([
-          fetchWithAdminUid(statsUrl),
-          fetchWithAdminUid(usersUrl),
+          fetchWithTokenRefresh(statsUrl),
+          fetchWithTokenRefresh(usersUrl),
         ]);
 
         // Handle 401 errors - user lacks admin privileges
@@ -256,16 +240,19 @@ const AdminPage: React.FC<AdminPageProps> = ({
     try {
       const base = await getSmsServerUrl();
       // Use fetchWithTokenRefresh with POST method
-      const response = await fetchWithAdminUid(`${base}/admin/credentials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountSid: localTwilioSid,
-          authToken: localTwilioToken,
-          phoneNumber: localTwilioPhone,
-          messagingServiceSid: localMessagingServiceSid,
-        }),
-      });
+      const response = await fetchWithTokenRefresh(
+        `${base}/admin/credentials`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountSid: localTwilioSid,
+            authToken: localTwilioToken,
+            phoneNumber: localTwilioPhone,
+            messagingServiceSid: localMessagingServiceSid,
+          }),
+        }
+      );
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -297,14 +284,17 @@ const AdminPage: React.FC<AdminPageProps> = ({
     try {
       const base = await getSmsServerUrl();
       // Use fetchWithTokenRefresh with POST method
-      const response = await fetchWithAdminUid(`${base}/admin/feedback-urls`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          feedbackPageUrl,
-          smsServerPort,
-        }),
-      });
+      const response = await fetchWithTokenRefresh(
+        `${base}/admin/feedback-urls`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            feedbackPageUrl,
+            smsServerPort,
+          }),
+        }
+      );
 
       if (!response.ok) {
         const errorData = await response.json();

@@ -578,6 +578,19 @@ const App: React.FC = () => {
       ? Page.Home
       : Page.Dashboard;
   const [currentPage, setCurrentPage] = useState<Page>(initialPage);
+
+  // Ensure we don't render AdminPage unless auth role is confirmed as admin.
+  // This prevents mounting the admin UI when a stale `adminSession` exists
+  // but the token is missing/expired (which previously caused the blank
+  // white screen on reload). If the user isn't admin we redirect to the
+  // admin login route.
+  useEffect(() => {
+    try {
+      if (currentPage === Page.Admin && (!auth || auth.role !== "admin")) {
+        setCurrentPage(Page.AdminLogin);
+      }
+    } catch {}
+  }, [currentPage, auth]);
   // Load customers from localStorage if available to preserve state across hard reloads
   const [customers, setCustomers] = useState<Customer[]>(() => {
     const isSampleCustomer = (c: Customer) => {
