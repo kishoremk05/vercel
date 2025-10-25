@@ -343,6 +343,31 @@ try {
       .json({ ready: firestoreEnabled ? "firestore" : "no-firestore" })
   );
 
+  // On-demand dbV2 import diagnostic
+  // Attempts to import ./server/db/dataV2.js and returns a concise error message
+  // if the import fails. This is read-only and intended for debugging only.
+  app.get("/__debug/dbv2", async (req, res) => {
+    try {
+      try {
+        const mod = await import("./server/db/dataV2.js");
+        const loaded = mod.default || mod;
+        return res.json({ success: true, loaded: !!loaded });
+      } catch (impErr) {
+        const msg = impErr?.message || String(impErr);
+        const stack =
+          impErr && impErr.stack ? String(impErr.stack).slice(0, 2000) : null;
+        console.warn("[__debug/dbv2] import failed", msg);
+        return res
+          .status(500)
+          .json({ success: false, error: msg, stack: stack });
+      }
+    } catch (e) {
+      return res
+        .status(500)
+        .json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
   // --- Account Deletion Endpoint ---
   // Securely deletes all Firestore data for a user/company (clients/{uid}, subcollections, and optionally users/companies)
   app.delete("/api/account/delete", async (req, res) => {
