@@ -37,6 +37,37 @@ export async function getFreshIdToken(forceRefresh = false): Promise<string | nu
 }
 
 /**
+ * Get a fresh Firebase ID token for admin, refreshing if necessary
+ * @param forceRefresh - Force token refresh even if not expired
+ * @returns Fresh ID token or null if not authenticated
+ */
+export async function getAdminIdToken(forceRefresh = false): Promise<string | null> {
+  try {
+    const auth = getFirebaseAuth();
+    const user = auth?.currentUser;
+
+    if (!user) {
+      console.warn('[tokenRefresh] No authenticated admin user found');
+      return null;
+    }
+
+    // Get fresh token (Firebase SDK handles caching and auto-refresh)
+    const idToken = await user.getIdToken(forceRefresh);
+
+    // Update localStorage
+    if (idToken) {
+      localStorage.setItem('adminToken', idToken);
+      console.log('[tokenRefresh] ✅ Admin token refreshed successfully');
+    }
+
+    return idToken;
+  } catch (error) {
+    console.error('[tokenRefresh] Failed to refresh admin token:', error);
+    return null;
+  }
+}
+
+/**
  * Make an authenticated fetch request with automatic token refresh on 401
  * @param url - Request URL
  * @param options - Fetch options
