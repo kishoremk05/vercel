@@ -413,59 +413,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
   return (
     <div className="min-h-screen grid-pattern relative overflow-hidden">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
-        {/* Pagination Controls */}
-        {users.filter(matchesSearch).length > 0 && (
-          <div className="flex items-center justify-center gap-3 mt-6">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                currentPage === 1
-                  ? "text-gray-400 cursor-not-allowed"
-                  : "text-gray-700 hover:bg-gray-100"
-              }`}
-            >
-              Prev
-            </button>
-
-            {Array.from(
-              {
-                length: Math.ceil(
-                  users.filter(matchesSearch).length / itemsPerPage
-                ),
-              },
-              (_, i) => i + 1
-            ).map((pageNum) => (
-              <button
-                key={pageNum}
-                onClick={() => setCurrentPage(pageNum)}
-                className={`w-10 h-10 rounded-lg text-sm font-medium transition-all ${
-                  currentPage === pageNum
-                    ? "bg-gray-900 text-white"
-                    : "text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-
-            <button
-              onClick={() => setCurrentPage(currentPage + 1)}
-              disabled={
-                currentPage ===
-                Math.ceil(users.filter(matchesSearch).length / itemsPerPage)
-              }
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                currentPage ===
-                Math.ceil(users.filter(matchesSearch).length / itemsPerPage)
-                  ? "text-gray-400 cursor-not-allowed"
-                  : "text-gray-700 hover:bg-gray-100"
-              }`}
-            >
-              Next
-            </button>
-          </div>
-        )}
+        {/* top pagination intentionally removed */}
 
         {/* Logged-in User Details */}
         <div className="mb-6 sm:mb-8 lg:mb-10">
