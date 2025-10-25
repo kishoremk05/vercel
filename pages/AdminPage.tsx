@@ -114,7 +114,11 @@ const AdminPage: React.FC<AdminPageProps> = ({
           // Don't set auth error here, credentials are optional
         } else {
           const errorData = await response.json().catch(() => ({}));
-          console.error("Failed to load credentials:", response.status, errorData);
+          console.error(
+            "Failed to load credentials:",
+            response.status,
+            errorData
+          );
         }
       } catch (error) {
         console.error("Error loading credentials:", error);
@@ -144,7 +148,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
         // Handle 401 errors - user lacks admin privileges
         if (statsRes.status === 401 || usersRes.status === 401) {
           setHasAuthError(true);
-          setAuthErrorMessage("401 Unauthorized: Insufficient privileges (need admin role)");
+          setAuthErrorMessage(
+            "401 Unauthorized: Insufficient privileges (need admin role)"
+          );
           setIsLoadingData(false);
           return;
         }
@@ -173,11 +179,17 @@ const AdminPage: React.FC<AdminPageProps> = ({
               setUsers([]);
             }
           } catch (parseErr) {
-            console.error("Failed to parse /admin/firebase-users JSON", parseErr);
+            console.error(
+              "Failed to parse /admin/firebase-users JSON",
+              parseErr
+            );
             setUsers([]);
           }
         } else {
-          console.error("Failed to fetch /admin/firebase-users", usersRes.status);
+          console.error(
+            "Failed to fetch /admin/firebase-users",
+            usersRes.status
+          );
           setUsers([]);
         }
       } catch (error: any) {
@@ -305,15 +317,19 @@ const AdminPage: React.FC<AdminPageProps> = ({
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
             ></path>
           </svg>
-          <p className="text-lg font-semibold text-gray-700">Loading Admin Dashboard...</p>
-          <p className="text-sm text-gray-500 mt-2">Please wait while we fetch your data</p>
+          <p className="text-lg font-semibold text-gray-700">
+            Loading Admin Dashboard...
+          </p>
+          <p className="text-sm text-gray-500 mt-2">
+            Please wait while we fetch your data
+          </p>
         </div>
       </div>
     );
   }
 
-  // Show 401 unauthorized error
-  if (hasAuthError) {
+  // Show 401 unauthorized error or missing token error
+  if (hasAuthError || authErrorMessage === "Missing Bearer token") {
     return (
       <div className="min-h-screen grid-pattern relative overflow-hidden flex items-center justify-center">
         <div className="max-w-md mx-auto text-center bg-white rounded-2xl shadow-xl p-8 border border-red-200">
@@ -332,22 +348,31 @@ const AdminPage: React.FC<AdminPageProps> = ({
               />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
-          <p className="text-red-600 font-semibold mb-4">{authErrorMessage}</p>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            Admin Login Required
+          </h2>
+          <p className="text-red-600 font-semibold mb-4">
+            {authErrorMessage ||
+              "Missing Bearer token. Please sign in again as admin."}
+          </p>
           <p className="text-gray-600 mb-6">
-            You don't have admin privileges to access this page. Please contact your system administrator.
+            Your session may have expired or you do not have admin privileges.
+            <br />
+            Please sign out and sign in again with your admin account.
           </p>
           <button
             onClick={() => {
               try {
                 localStorage.removeItem("adminSession");
                 localStorage.removeItem("adminEmail");
+                localStorage.removeItem("adminToken");
               } catch {}
               onLogout();
+              window.location.reload();
             }}
             className="bg-red-500 hover:bg-red-600 text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-all duration-150"
           >
-            Return to Login
+            Sign In Again
           </button>
         </div>
       </div>
@@ -919,14 +944,23 @@ const AdminPage: React.FC<AdminPageProps> = ({
                       u.displayName?.toLowerCase()?.includes(searchLower) ||
                       u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
                       u.role?.toLowerCase().includes(searchLower) ||
-                      u.company?.companyName?.toLowerCase()?.includes(searchLower) ||
-                      u.profile?.businessName?.toLowerCase()?.includes(searchLower)
+                      u.company?.companyName
+                        ?.toLowerCase()
+                        ?.includes(searchLower) ||
+                      u.profile?.businessName
+                        ?.toLowerCase()
+                        ?.includes(searchLower)
                     );
                   })
-                  .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                  .slice(
+                    (currentPage - 1) * itemsPerPage,
+                    currentPage * itemsPerPage
+                  )
                   .map((user) => {
                     const email = user.firestoreEmail || user.email;
-                    const initials = email ? email.substring(0, 2).toUpperCase() : "?";
+                    const initials = email
+                      ? email.substring(0, 2).toUpperCase()
+                      : "?";
                     const businessName =
                       user.profile?.businessName ||
                       user.company?.companyName ||
@@ -934,7 +968,10 @@ const AdminPage: React.FC<AdminPageProps> = ({
                       "Unknown";
 
                     return (
-                      <tr key={user.uid} className="hover:bg-blue-50 transition-all">
+                      <tr
+                        key={user.uid}
+                        className="hover:bg-blue-50 transition-all"
+                      >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-3">
                             {user.profile?.photoURL || user.photoURL ? (
@@ -945,7 +982,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
                                 onError={(e) => {
                                   const target = e.target as HTMLImageElement;
                                   target.style.display = "none";
-                                  const nextEl = target.nextElementSibling as HTMLElement;
+                                  const nextEl =
+                                    target.nextElementSibling as HTMLElement;
                                   if (nextEl) nextEl.style.display = "flex";
                                 }}
                               />
@@ -953,7 +991,10 @@ const AdminPage: React.FC<AdminPageProps> = ({
                             <div
                               className="flex-shrink-0 h-10 w-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm"
                               style={{
-                                display: user.profile?.photoURL || user.photoURL ? "none" : "flex",
+                                display:
+                                  user.profile?.photoURL || user.photoURL
+                                    ? "none"
+                                    : "flex",
                               }}
                             >
                               {initials}
@@ -962,12 +1003,16 @@ const AdminPage: React.FC<AdminPageProps> = ({
                               <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
                                 {businessName}
                                 {user.emailVerified && (
-                                  <span className="text-green-600 text-xs">✓</span>
+                                  <span className="text-green-600 text-xs">
+                                    ✓
+                                  </span>
                                 )}
                               </div>
                               <div className="text-xs text-gray-500">
                                 {email || (
-                                  <span className="text-gray-400 italic">No email</span>
+                                  <span className="text-gray-400 italic">
+                                    No email
+                                  </span>
                                 )}
                               </div>
                             </div>
@@ -976,7 +1021,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
                             className={`px-2 py-1 rounded-full text-xs font-bold ${
-                              user.role === "admin" || user.role === "superadmin"
+                              user.role === "admin" ||
+                              user.role === "superadmin"
                                 ? "bg-purple-100 text-purple-700"
                                 : "bg-blue-100 text-blue-700"
                             }`}
@@ -988,7 +1034,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                           {user.lastSignInAt ? (
-                            <span>{new Date(user.lastSignInAt).toLocaleDateString()}</span>
+                            <span>
+                              {new Date(user.lastSignInAt).toLocaleDateString()}
+                            </span>
                           ) : (
                             <span className="text-gray-400 italic">Never</span>
                           )}
@@ -1012,7 +1060,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
                                 : "bg-green-500 text-white hover:bg-green-600"
                             }`}
                             onClick={() => handleSuspend(user.uid)}
-                            title={!user.disabled ? "Disable user" : "Enable user"}
+                            title={
+                              !user.disabled ? "Disable user" : "Enable user"
+                            }
                           >
                             {!user.disabled ? "Disable" : "Enable"}
                           </button>
@@ -1032,21 +1082,20 @@ const AdminPage: React.FC<AdminPageProps> = ({
           </div>
 
           {/* Pagination Controls */}
-          {users
-            .filter((u) => {
-              const searchLower = search.toLowerCase();
-              if (search === "Active") return !u.disabled;
-              if (search === "Suspended") return u.disabled;
-              return (
-                u.email?.toLowerCase().includes(searchLower) ||
-                u.firestoreEmail?.toLowerCase()?.includes(searchLower) ||
-                u.displayName?.toLowerCase()?.includes(searchLower) ||
-                u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
-                u.role?.toLowerCase().includes(searchLower) ||
-                u.company?.companyName?.toLowerCase()?.includes(searchLower) ||
-                u.profile?.businessName?.toLowerCase()?.includes(searchLower)
-              );
-            }).length > 0 && (
+          {users.filter((u) => {
+            const searchLower = search.toLowerCase();
+            if (search === "Active") return !u.disabled;
+            if (search === "Suspended") return u.disabled;
+            return (
+              u.email?.toLowerCase().includes(searchLower) ||
+              u.firestoreEmail?.toLowerCase()?.includes(searchLower) ||
+              u.displayName?.toLowerCase()?.includes(searchLower) ||
+              u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
+              u.role?.toLowerCase().includes(searchLower) ||
+              u.company?.companyName?.toLowerCase()?.includes(searchLower) ||
+              u.profile?.businessName?.toLowerCase()?.includes(searchLower)
+            );
+          }).length > 0 && (
             <div className="flex items-center justify-center gap-3 mt-6">
               <button
                 onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
@@ -1068,12 +1117,18 @@ const AdminPage: React.FC<AdminPageProps> = ({
                       if (search === "Suspended") return u.disabled;
                       return (
                         u.email?.toLowerCase().includes(searchLower) ||
-                        u.firestoreEmail?.toLowerCase()?.includes(searchLower) ||
+                        u.firestoreEmail
+                          ?.toLowerCase()
+                          ?.includes(searchLower) ||
                         u.displayName?.toLowerCase()?.includes(searchLower) ||
                         u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
                         u.role?.toLowerCase().includes(searchLower) ||
-                        u.company?.companyName?.toLowerCase()?.includes(searchLower) ||
-                        u.profile?.businessName?.toLowerCase()?.includes(searchLower)
+                        u.company?.companyName
+                          ?.toLowerCase()
+                          ?.includes(searchLower) ||
+                        u.profile?.businessName
+                          ?.toLowerCase()
+                          ?.includes(searchLower)
                       );
                     }).length / itemsPerPage
                   ),
@@ -1103,12 +1158,18 @@ const AdminPage: React.FC<AdminPageProps> = ({
                       if (search === "Suspended") return u.disabled;
                       return (
                         u.email?.toLowerCase().includes(searchLower) ||
-                        u.firestoreEmail?.toLowerCase()?.includes(searchLower) ||
+                        u.firestoreEmail
+                          ?.toLowerCase()
+                          ?.includes(searchLower) ||
                         u.displayName?.toLowerCase()?.includes(searchLower) ||
                         u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
                         u.role?.toLowerCase().includes(searchLower) ||
-                        u.company?.companyName?.toLowerCase()?.includes(searchLower) ||
-                        u.profile?.businessName?.toLowerCase()?.includes(searchLower)
+                        u.company?.companyName
+                          ?.toLowerCase()
+                          ?.includes(searchLower) ||
+                        u.profile?.businessName
+                          ?.toLowerCase()
+                          ?.includes(searchLower)
                       );
                     }).length / itemsPerPage
                   )
@@ -1122,12 +1183,18 @@ const AdminPage: React.FC<AdminPageProps> = ({
                       if (search === "Suspended") return u.disabled;
                       return (
                         u.email?.toLowerCase().includes(searchLower) ||
-                        u.firestoreEmail?.toLowerCase()?.includes(searchLower) ||
+                        u.firestoreEmail
+                          ?.toLowerCase()
+                          ?.includes(searchLower) ||
                         u.displayName?.toLowerCase()?.includes(searchLower) ||
                         u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
                         u.role?.toLowerCase().includes(searchLower) ||
-                        u.company?.companyName?.toLowerCase()?.includes(searchLower) ||
-                        u.profile?.businessName?.toLowerCase()?.includes(searchLower)
+                        u.company?.companyName
+                          ?.toLowerCase()
+                          ?.includes(searchLower) ||
+                        u.profile?.businessName
+                          ?.toLowerCase()
+                          ?.includes(searchLower)
                       );
                     }).length / itemsPerPage
                   )
@@ -1162,15 +1229,21 @@ const AdminPage: React.FC<AdminPageProps> = ({
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 border border-blue-100">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h4 className="text-lg font-bold text-gray-900 mb-1">Customer Growth</h4>
-                  <p className="text-sm text-gray-600">New SaaS client signups</p>
+                  <h4 className="text-lg font-bold text-gray-900 mb-1">
+                    Customer Growth
+                  </h4>
+                  <p className="text-sm text-gray-600">
+                    New SaaS client signups
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-semibold text-gray-700 bg-white border border-gray-200 px-3 py-1.5 rounded-full shadow-sm">
                     Total: {stats?.totalUsers || 0} users
                   </span>
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-full border border-blue-200">
-                    <span className="text-xs font-medium text-gray-600">Last 30 Days</span>
+                    <span className="text-xs font-medium text-gray-600">
+                      Last 30 Days
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1187,7 +1260,9 @@ const AdminPage: React.FC<AdminPageProps> = ({
                   for (let i = 5; i >= 0; i--) {
                     const d = new Date(today);
                     d.setMonth(today.getMonth() - i);
-                    const monthKey = d.toLocaleDateString("en-US", { month: "short" });
+                    const monthKey = d.toLocaleDateString("en-US", {
+                      month: "short",
+                    });
                     const yearKey = d.getFullYear();
                     const label = `${monthKey}`;
                     monthLabels.push(label);
@@ -1199,9 +1274,12 @@ const AdminPage: React.FC<AdminPageProps> = ({
                     if (user.createdAt) {
                       try {
                         const signupDate = new Date(user.createdAt);
-                        const monthLabel = signupDate.toLocaleDateString("en-US", {
-                          month: "short",
-                        });
+                        const monthLabel = signupDate.toLocaleDateString(
+                          "en-US",
+                          {
+                            month: "short",
+                          }
+                        );
                         // Only count if within last 6 months
                         if (monthData.hasOwnProperty(monthLabel)) {
                           monthData[monthLabel]++;
@@ -1231,12 +1309,30 @@ const AdminPage: React.FC<AdminPageProps> = ({
                         margin={{ left: 0, right: 20, top: 10, bottom: 10 }}
                       >
                         <defs>
-                          <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          <linearGradient
+                            id="colorUsers"
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop
+                              offset="5%"
+                              stopColor="#3b82f6"
+                              stopOpacity={0.3}
+                            />
+                            <stop
+                              offset="95%"
+                              stopColor="#3b82f6"
+                              stopOpacity={0}
+                            />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#e5e7eb"
+                          vertical={false}
+                        />
                         <XAxis
                           dataKey="month"
                           tick={{ fontSize: 12, fill: "#6b7280" }}
@@ -1256,7 +1352,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
                           }}
                           formatter={(value: any, name: string) => {
                             if (name === "users") return [value, "Total Users"];
-                            if (name === "newUsers") return [value, "New Signups"];
+                            if (name === "newUsers")
+                              return [value, "New Signups"];
                             return [value, name];
                           }}
                         />
@@ -1273,8 +1370,6 @@ const AdminPage: React.FC<AdminPageProps> = ({
                           stroke="#3b82f6"
                           strokeWidth={3}
                           dot={{ fill: "#3b82f6", r: 5 }}
-                          
-                          
                           activeDot={{ r: 7 }}
                         />
                       </LineChart>
