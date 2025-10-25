@@ -78,6 +78,26 @@ const AdminPage: React.FC<AdminPageProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 3;
 
+  // Helper: safe match for search across several user fields
+  const matchesSearch = (u: any) => {
+    const searchLower = search.toLowerCase();
+    if (search === "Active") return !u.disabled;
+    if (search === "Suspended") return u.disabled;
+    return (
+      (u.email || "").toLowerCase().includes(searchLower) ||
+      (u.firestoreEmail || "").toLowerCase().includes(searchLower) ||
+      (u.displayName || "").toLowerCase().includes(searchLower) ||
+      (u.phoneNumber || "").toLowerCase().includes(searchLower) ||
+      (u.role || "").toLowerCase().includes(searchLower) ||
+      ((u.company && u.company.companyName) || "")
+        .toLowerCase()
+        .includes(searchLower) ||
+      ((u.profile && u.profile.businessName) || "")
+        .toLowerCase()
+        .includes(searchLower)
+    );
+  };
+
   // Setup automatic token refresh on component mount
   // NOTE: Temporarily disabled token auto-refresh for dev/demo so the
   // admin page can load using a token stored in localStorage.
@@ -393,78 +413,59 @@ const AdminPage: React.FC<AdminPageProps> = ({
   return (
     <div className="min-h-screen grid-pattern relative overflow-hidden">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
-        {/* Header Section */}
-        <div className="mb-6 sm:mb-8 lg:mb-10">
-          <div className="gradient-border premium-card bg-white shadow-lg p-4 sm:p-5 lg:p-6 transition-all duration-300 rounded-2xl">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 sm:gap-4">
-              <div className="space-y-1 flex-1">
-                <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold text-gray-900 flex items-center gap-2">
-                  <span
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white pulse-scale"
-                    style={{
-                      boxShadow:
-                        "0 0 20px rgba(99, 102, 241, 0.4), 0 4px 6px -1px rgba(99, 102, 241, 0.3)",
-                    }}
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      className="h-4 w-4"
-                    >
-                      <path d="M11.7 2.805a.75.75 0 01.6 0A60.65 60.65 0 0122.83 8.72a.75.75 0 01-.231 1.337 49.949 49.949 0 00-9.902 3.912l-.003.002-.34.18a.75.75 0 01-.707 0A50.009 50.009 0 007.5 12.174v-.224c0-.131.067-.248.172-.311a54.614 54.614 0 014.653-2.52.75.75 0 00-.65-1.352 56.129 56.129 0 00-4.78 2.589 1.858 1.858 0 00-.859 1.228 49.803 49.803 0 00-4.634-1.527.75.75 0 01-.231-1.337A60.653 60.653 0 0111.7 2.805z" />
-                      <path d="M13.06 15.473a48.45 48.45 0 017.666-3.282c.134 1.414.22 2.843.255 4.285a.75.75 0 01-.46.71 47.878 47.878 0 00-8.105 4.342.75.75 0 01-.832 0 47.877 47.877 0 00-8.104-4.342.75.75 0 01-.461-.71c.035-1.442.121-2.87.255-4.286A48.4 48.4 0 016 13.18v1.27a1.5 1.5 0 00-.14 2.508c-.09.38-.222.753-.397 1.11.452.213.901.434 1.346.661a6.729 6.729 0 00.551-1.608 1.5 1.5 0 00.14-2.67v-.645a48.549 48.549 0 013.44 1.668 2.25 2.25 0 002.12 0z" />
-                      <path d="M4.462 19.462c.42-.419.753-.89 1-1.394.453.213.902.434 1.347.661a6.743 6.743 0 01-1.286 1.794.75.75 0 11-1.06-1.06z" />
-                    </svg>
-                  </span>
-                  Admin Dashboard
-                </h2>
-                <p className="text-xs sm:text-sm text-gray-600">
-                  Manage clients, monitor system activity, and configure Twilio
-                  credentials.
-                </p>
-                <p className="text-[11px] sm:text-xs text-gray-500">
-                  Signed in as {localStorage.getItem("adminEmail") || "admin"}
-                </p>
-              </div>
-              <div className="flex gap-1.5 sm:gap-2 items-center flex-wrap">
-                <span className="inline-block bg-green-100 text-green-700 font-semibold px-2 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs border border-green-200">
-                  <span className="hidden sm:inline">System </span>Healthy
-                </span>
-                <span className="inline-block bg-blue-100 text-blue-700 font-semibold px-2 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs border border-blue-200">
-                  <span className="hidden sm:inline">Last sync: </span>2 min
-                  <span className="hidden sm:inline"> ago</span>
-                </span>
-                <button
-                  onClick={() => {
-                    try {
-                      localStorage.removeItem("adminSession");
-                      localStorage.removeItem("adminEmail");
-                    } catch {}
-                    onLogout();
-                  }}
-                  className="bg-red-500 hover:bg-red-600 text-white font-semibold px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg shadow-md flex items-center gap-1.5 sm:gap-2 transition-all duration-150 text-sm"
-                  title="Logout"
-                >
-                  <svg
-                    className="w-4 h-4 sm:w-5 sm:h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H7a2 2 0 01-2-2V7a2 2 0 012-2h4a2 2 0 012 2v1"
-                    />
-                  </svg>
-                  <span className="hidden sm:inline">Logout</span>
-                </button>
-              </div>
-            </div>
+        {/* Pagination Controls */}
+        {users.filter(matchesSearch).length > 0 && (
+          <div className="flex items-center justify-center gap-3 mt-6">
+            <button
+              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                currentPage === 1
+                  ? "text-gray-400 cursor-not-allowed"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              Prev
+            </button>
+
+            {Array.from(
+              {
+                length: Math.ceil(
+                  users.filter(matchesSearch).length / itemsPerPage
+                ),
+              },
+              (_, i) => i + 1
+            ).map((pageNum) => (
+              <button
+                key={pageNum}
+                onClick={() => setCurrentPage(pageNum)}
+                className={`w-10 h-10 rounded-lg text-sm font-medium transition-all ${
+                  currentPage === pageNum
+                    ? "bg-gray-900 text-white"
+                    : "text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                {pageNum}
+              </button>
+            ))}
+
+            <button
+              onClick={() => setCurrentPage(currentPage + 1)}
+              disabled={
+                currentPage ===
+                Math.ceil(users.filter(matchesSearch).length / itemsPerPage)
+              }
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                currentPage ===
+                Math.ceil(users.filter(matchesSearch).length / itemsPerPage)
+                  ? "text-gray-400 cursor-not-allowed"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              Next
+            </button>
           </div>
-        </div>
+        )}
 
         {/* Logged-in User Details */}
         <div className="mb-6 sm:mb-8 lg:mb-10">
@@ -948,18 +949,25 @@ const AdminPage: React.FC<AdminPageProps> = ({
                     const searchLower = search.toLowerCase();
                     if (search === "Active") return !u.disabled;
                     if (search === "Suspended") return u.disabled;
+                    // Use safe string checks to avoid calling methods on undefined
                     return (
-                      u.email?.toLowerCase().includes(searchLower) ||
-                      u.firestoreEmail?.toLowerCase()?.includes(searchLower) ||
-                      u.displayName?.toLowerCase()?.includes(searchLower) ||
-                      u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
-                      u.role?.toLowerCase().includes(searchLower) ||
-                      u.company?.companyName
-                        ?.toLowerCase()
-                        ?.includes(searchLower) ||
-                      u.profile?.businessName
-                        ?.toLowerCase()
-                        ?.includes(searchLower)
+                      (u.email || "").toLowerCase().includes(searchLower) ||
+                      (u.firestoreEmail || "")
+                        .toLowerCase()
+                        .includes(searchLower) ||
+                      (u.displayName || "")
+                        .toLowerCase()
+                        .includes(searchLower) ||
+                      (u.phoneNumber || "")
+                        .toLowerCase()
+                        .includes(searchLower) ||
+                      (u.role || "").toLowerCase().includes(searchLower) ||
+                      ((u.company && u.company.companyName) || "")
+                        .toLowerCase()
+                        .includes(searchLower) ||
+                      ((u.profile && u.profile.businessName) || "")
+                        .toLowerCase()
+                        .includes(searchLower)
                     );
                   })
                   .slice(
@@ -1092,20 +1100,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
           </div>
 
           {/* Pagination Controls */}
-          {users.filter((u) => {
-            const searchLower = search.toLowerCase();
-            if (search === "Active") return !u.disabled;
-            if (search === "Suspended") return u.disabled;
-            return (
-              u.email?.toLowerCase().includes(searchLower) ||
-              u.firestoreEmail?.toLowerCase()?.includes(searchLower) ||
-              u.displayName?.toLowerCase()?.includes(searchLower) ||
-              u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
-              u.role?.toLowerCase().includes(searchLower) ||
-              u.company?.companyName?.toLowerCase()?.includes(searchLower) ||
-              u.profile?.businessName?.toLowerCase()?.includes(searchLower)
-            );
-          }).length > 0 && (
+          {users.filter(matchesSearch).length > 0 && (
             <div className="flex items-center justify-center gap-3 mt-6">
               <button
                 onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
@@ -1118,29 +1113,11 @@ const AdminPage: React.FC<AdminPageProps> = ({
               >
                 Prev
               </button>
+
               {Array.from(
                 {
                   length: Math.ceil(
-                    users.filter((u) => {
-                      const searchLower = search.toLowerCase();
-                      if (search === "Active") return !u.disabled;
-                      if (search === "Suspended") return u.disabled;
-                      return (
-                        u.email?.toLowerCase().includes(searchLower) ||
-                        u.firestoreEmail
-                          ?.toLowerCase()
-                          ?.includes(searchLower) ||
-                        u.displayName?.toLowerCase()?.includes(searchLower) ||
-                        u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
-                        u.role?.toLowerCase().includes(searchLower) ||
-                        u.company?.companyName
-                          ?.toLowerCase()
-                          ?.includes(searchLower) ||
-                        u.profile?.businessName
-                          ?.toLowerCase()
-                          ?.includes(searchLower)
-                      );
-                    }).length / itemsPerPage
+                    users.filter(matchesSearch).length / itemsPerPage
                   ),
                 },
                 (_, i) => i + 1
@@ -1157,57 +1134,16 @@ const AdminPage: React.FC<AdminPageProps> = ({
                   {pageNum}
                 </button>
               ))}
+
               <button
                 onClick={() => setCurrentPage(currentPage + 1)}
                 disabled={
                   currentPage ===
-                  Math.ceil(
-                    users.filter((u) => {
-                      const searchLower = search.toLowerCase();
-                      if (search === "Active") return !u.disabled;
-                      if (search === "Suspended") return u.disabled;
-                      return (
-                        u.email?.toLowerCase().includes(searchLower) ||
-                        u.firestoreEmail
-                          ?.toLowerCase()
-                          ?.includes(searchLower) ||
-                        u.displayName?.toLowerCase()?.includes(searchLower) ||
-                        u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
-                        u.role?.toLowerCase().includes(searchLower) ||
-                        u.company?.companyName
-                          ?.toLowerCase()
-                          ?.includes(searchLower) ||
-                        u.profile?.businessName
-                          ?.toLowerCase()
-                          ?.includes(searchLower)
-                      );
-                    }).length / itemsPerPage
-                  )
+                  Math.ceil(users.filter(matchesSearch).length / itemsPerPage)
                 }
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   currentPage ===
-                  Math.ceil(
-                    users.filter((u) => {
-                      const searchLower = search.toLowerCase();
-                      if (search === "Active") return !u.disabled;
-                      if (search === "Suspended") return u.disabled;
-                      return (
-                        u.email?.toLowerCase().includes(searchLower) ||
-                        u.firestoreEmail
-                          ?.toLowerCase()
-                          ?.includes(searchLower) ||
-                        u.displayName?.toLowerCase()?.includes(searchLower) ||
-                        u.phoneNumber?.toLowerCase()?.includes(searchLower) ||
-                        u.role?.toLowerCase().includes(searchLower) ||
-                        u.company?.companyName
-                          ?.toLowerCase()
-                          ?.includes(searchLower) ||
-                        u.profile?.businessName
-                          ?.toLowerCase()
-                          ?.includes(searchLower)
-                      );
-                    }).length / itemsPerPage
-                  )
+                  Math.ceil(users.filter(matchesSearch).length / itemsPerPage)
                     ? "text-gray-400 cursor-not-allowed"
                     : "text-gray-700 hover:bg-gray-100"
                 }`}
