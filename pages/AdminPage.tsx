@@ -232,6 +232,21 @@ const AdminPage: React.FC<AdminPageProps> = ({
     );
   };
 
+  const handleSignOut = () => {
+    try {
+      localStorage.removeItem("adminSession");
+      localStorage.removeItem("adminEmail");
+      localStorage.removeItem("adminToken");
+    } catch {}
+    try {
+      onLogout();
+    } catch {}
+    // Navigate to admin login explicitly
+    try {
+      window.location.href = "/admin-login";
+    } catch {}
+  };
+
   const handleSaveCredentials = async () => {
     setIsSaving(true);
     setShowError(false);
@@ -405,43 +420,49 @@ const AdminPage: React.FC<AdminPageProps> = ({
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
         {/* top pagination intentionally removed */}
 
-        {/* Logged-in User Details */}
-        <div className="mb-6 sm:mb-8 lg:mb-10">
-          <div className="premium-card bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h3 className="text-base sm:text-lg font-bold text-gray-900">
-                  Logged-in User
-                </h3>
-                <p className="text-sm text-gray-600 mt-0.5">
-                  This is the account currently authenticated as admin.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <span className="inline-flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    className="w-4 h-4 text-gray-500"
-                  >
-                    <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-9.52 5.71a3 3 0 01-3.08 0L1.5 8.67z" />
-                    <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.52 5.713a3 3 0 003.08 0L22.5 6.908z" />
-                  </svg>
-                  {localStorage.getItem("adminEmail") || "admin"}
-                </span>
-                <span className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold bg-purple-100 text-purple-700">
-                  👑 Admin
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Summary Cards */}
+        {/* Summary Cards (includes Logged-in User as first card) */}
         <div className="mb-6 sm:mb-8 lg:mb-10 mx-auto max-w-4xl">
           <div className="flex justify-center">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 max-w-2xl w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 max-w-2xl w-full">
+              {/* Logged-in User Card */}
+              <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6 lg:p-8 hover:shadow-lg hover:border-gray-300 transition-all duration-200">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-900">
+                      Logged-in User
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-0.5">
+                      Currently authenticated admin account
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="inline-flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        className="w-4 h-4 text-gray-500"
+                      >
+                        <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-9.52 5.71a3 3 0 01-3.08 0L1.5 8.67z" />
+                        <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.52 5.713a3 3 0 003.08 0L22.5 6.908z" />
+                      </svg>
+                      {localStorage.getItem("adminEmail") || "admin"}
+                    </div>
+                    <span className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold bg-purple-100 text-purple-700">
+                      👑 Admin
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={handleSignOut}
+                    className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors"
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+
               <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6 lg:p-8 hover:shadow-lg hover:border-gray-300 transition-all duration-200">
                 <div className="flex flex-col items-center text-center">
                   <div className="bg-blue-100 p-3 rounded-xl mb-4">
