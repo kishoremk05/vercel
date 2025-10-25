@@ -237,6 +237,8 @@ try {
           "Content-Type",
           "Accept",
           "X-Requested-With",
+          // admin-specific header used by admin routes
+          "x-admin-uid",
           "x-company-id",
           "x-client-id",
           "x-user-email",
@@ -313,7 +315,7 @@ try {
       );
       res.setHeader(
         "Access-Control-Allow-Headers",
-        "Authorization, Content-Type, Accept, X-Requested-With, x-company-id, x-client-id, x-user-email, x-plan-id, x-plan, x-price, x-amount, x-session-id, x-subscription-id"
+        "Authorization, Content-Type, Accept, X-Requested-With, x-admin-uid, x-company-id, x-client-id, x-user-email, x-plan-id, x-plan, x-price, x-amount, x-session-id, x-subscription-id"
       );
       res.setHeader("Access-Control-Max-Age", "86400");
       if (req.method === "OPTIONS") {
