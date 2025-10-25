@@ -145,14 +145,51 @@ const App: React.FC = () => {
 
   // Auth state: use localStorage for demo/local logins only.
   const [auth, setAuth] = useState<{ role: "buyer" | "admin" } | null>(() => {
-    // Initialize auth from localStorage to prevent logout on reload
+    // Initialize auth from localStorage to prevent logout on reload.
+    // Important: don't assume admin just because `adminSession` exists.
+    // Validate the cached admin token (if any) and clear stale state.
+    const isValidJwt = (token?: string | null) => {
+      if (!token) return false;
+      try {
+        const parts = token.split(".");
+        if (parts.length < 2) return false;
+        // base64url decode
+        const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const json = decodeURIComponent(
+          atob(payload)
+            .split("")
+            .map(function (c) {
+              return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+            })
+            .join("")
+        );
+        const obj = JSON.parse(json) as any;
+        if (obj && typeof obj.exp === "number") {
+          // allow a 30s leeway
+          return obj.exp > Date.now() / 1000 + 30;
+        }
+        return false;
+      } catch (e) {
+        return false;
+      }
+    };
+
     try {
       const companyId = localStorage.getItem("companyId");
       const userEmail = localStorage.getItem("userEmail");
       const adminSession = localStorage.getItem("adminSession");
+      const adminToken = localStorage.getItem("adminToken");
 
       if (adminSession === "true") {
-        return { role: "admin" };
+        if (isValidJwt(adminToken)) {
+          return { role: "admin" };
+        }
+        // stale admin session — clear it so the app doesn't assume admin on reload
+        try {
+          localStorage.removeItem("adminSession");
+          localStorage.removeItem("adminToken");
+        } catch {}
+        return null;
       } else if (companyId && userEmail) {
         // User is logged in as client
         return { role: "buyer" };
@@ -160,6 +197,69 @@ const App: React.FC = () => {
     } catch {}
     return null;
   });
+
+  // Helper to validate a JWT (used by startup logic)
+  const isValidJwt = (token?: string | null) => {
+    if (!token) return false;
+    try {
+      const parts = token.split(".");
+      if (parts.length < 2) return false;
+      const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const json = decodeURIComponent(
+        atob(payload)
+          .split("")
+          .map(function (c) {
+            return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+          })
+          .join("")
+      );
+      const obj = JSON.parse(json) as any;
+      if (obj && typeof obj.exp === "number") {
+        return obj.exp > Date.now() / 1000 + 30;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // If an adminSession exists but the cached token is missing/expired,
+  // attempt to obtain a fresh token from Firebase (if available). This
+  // runs after mount so it can call async token helpers.
+  useEffect(() => {
+    (async () => {
+      try {
+        const adminSession = localStorage.getItem("adminSession");
+        const adminToken = localStorage.getItem("adminToken");
+        if (adminSession === "true" && !isValidJwt(adminToken)) {
+          // Try to get a fresh token via the app's helper. waitForAuthToken
+          // returns a token when Firebase SDK has a current user.
+          try {
+            const fresh = await waitForAuthToken(5000).catch(() => null);
+            if (fresh) {
+              try {
+                localStorage.setItem("adminToken", fresh);
+              } catch {}
+              setAuth({ role: "admin" });
+              return;
+            }
+          } catch {}
+
+          // If we couldn't refresh, clear stale admin session so UI
+          // doesn't assume admin access and crash on reload.
+          try {
+            localStorage.removeItem("adminSession");
+            localStorage.removeItem("adminToken");
+          } catch {}
+          setAuth(null);
+        }
+      } catch (e) {
+        // ignore errors here
+      }
+    })();
+    // run only once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Subscription and payment flow removed (payment feature disabled)
 
   // Listen for in-app navigation requests (e.g., Customer List 'Choose a Plan' button)

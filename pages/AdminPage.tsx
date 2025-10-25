@@ -1293,8 +1293,18 @@ const ErrorBoundary: React.FC<{ children: React.ReactNode }> = ({
 
     window.addEventListener("error", errorHandler);
 
+    // Also capture unhandled promise rejections so they're visible during dev
+    const rejectionHandler = (ev: PromiseRejectionEvent) => {
+      try {
+        console.error("Unhandled rejection caught:", ev.reason);
+      } catch {}
+      setHasError(true);
+    };
+    window.addEventListener("unhandledrejection", rejectionHandler as any);
+
     return () => {
       window.removeEventListener("error", errorHandler);
+      window.removeEventListener("unhandledrejection", rejectionHandler as any);
     };
   }, []);
 
