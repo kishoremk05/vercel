@@ -110,7 +110,29 @@ try {
   // Allow providing Firebase service account JSON via env var for platforms
   // that do not support files in the repo (e.g., Render). If FIREBASE_ADMIN_JSON
   // is set, parse it and initialize admin SDK from it.
-  const envCreds = process.env.FIREBASE_ADMIN_JSON || null;
+  // Support FIREBASE_ADMIN_JSON (raw JSON string) or FIREBASE_ADMIN_JSON_B64 (base64-encoded JSON)
+  let envCreds = null;
+  try {
+    if (process.env.FIREBASE_ADMIN_JSON) {
+      envCreds = process.env.FIREBASE_ADMIN_JSON;
+    } else if (process.env.FIREBASE_ADMIN_JSON_B64) {
+      console.log(
+        "[firebase] Detected FIREBASE_ADMIN_JSON_B64 env var - decoding base64"
+      );
+      envCreds = Buffer.from(
+        process.env.FIREBASE_ADMIN_JSON_B64,
+        "base64"
+      ).toString("utf8");
+    } else {
+      envCreds = null;
+    }
+  } catch (e) {
+    console.warn(
+      "[firebase] Failed to read FIREBASE_ADMIN_JSON env var:",
+      e?.message || e
+    );
+    envCreds = null;
+  }
   let serviceAccountPath = null;
   try {
     if (envCreds) {
@@ -344,6 +366,31 @@ try {
       .status(200)
       .json({ ready: firestoreEnabled ? "firestore" : "no-firestore" })
   );
+
+  // Debug endpoint: return diagnostic flags (safe: no secrets)
+  // Useful for remote troubleshooting when startup logs are not available.
+  app.get("/__debug/status", (req, res) => {
+    try {
+      const hasEnvCreds = Boolean(
+        process.env.FIREBASE_ADMIN_JSON || process.env.FIREBASE_ADMIN_JSON_B64
+      );
+      // serviceAccountPath is defined above in the init block when file-based creds are detected
+      const fileCredsFound =
+        typeof serviceAccountPath !== "undefined" && !!serviceAccountPath;
+      return res.json({
+        success: true,
+        firestoreEnabled: !!firestoreEnabled,
+        dbV2Loaded: !!dbV2,
+        firebaseProjectId: firebaseProjectId || null,
+        hasEnvCreds: hasEnvCreds,
+        serviceAccountFileFound: !!fileCredsFound,
+      });
+    } catch (e) {
+      return res
+        .status(500)
+        .json({ success: false, error: e?.message || String(e) });
+    }
+  });
 
   // --- Account Deletion Endpoint ---
   // Securely deletes all Firestore data for a user/company (clients/{uid}, subcollections, and optionally users/companies)
