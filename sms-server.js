@@ -240,6 +240,7 @@ try {
           "x-company-id",
           "x-client-id",
           "x-user-email",
+          "x-admin-uid",
           "x-plan-id",
           "x-plan",
           "x-price",
@@ -313,7 +314,7 @@ try {
       );
       res.setHeader(
         "Access-Control-Allow-Headers",
-        "Authorization, Content-Type, Accept, X-Requested-With, x-company-id, x-client-id, x-user-email, x-plan-id, x-plan, x-price, x-amount, x-session-id, x-subscription-id"
+        "Authorization, Content-Type, Accept, X-Requested-With, x-company-id, x-client-id, x-user-email, x-admin-uid, x-plan-id, x-plan, x-price, x-amount, x-session-id, x-subscription-id"
       );
       res.setHeader("Access-Control-Max-Age", "86400");
       if (req.method === "OPTIONS") {
@@ -3500,13 +3501,11 @@ app.get("/api/admin/global-credentials", async (req, res) => {
         console.log("[firebase] Lazy-loaded dbV2 for admin global-credentials");
       } catch (e) {
         console.warn("[firebase] Lazy dbV2 import failed:", e?.message || e);
-        return res
-          .status(500)
-          .json({
-            success: false,
-            error: "dbv2-not-loaded",
-            details: e?.message || String(e),
-          });
+        return res.status(500).json({
+          success: false,
+          error: "dbv2-not-loaded",
+          details: e?.message || String(e),
+        });
       }
     }
     const settings = await dbV2.getGlobalAdminSettings();
@@ -3844,13 +3843,11 @@ app.get("/api/dashboard/stats", async (req, res) => {
         console.log("[firebase] Lazy-loaded dbV2 for dashboard stats");
       } catch (e) {
         console.warn("[firebase] Lazy dbV2 import failed:", e?.message || e);
-        return res
-          .status(500)
-          .json({
-            success: false,
-            error: "dbv2-not-loaded",
-            details: e?.message || String(e),
-          });
+        return res.status(500).json({
+          success: false,
+          error: "dbv2-not-loaded",
+          details: e?.message || String(e),
+        });
       }
     }
 
