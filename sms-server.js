@@ -110,29 +110,7 @@ try {
   // Allow providing Firebase service account JSON via env var for platforms
   // that do not support files in the repo (e.g., Render). If FIREBASE_ADMIN_JSON
   // is set, parse it and initialize admin SDK from it.
-  // Support FIREBASE_ADMIN_JSON (raw JSON string) or FIREBASE_ADMIN_JSON_B64 (base64-encoded JSON)
-  let envCreds = null;
-  try {
-    if (process.env.FIREBASE_ADMIN_JSON) {
-      envCreds = process.env.FIREBASE_ADMIN_JSON;
-    } else if (process.env.FIREBASE_ADMIN_JSON_B64) {
-      console.log(
-        "[firebase] Detected FIREBASE_ADMIN_JSON_B64 env var - decoding base64"
-      );
-      envCreds = Buffer.from(
-        process.env.FIREBASE_ADMIN_JSON_B64,
-        "base64"
-      ).toString("utf8");
-    } else {
-      envCreds = null;
-    }
-  } catch (e) {
-    console.warn(
-      "[firebase] Failed to read FIREBASE_ADMIN_JSON env var:",
-      e?.message || e
-    );
-    envCreds = null;
-  }
+  const envCreds = process.env.FIREBASE_ADMIN_JSON || null;
   let serviceAccountPath = null;
   try {
     if (envCreds) {
@@ -259,8 +237,6 @@ try {
           "Content-Type",
           "Accept",
           "X-Requested-With",
-          // admin-specific header used by admin routes
-          "x-admin-uid",
           "x-company-id",
           "x-client-id",
           "x-user-email",
@@ -337,7 +313,7 @@ try {
       );
       res.setHeader(
         "Access-Control-Allow-Headers",
-        "Authorization, Content-Type, Accept, X-Requested-With, x-admin-uid, x-company-id, x-client-id, x-user-email, x-plan-id, x-plan, x-price, x-amount, x-session-id, x-subscription-id"
+        "Authorization, Content-Type, Accept, X-Requested-With, x-company-id, x-client-id, x-user-email, x-plan-id, x-plan, x-price, x-amount, x-session-id, x-subscription-id"
       );
       res.setHeader("Access-Control-Max-Age", "86400");
       if (req.method === "OPTIONS") {
@@ -366,31 +342,6 @@ try {
       .status(200)
       .json({ ready: firestoreEnabled ? "firestore" : "no-firestore" })
   );
-
-  // Debug endpoint: return diagnostic flags (safe: no secrets)
-  // Useful for remote troubleshooting when startup logs are not available.
-  app.get("/__debug/status", (req, res) => {
-    try {
-      const hasEnvCreds = Boolean(
-        process.env.FIREBASE_ADMIN_JSON || process.env.FIREBASE_ADMIN_JSON_B64
-      );
-      // serviceAccountPath is defined above in the init block when file-based creds are detected
-      const fileCredsFound =
-        typeof serviceAccountPath !== "undefined" && !!serviceAccountPath;
-      return res.json({
-        success: true,
-        firestoreEnabled: !!firestoreEnabled,
-        dbV2Loaded: !!dbV2,
-        firebaseProjectId: firebaseProjectId || null,
-        hasEnvCreds: hasEnvCreds,
-        serviceAccountFileFound: !!fileCredsFound,
-      });
-    } catch (e) {
-      return res
-        .status(500)
-        .json({ success: false, error: e?.message || String(e) });
-    }
-  });
 
   // --- Account Deletion Endpoint ---
   // Securely deletes all Firestore data for a user/company (clients/{uid}, subcollections, and optionally users/companies)
@@ -6122,215 +6073,6 @@ app.get("/api/dashboard/stats", async (req, res) => {
 });
 
 // ========== END NEGATIVE COMMENTS API ==========
-
-// ==========================================
-// ADMIN AUTH MIDDLEWARE + ADMIN ROUTES
-// Adds a verifyAdminToken middleware and a couple of safe admin routes.
-// Relies on existing `firebaseAdmin` initialization above. If the Admin
-// SDK is not initialized this will return 503 so the rest of the server
-// remains functional.
-// ==========================================
-
-async function verifyAdminToken(req, res, next) {
-  try {
-    if (!firebaseAdmin) {
-      return res
-        .status(503)
-        .json({ success: false, error: "firebase-admin-not-initialized" });
-    }
-
-    const authHeader =
-      req.headers.authorization || req.headers.Authorization || "";
-    if (!authHeader || !String(authHeader).startsWith("Bearer ")) {
-      return res
-        .status(401)
-        .json({ success: false, error: "No authorization token provided" });
-    }
-
-    const idToken = String(authHeader).slice(7).trim();
-    if (!idToken) {
-      return res.status(401).json({ success: false, error: "Empty token" });
-    }
-
-    const decoded = await firebaseAdmin.auth().verifyIdToken(idToken);
-    // Support boolean or string 'true'
-    const isAdmin =
-      decoded && (decoded.admin === true || decoded.admin === "true");
-    if (!isAdmin) {
-      return res.status(401).json({
-        success: false,
-        error: "Insufficient privileges (need admin role)",
-      });
-    }
-
-    req.user = decoded;
-    return next();
-  } catch (err) {
-    console.error(
-      "[admin:verify] token verification error:",
-      err?.message || err
-    );
-    return res
-      .status(401)
-      .json({ success: false, error: "Invalid or expired token" });
-  }
-}
-
-// Helper: set admin custom claim on a user (safe when firebaseAdmin available)
-async function setAdminClaim(userEmail) {
-  try {
-    if (!firebaseAdmin) throw new Error("firebase-admin-not-initialized");
-    const user = await firebaseAdmin.auth().getUserByEmail(String(userEmail));
-    await firebaseAdmin.auth().setCustomUserClaims(user.uid, { admin: true });
-    console.log(
-      `[admin:setClaim] ✅ Admin claim set for ${userEmail} (${user.uid})`
-    );
-    return { success: true };
-  } catch (e) {
-    console.error("[admin:setClaim] error", e?.message || e);
-    return { success: false, error: e?.message || String(e) };
-  }
-}
-
-async function checkUserClaims(userEmail) {
-  try {
-    if (!firebaseAdmin) throw new Error("firebase-admin-not-initialized");
-    const user = await firebaseAdmin.auth().getUserByEmail(String(userEmail));
-    console.log(
-      "[admin:checkClaims] customClaims for",
-      userEmail,
-      user.customClaims
-    );
-    return user.customClaims || null;
-  } catch (e) {
-    console.error("[admin:checkClaims] error", e?.message || e);
-    return null;
-  }
-}
-
-// Protect all /admin routes and their subpaths with the middleware by default
-// Use '/admin' (prefix) instead of '/admin/*' because path-to-regexp used by
-// recent Express versions rejects the explicit '*' token (causes a PathError).
-app.use("/admin", verifyAdminToken);
-
-// Example admin endpoints
-app.get("/admin/credentials", verifyAdminToken, async (req, res) => {
-  try {
-    // Prefer dbV2 helper if available
-    let settings = null;
-    if (dbV2 && typeof dbV2.getGlobalAdminSettings === "function") {
-      settings = await dbV2.getGlobalAdminSettings().catch(() => null);
-    }
-    if (!settings && firestoreEnabled) {
-      try {
-        const snap = await firebaseAdmin
-          .firestore()
-          .collection("settings")
-          .doc("global")
-          .get();
-        settings = snap.exists ? snap.data() : null;
-      } catch (e) {
-        // ignore
-      }
-    }
-    // Only return non-sensitive fields
-    const safe = {
-      twilio: {
-        phoneNumber: settings?.twilio?.phoneNumber || null,
-        messagingServiceSid: settings?.twilio?.messagingServiceSid || null,
-      },
-      dodo: {
-        apiBase: settings?.dodo?.apiBase || null,
-      },
-    };
-    return res.json({ success: true, credentials: safe });
-  } catch (e) {
-    console.error("[admin/credentials] error", e?.message || e);
-    return res
-      .status(500)
-      .json({ success: false, error: e?.message || String(e) });
-  }
-});
-
-app.get("/admin/global-stats", verifyAdminToken, async (req, res) => {
-  try {
-    if (!firestoreEnabled)
-      return res
-        .status(503)
-        .json({ success: false, error: "firestore-disabled" });
-    const firestore = firebaseAdmin.firestore();
-    // Count clients (note: may be expensive for very large projects)
-    const clientsSnap = await firestore.collection("clients").get();
-    let usersCount = 0;
-    try {
-      const list = await firebaseAdmin.auth().listUsers(1000);
-      usersCount = Array.isArray(list.users) ? list.users.length : 0;
-    } catch (e) {
-      // ignore auth listing failures (requires proper permissions)
-    }
-    return res.json({
-      success: true,
-      stats: { clients: clientsSnap.size, firebaseUsers: usersCount },
-    });
-  } catch (e) {
-    console.error("[admin/global-stats] error", e?.message || e);
-    return res
-      .status(500)
-      .json({ success: false, error: e?.message || String(e) });
-  }
-});
-
-app.get("/admin/firebase-users", verifyAdminToken, async (req, res) => {
-  try {
-    if (!firebaseAdmin)
-      return res
-        .status(503)
-        .json({ success: false, error: "firebase-admin-not-initialized" });
-    const listUsersResult = await firebaseAdmin.auth().listUsers(1000);
-    const users = (listUsersResult.users || []).map((user) => ({
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName,
-      disabled: user.disabled,
-      emailVerified: user.emailVerified,
-      createdAt: user.metadata?.creationTime,
-      lastSignInAt: user.metadata?.lastSignInTime,
-      role: user.customClaims?.admin ? "admin" : "user",
-    }));
-    return res.json({ success: true, users });
-  } catch (e) {
-    console.error("[admin/firebase-users] error", e?.message || e);
-    return res
-      .status(500)
-      .json({ success: false, error: e?.message || String(e) });
-  }
-});
-
-// Temporary setup endpoint - REMOVED AFTER INITIAL SETUP
-// app.post("/setup-admin", async (req, res) => {
-//   try {
-//     const { email, secretKey } = req.body || {};
-//     if (!process.env.ADMIN_SETUP_SECRET) {
-//       return res
-//         .status(500)
-//         .json({ success: false, error: "ADMIN_SETUP_SECRET not configured" });
-//     }
-//     if (secretKey !== process.env.ADMIN_SETUP_SECRET) {
-//       return res
-//         .status(403)
-//         .json({ success: false, error: "Invalid secret key" });
-//     }
-//     if (!email)
-//       return res.status(400).json({ success: false, error: "email required" });
-//     const result = await setAdminClaim(email);
-//     return res.json(result);
-//   } catch (e) {
-//     console.error("[setup-admin] error", e?.message || e);
-//     return res
-//       .status(500)
-//       .json({ success: false, error: e?.message || String(e) });
-//   }
-// });
 
 // Static file serving for SPA (must be AFTER all API routes)
 app.use(express.static(path.join(__dirname, "dist")));
