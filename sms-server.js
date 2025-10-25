@@ -481,6 +481,39 @@ try {
     app.use(cors());
     app.use(express.json({ limit: "1mb" }));
   }
+  // Provide minimal debug endpoints even when full init failed so remote
+  // troubleshooting is possible. Do NOT leak secrets.
+  try {
+    app.get("/__debug/status", (req, res) => {
+      return res.json({
+        success: false,
+        rootInitFailed: true,
+        rootInitError: String(e?.message || e),
+        firestoreEnabled: !!firestoreEnabled,
+        dbV2Loaded: !!dbV2,
+        firebaseProjectId: firebaseProjectId || null,
+        hasEnvCreds: Boolean(
+          process.env.FIREBASE_ADMIN_JSON || process.env.FIREBASE_ADMIN_JSON_B64
+        ),
+      });
+    });
+
+    app.get("/__debug/dbv2", async (req, res) => {
+      try {
+        const mod = await import("./server/db/dataV2.js");
+        return res.json({
+          success: true,
+          loaded: !!(mod && (mod.default || mod)),
+        });
+      } catch (impErr) {
+        return res
+          .status(500)
+          .json({ success: false, error: impErr?.message || String(impErr) });
+      }
+    });
+  } catch (inner) {
+    // ignore
+  }
 }
 
 function toWhatsAppAddress(raw) {
@@ -663,6 +696,17 @@ async function handleSendSms(req, res) {
   let companyCreds = {};
   let adminCreds = {};
   if (firestoreEnabled) {
+    // Ensure dbV2 is loaded (lazy import fallback for hosted envs)
+    if (!dbV2) {
+      try {
+        const mod = await import("./server/db/dataV2.js");
+        dbV2 = mod.default || mod;
+        console.log("[firebase] Lazy-loaded dbV2 for send-sms");
+      } catch (e) {
+        console.warn("[firebase] Lazy dbV2 import failed:", e?.message || e);
+        // proceed - handlers below will handle missing creds gracefully
+      }
+    }
     try {
       if (companyIdBody) {
         const company = await dbV2.getCompanyById(String(companyIdBody));
@@ -3448,6 +3492,23 @@ app.get("/api/admin/global-credentials", async (req, res) => {
     console.log(
       "[api:admin:global-credentials] ✅ Firestore enabled, fetching settings..."
     );
+    // Ensure dbV2 is loaded (lazy import as a safety net in hosted environments)
+    if (!dbV2) {
+      try {
+        const mod = await import("./server/db/dataV2.js");
+        dbV2 = mod.default || mod;
+        console.log("[firebase] Lazy-loaded dbV2 for admin global-credentials");
+      } catch (e) {
+        console.warn("[firebase] Lazy dbV2 import failed:", e?.message || e);
+        return res
+          .status(500)
+          .json({
+            success: false,
+            error: "dbv2-not-loaded",
+            details: e?.message || String(e),
+          });
+      }
+    }
     const settings = await dbV2.getGlobalAdminSettings();
 
     console.log(
@@ -3774,6 +3835,24 @@ app.get("/api/dashboard/stats", async (req, res) => {
     }
 
     const firestore = firebaseAdmin.firestore();
+
+    // Ensure dbV2 is loaded (lazy import fallback)
+    if (!dbV2) {
+      try {
+        const mod = await import("./server/db/dataV2.js");
+        dbV2 = mod.default || mod;
+        console.log("[firebase] Lazy-loaded dbV2 for dashboard stats");
+      } catch (e) {
+        console.warn("[firebase] Lazy dbV2 import failed:", e?.message || e);
+        return res
+          .status(500)
+          .json({
+            success: false,
+            error: "dbv2-not-loaded",
+            details: e?.message || String(e),
+          });
+      }
+    }
 
     // Load or create company (legacy helper)
     let company = await dbV2.getCompanyById(companyId);

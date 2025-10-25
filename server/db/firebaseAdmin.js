@@ -1,6 +1,5 @@
 import admin from "firebase-admin";
 import fs from "fs";
-import adminRoutes from "../routes/adminRoutes";
 
 function getServiceAccount() {
   const svc = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -72,6 +71,16 @@ export async function validateAdminUid(uid) {
 }
 
 // Example of integrating the admin routes into your Express app
-export function setupAdminRoutes(app) {
-  app.use("/admin", adminRoutes);
+export async function setupAdminRoutes(app) {
+  // Lazily import adminRoutes to avoid circular import (adminRoutes imports validateAdminUid)
+  try {
+    const mod = await import("../routes/adminRoutes.js");
+    const adminRoutes = mod.default || mod;
+    app.use("/admin", adminRoutes);
+  } catch (e) {
+    console.warn(
+      "[firebaseAdmin] setupAdminRoutes failed to import adminRoutes:",
+      e?.message || e
+    );
+  }
 }
