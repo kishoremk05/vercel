@@ -207,10 +207,20 @@ const AdminPage: React.FC<AdminPageProps> = ({
           : undefined;
 
         // Plain fetch for stats and users
-        const [statsRes, usersRes] = await Promise.all([
-          fetch(statsUrl, { headers }),
-          fetch(usersUrl, { headers }),
-        ]);
+        let statsRes, usersRes;
+        try {
+          [statsRes, usersRes] = await Promise.all([
+            fetch(statsUrl, { headers }),
+            fetch(usersUrl, { headers }),
+          ]);
+        } catch (networkError) {
+          setErrorMessage(
+            "Network error: Failed to fetch admin data. Please check your connection or server status."
+          );
+          setShowError(true);
+          setUsers([]);
+          return;
+        }
 
         // If either response is 401, surface privilege error and stop further parsing
         if (statsRes.status === 401 || usersRes.status === 401) {
@@ -220,7 +230,6 @@ const AdminPage: React.FC<AdminPageProps> = ({
             body?.error || "Unauthorized: insufficient admin privileges"
           );
           setShowError(true);
-          setTimeout(() => setShowError(false), 6000);
           setUsers([]);
           return;
         }
@@ -235,18 +244,19 @@ const AdminPage: React.FC<AdminPageProps> = ({
           setStats(data?.stats || null);
         } else {
           const text = await statsRes.text();
-          console.error(
-            "Failed to fetch /admin/global-stats",
-            statsRes.status,
-            text?.slice(0, 500)
+          setErrorMessage(
+            "Failed to load global stats: " +
+              (text?.slice(0, 200) || statsRes.status)
           );
+          setShowError(true);
+          setUsers([]);
+          return;
         }
 
         if (usersRes.status === 401) {
           const body = await usersRes.json().catch(() => null);
           setErrorMessage(body?.error || "Unauthorized: failed to load users");
           setShowError(true);
-          setTimeout(() => setShowError(false), 6000);
           setUsers([]);
           return;
         }
@@ -256,30 +266,31 @@ const AdminPage: React.FC<AdminPageProps> = ({
           try {
             data = await usersRes.json();
           } catch (parseErr: any) {
-            console.error(
-              "Failed to parse /admin/firebase-users JSON",
-              parseErr
-            );
+            setErrorMessage("Failed to parse users data: " + parseErr?.message);
+            setShowError(true);
+            setUsers([]);
+            return;
           }
           if (data?.success && Array.isArray(data.users)) {
             setUsers(data.users);
           } else {
             setUsers([]);
+            setErrorMessage("No users found or invalid response.");
+            setShowError(true);
           }
         } else {
           const text = await usersRes.text();
-          console.error(
-            "Failed to fetch /admin/firebase-users",
-            usersRes.status,
-            text?.slice(0, 500)
+          setErrorMessage(
+            "Failed to load Firebase users: " +
+              (text?.slice(0, 200) || usersRes.status)
           );
-          setUsers([]);
-          setErrorMessage("Failed to load Firebase users (see console)");
           setShowError(true);
-          setTimeout(() => setShowError(false), 6000);
+          setUsers([]);
         }
       } catch (e) {
-        console.error("Failed to load admin data", e);
+        setErrorMessage("Unexpected error: " + (e?.message || e));
+        setShowError(true);
+        setUsers([]);
       }
     };
     // If Firebase user isn't ready yet, wait for auth state once then run
