@@ -122,6 +122,80 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     })();
   }, []);
 
+  // Ensure the settings page URL contains the clientId query param. This
+  // helps previews and saved links include the client context. Try
+  // localStorage first, then a lightweight Firebase auth fallback via
+  // runtime import so bundlers/SSR are not affected.
+  useEffect(() => {
+    let unsub: any = null;
+    const trySet = (clientId?: string | null) => {
+      try {
+        if (!clientId) return false;
+        const url = new URL(window.location.href);
+        if (!url.searchParams.get("clientId")) {
+          url.searchParams.set("clientId", clientId);
+          window.history.replaceState(window.history.state, "", url.toString());
+        }
+        return true;
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("SettingsPage: failed to append clientId", e);
+        return false;
+      }
+    };
+
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("clientId")) return;
+
+      const fromStorage =
+        localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
+      if (fromStorage) {
+        trySet(fromStorage);
+        return;
+      }
+
+      try {
+        const mod = require("../lib/firebaseClient");
+        const getFirebaseAuth = mod.getFirebaseAuth;
+        if (typeof getFirebaseAuth === "function") {
+          const auth = getFirebaseAuth();
+          if (auth && auth.currentUser && auth.currentUser.uid) {
+            trySet(auth.currentUser.uid);
+            return;
+          }
+          try {
+            unsub = auth.onAuthStateChanged((u: any) => {
+              if (u && u.uid) {
+                trySet(u.uid);
+                try {
+                  unsub && unsub();
+                } catch {}
+              }
+            });
+            setTimeout(() => {
+              try {
+                unsub && unsub();
+              } catch {}
+            }, 5000);
+          } catch (e) {
+            // ignore
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+    };
+  }, []);
+
   // Helper to personalize strings with placeholders used in both preview and send flows
   // Ensure a link contains tenantKey, preserving other params
   const ensureTenantKey = (link: string) => {

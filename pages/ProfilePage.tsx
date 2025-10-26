@@ -229,6 +229,50 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
     }
   }, []);
 
+  // Ensure the profile page URL includes the clientId query param so
+  // links opened from external sources include the client context.
+  // Prefer localStorage.companyId / auth_uid, otherwise derive via Firebase.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("clientId")) return;
+
+      const fromStorage =
+        localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
+      if (fromStorage) {
+        url.searchParams.set("clientId", fromStorage);
+        window.history.replaceState(window.history.state, "", url.toString());
+        return;
+      }
+
+      // Fallback: try to derive companyId from Firebase auth
+      (async () => {
+        try {
+          const cid = await deriveCompanyId();
+          if (cid) {
+            try {
+              const u = new URL(window.location.href);
+              if (!u.searchParams.get("clientId")) {
+                u.searchParams.set("clientId", cid);
+                window.history.replaceState(
+                  window.history.state,
+                  "",
+                  u.toString()
+                );
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      })();
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
   // Always use Firestore subscriptionData for display; never fall back to localStorage
   useEffect(() => {
     if (!subscriptionData) {
