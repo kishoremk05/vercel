@@ -158,6 +158,61 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
   const userEmail = localStorage.getItem("userEmail") || "";
   const businessName = localStorage.getItem("businessName") || "Your Business";
 
+  // Ensure the payment page URL includes the logged-in client's id
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        // Prefer stored companyId, fall back to authenticated user's UID
+        let companyId = localStorage.getItem("companyId");
+        if (!companyId) {
+          try {
+            const auth = getFirebaseAuth();
+            if (auth && !auth.currentUser) {
+              // wait briefly for auth state to initialize
+              await new Promise<void>((resolve) => {
+                const off = auth.onAuthStateChanged((u: any) => {
+                  try {
+                    off();
+                  } catch {}
+                  resolve();
+                });
+                setTimeout(() => {
+                  try {
+                    off();
+                  } catch {}
+                  resolve();
+                }, 2000);
+              });
+            }
+            if (auth && auth.currentUser && auth.currentUser.uid) {
+              companyId = auth.currentUser.uid;
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        if (!mounted) return;
+        if (companyId) {
+          try {
+            const params = new URLSearchParams(window.location.search || "");
+            if (!params.get("clientId")) {
+              params.set("clientId", String(companyId));
+              const newUrl = `${window.location.pathname}?${params.toString()}`;
+              window.history.replaceState({}, "", newUrl);
+            }
+          } catch (e) {}
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const handlePayment = async () => {
     if (alreadyPaid) {
       window.location.href = "/dashboard";
