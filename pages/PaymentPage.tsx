@@ -147,6 +147,55 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     };
   }, []);
 
+  // If a clientId is present in the URL (or localStorage) verify that the
+  // client's profile does not already have an active plan or remaining SMS
+  // credits. If such data exists, redirect to the dashboard to avoid double
+  // payment attempts.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const params = new URLSearchParams(window.location.search || "");
+        let clientId =
+          params.get("clientId") || localStorage.getItem("companyId");
+        if (!clientId) return;
+
+        const db = getFirebaseDb();
+        const profileRef = doc(
+          db,
+          "clients",
+          String(clientId),
+          "profile",
+          "main"
+        );
+        const snap = await getDoc(profileRef).catch(() => null as any);
+        if (!mounted) return;
+        if (snap && snap.exists && snap.exists()) {
+          const data: any = snap.data();
+          const hasPlan = !!(
+            data?.planId ||
+            data?.planName ||
+            data?.status === "active"
+          );
+          const hasCredits =
+            Number(data?.remainingCredits || data?.smsCredits || 0) > 0;
+          if (hasPlan || hasCredits) {
+            // Ensure local companyId is set for other parts of the app
+            try {
+              localStorage.setItem("companyId", String(clientId));
+            } catch {}
+            window.location.href = "/dashboard";
+          }
+        }
+      } catch (e) {
+        // ignore - non-fatal
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   // Redirect to dashboard if alreadyPaid from server
   useEffect(() => {
     if (alreadyPaid && alreadyPaidSource === "server") {
