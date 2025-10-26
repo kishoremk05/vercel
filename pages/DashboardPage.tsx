@@ -2317,6 +2317,90 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const messageCount = dashStats?.messageCount ?? 0;
   const feedbackCount = dashStats?.feedbackCount ?? 0;
 
+  // Ensure the dashboard URL contains the clientId query param for the
+  // currently logged-in client. Prefer localStorage.companyId then
+  // localStorage.auth_uid and finally the Firebase auth currentUser UID.
+  // This mirrors the PaymentPage logic so links shared or opened from
+  // elsewhere include the client context.
+  useEffect(() => {
+    let unsub: any = null;
+    const trySetClientId = (clientId?: string | null) => {
+      try {
+        if (!clientId) return false;
+        const url = new URL(window.location.href);
+        if (!url.searchParams.get("clientId")) {
+          url.searchParams.set("clientId", clientId);
+          window.history.replaceState(window.history.state, "", url.toString());
+        }
+        return true;
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug("DashboardPage: failed to append clientId to URL", e);
+        return false;
+      }
+    };
+
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("clientId")) return;
+
+      // 1) try localStorage first
+      const fromStorage =
+        localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
+      if (fromStorage) {
+        trySetClientId(fromStorage);
+        return;
+      }
+
+      // 2) fallback to Firebase currentUser UID if available
+      try {
+        // lazy import helper from lib which ensures Firebase is initialized
+        // and exposes getFirebaseAuth
+        // Import at runtime to avoid affecting SSR or build-time resolution
+        const mod = require("../lib/firebaseClient");
+        const getFirebaseAuth = mod.getFirebaseAuth;
+        if (typeof getFirebaseAuth === "function") {
+          const auth = getFirebaseAuth();
+          if (auth && auth.currentUser && auth.currentUser.uid) {
+            trySetClientId(auth.currentUser.uid);
+            return;
+          }
+          // Listen for auth state change for a short period
+          try {
+            unsub = auth.onAuthStateChanged((u: any) => {
+              if (u && u.uid) {
+                trySetClientId(u.uid);
+                try {
+                  unsub && unsub();
+                } catch {}
+              }
+            });
+            // safety: remove listener after 5s
+            setTimeout(() => {
+              try {
+                unsub && unsub();
+              } catch {}
+            }, 5000);
+          } catch (e) {
+            // ignore
+          }
+        }
+      } catch (e) {
+        // runtime require may fail in some bundlers - ignore
+        // eslint-disable-next-line no-console
+        console.debug("DashboardPage: firebase fallback unavailable", e);
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+    };
+  }, []);
+
   // Negative comments state (fetched from Firebase)
   const [negativeComments, setNegativeComments] = useState<
     Array<{
