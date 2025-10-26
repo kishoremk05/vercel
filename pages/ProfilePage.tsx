@@ -1519,42 +1519,32 @@ const SmsCreditsDisplay: React.FC<{
   subscriptionData: any;
   messagesSentThisMonth?: number;
 }> = ({ subscriptionData, messagesSentThisMonth }) => {
-  const [sentCount, setSentCount] = useState<number | null>(null);
+  const [remainingCount, setRemainingCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
     try {
       if (!subscriptionData) {
-        setSentCount(0);
+        setRemainingCount(0);
         return;
       }
       if (
         typeof messagesSentThisMonth === "number" &&
         messagesSentThisMonth >= 0
       ) {
-        // Prefer the dashboard-computed count when available because it's
-        // derived from actual message activity logs and is authoritative
-        // for the Sent metric.
-        setSentCount(messagesSentThisMonth);
-      } else {
+        // Calculate remaining SMS count based on dashboard's sent count
         const total = Number(
           subscriptionData.smsCredits ?? subscriptionData.totalCredits ?? 0
         );
-        const remaining = Number(
-          subscriptionData.remainingCredits ??
-            subscriptionData.remaining ??
-            total
-        );
-        const sent =
-          Number.isFinite(total) && Number.isFinite(remaining)
-            ? Math.max(0, total - remaining)
-            : 0;
-        setSentCount(sent);
+        const remaining = Math.max(0, total - messagesSentThisMonth);
+        setRemainingCount(remaining);
+      } else {
+        setRemainingCount(null);
       }
     } catch (e) {
       console.warn("[SmsCreditsDisplay] compute error:", e);
-      setSentCount(0);
+      setRemainingCount(0);
     } finally {
       setLoading(false);
     }
@@ -1562,7 +1552,9 @@ const SmsCreditsDisplay: React.FC<{
 
   if (loading) return <div className="text-sm text-gray-500">Loading...</div>;
   return (
-    <div className="text-sm text-gray-600">Sent: {sentCount ?? "N/A"}</div>
+    <div className="text-sm text-gray-600">
+      Remaining SMS: {remainingCount ?? "N/A"}
+    </div>
   );
 };
 
