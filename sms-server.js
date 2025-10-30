@@ -2246,15 +2246,18 @@ app.post("/api/payments/create-session", async (req, res) => {
       });
     }
 
-    // Determine return URLs with fallbacks
-    const baseUrl =
+    // Determine return URLs with fallbacks. Support comma-separated
+    // FRONTEND_URL (some platforms allow multiple values) by using
+    // the first entry as the canonical return URL. This avoids
+    // constructing invalid return URLs when FRONTEND_URL contains
+    // multiple domains.
+    const rawBase =
       process.env.FRONTEND_URL ||
       process.env.VITE_API_BASE ||
       "https://vercel-swart-chi-29.vercel.app";
-    const successUrl = `${baseUrl.replace(
-      /\/$/,
-      ""
-    )}/payment-success?client_id=${encodeURIComponent(
+    const firstBase = (rawBase || "").split(",")[0] || rawBase;
+    const baseUrl = (firstBase || "").replace(/\/$/, "");
+    const successUrl = `${baseUrl}/payment-success?client_id=${encodeURIComponent(
       companyId || "unknown"
     )}&plan_id=${encodeURIComponent(plan)}`;
 
