@@ -1,0 +1,28 @@
+# ReputationFlow360 - Robots.txt
+# https://reputationflow360.com/robots.txt
+
+User-agent: *
+Allow: /
+Allow: /auth
+Allow: /signup
+Allow: /feedback
+Allow: /quick-feedback
+
+# Block private/admin pages from indexing
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /admin-login
+Disallow: /profile
+Disallow: /settings
+Disallow: /messenger
+Disallow: /credentials
+Disallow: /payment
+Disallow: /payment-success
+Disallow: /payment-cancel
+Disallow: /verify-subscription
+
+# Block API endpoints
+Disallow: /api/
+
+# Sitemap
+Sitemap: https://reputationflow360.com/sitemap.xml

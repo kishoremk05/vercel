@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import SEO from "../components/SEO";
 import { LinkIcon, StarIcon } from "../components/icons";
 import { getSmsServerUrl } from "../lib/firebaseConfig";
 
@@ -451,302 +452,329 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
   })();
 
   return (
-    <div className="min-h-screen grid-pattern relative overflow-hidden">
-      <div className="mx-auto max-w-7xl px-6 lg:px-8 py-6 lg:py-10">
-        {/* Header Section */}
-        <div className="mb-8 lg:mb-10">
-          <div className="gradient-border premium-card bg-white shadow-lg p-5 lg:p-6 transition-all duration-300 rounded-2xl">
-            <div className="space-y-1">
-              <h2 className="text-xl lg:text-2xl font-semibold text-gray-900 flex items-center gap-2">
-                <span
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white pulse-scale"
-                  style={{
-                    boxShadow:
-                      "0 0 20px rgba(99, 102, 241, 0.4), 0 4px 6px -1px rgba(99, 102, 241, 0.3)",
-                  }}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    className="h-4 w-4"
+    <>
+      <SEO
+        title="Settings | ReputationFlow360"
+        description="Configure your ReputationFlow360 settings, message templates, and integrations. Customize your review automation workflow."
+        canonical="https://reputationflow360.com/settings"
+        keywords="settings, configuration, message templates, integrations"
+        noindex={true}
+      />
+      <div className="min-h-screen grid-pattern relative overflow-hidden">
+        <div className="mx-auto max-w-7xl px-6 lg:px-8 py-6 lg:py-10">
+          {/* Header Section */}
+          <div className="mb-8 lg:mb-10">
+            <div className="gradient-border premium-card bg-white shadow-lg p-5 lg:p-6 transition-all duration-300 rounded-2xl">
+              <div className="space-y-1">
+                <h2 className="text-xl lg:text-2xl font-semibold text-gray-900 flex items-center gap-2">
+                  <span
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white pulse-scale"
+                    style={{
+                      boxShadow:
+                        "0 0 20px rgba(99, 102, 241, 0.4), 0 4px 6px -1px rgba(99, 102, 241, 0.3)",
+                    }}
                   >
-                    <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
-                    <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </span>
-                Settings
-              </h2>
-              <p className="text-sm text-gray-600">
-                Customize messages and configure your review funnel and
-                SMS/WhatsApp integration.
-              </p>
-            </div>
-            <div className="mt-4 flex justify-center">
-              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 border border-gray-200 text-gray-800 text-xs font-semibold shadow-sm">
-                <span className="font-semibold">SMS Server:</span>
-                {loadingServerPort ? (
-                  <span className="font-mono text-gray-500">Loading...</span>
-                ) : smsServerPort ? (
-                  <span className="font-mono text-indigo-600 font-bold">
-                    {smsServerPort}
-                  </span>
-                ) : (
-                  <span className="font-mono text-gray-500">
-                    Not configured
-                  </span>
-                )}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Message Template Configuration Card */}
-        <div className="mb-8 lg:mb-10">
-          <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg p-6 transition-all duration-300 hover:shadow-xl rounded-2xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-              <div className="bg-indigo-100 p-1.5 rounded-full">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  className="h-5 w-5 text-indigo-600"
-                >
-                  <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" />
-                  <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" />
-                </svg>
-              </div>
-              Message Templates
-            </h3>
-            <p className="text-sm text-gray-600 mb-6">
-              Configure your SMS and WhatsApp message templates. Twilio
-              credentials are managed in the Admin page.
-            </p>
-            <div className="space-y-6">
-              <div className="pt-2">
-                <h4 className="text-base font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                  <div className="bg-green-100 p-1 rounded">
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       viewBox="0 0 24 24"
                       fill="currentColor"
-                      className="h-4 w-4 text-green-600"
+                      className="h-4 w-4"
                     >
-                      <path d="M4.913 2.658c2.075-.27 4.19-.408 6.337-.408 2.147 0 4.262.139 6.337.408 1.922.25 3.291 1.861 3.405 3.727a4.403 4.403 0 00-1.032-.211 50.89 50.89 0 00-8.42 0c-2.358.196-4.04 2.19-4.04 4.434v4.286a4.47 4.47 0 002.433 3.984L7.28 21.53A.75.75 0 016 21v-4.03a48.527 48.527 0 01-1.087-.128C2.905 16.58 1.5 14.833 1.5 12.862V6.638c0-1.97 1.405-3.718 3.413-3.979z" />
-                      <path d="M15.75 7.5c-1.376 0-2.739.057-4.086.169C10.124 7.797 9 9.103 9 10.609v4.285c0 1.507 1.128 2.814 2.67 2.94 1.243.102 2.5.157 3.768.165l2.782 2.781a.75.75 0 001.28-.53v-2.39l.33-.026c1.542-.125 2.67-1.433 2.67-2.94v-4.286c0-1.505-1.125-2.811-2.664-2.94A49.392 49.392 0 0015.75 7.5z" />
+                      <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+                      <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                  </div>
-                  WhatsApp Template (manual)
-                </h4>
-                <p className="text-xs text-gray-500 mb-3">
-                  This template is used when you open WhatsApp manually from the
-                  Dashboard. Edit the text and placeholders below.
+                  </span>
+                  Settings
+                </h2>
+                <p className="text-sm text-gray-600">
+                  Customize messages and configure your review funnel and
+                  SMS/WhatsApp integration.
                 </p>
-                <div className="mt-2">
-                  <label className="block text-xs font-semibold text-gray-700 mb-2">
-                    WhatsApp Message Template
-                  </label>
-                  <textarea
-                    value={waMessage}
-                    onChange={(e) => setWaMessage(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-gray-900 shadow-sm"
-                    placeholder="Hi [Customer Name]..."
-                  />
-                  <p className="mt-2 text-xs text-gray-500">
-                    Placeholders supported: [Customer Name], [Business Name],
-                    [Review Link].
+              </div>
+              <div className="mt-4 flex justify-center">
+                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 border border-gray-200 text-gray-800 text-xs font-semibold shadow-sm">
+                  <span className="font-semibold">SMS Server:</span>
+                  {loadingServerPort ? (
+                    <span className="font-mono text-gray-500">Loading...</span>
+                  ) : smsServerPort ? (
+                    <span className="font-mono text-indigo-600 font-bold">
+                      {smsServerPort}
+                    </span>
+                  ) : (
+                    <span className="font-mono text-gray-500">
+                      Not configured
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Message Template Configuration Card */}
+          <div className="mb-8 lg:mb-10">
+            <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg p-6 transition-all duration-300 hover:shadow-xl rounded-2xl">
+              <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                <div className="bg-indigo-100 p-1.5 rounded-full">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="h-5 w-5 text-indigo-600"
+                  >
+                    <path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" />
+                    <path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" />
+                  </svg>
+                </div>
+                Message Templates
+              </h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Configure your SMS and WhatsApp message templates. Twilio
+                credentials are managed in the Admin page.
+              </p>
+              <div className="space-y-6">
+                <div className="pt-2">
+                  <h4 className="text-base font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    <div className="bg-green-100 p-1 rounded">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        className="h-4 w-4 text-green-600"
+                      >
+                        <path d="M4.913 2.658c2.075-.27 4.19-.408 6.337-.408 2.147 0 4.262.139 6.337.408 1.922.25 3.291 1.861 3.405 3.727a4.403 4.403 0 00-1.032-.211 50.89 50.89 0 00-8.42 0c-2.358.196-4.04 2.19-4.04 4.434v4.286a4.47 4.47 0 002.433 3.984L7.28 21.53A.75.75 0 016 21v-4.03a48.527 48.527 0 01-1.087-.128C2.905 16.58 1.5 14.833 1.5 12.862V6.638c0-1.97 1.405-3.718 3.413-3.979z" />
+                        <path d="M15.75 7.5c-1.376 0-2.739.057-4.086.169C10.124 7.797 9 9.103 9 10.609v4.285c0 1.507 1.128 2.814 2.67 2.94 1.243.102 2.5.157 3.768.165l2.782 2.781a.75.75 0 001.28-.53v-2.39l.33-.026c1.542-.125 2.67-1.433 2.67-2.94v-4.286c0-1.505-1.125-2.811-2.664-2.94A49.392 49.392 0 0015.75 7.5z" />
+                      </svg>
+                    </div>
+                    WhatsApp Template (manual)
+                  </h4>
+                  <p className="text-xs text-gray-500 mb-3">
+                    This template is used when you open WhatsApp manually from
+                    the Dashboard. Edit the text and placeholders below.
                   </p>
-                  <div className="mt-3 p-3 bg-gray-50 rounded-lg text-xs text-gray-700 border border-gray-200">
-                    <span className="font-semibold">Preview:</span>{" "}
-                    {sampleWaPreview}
+                  <div className="mt-2">
+                    <label className="block text-xs font-semibold text-gray-700 mb-2">
+                      WhatsApp Message Template
+                    </label>
+                    <textarea
+                      value={waMessage}
+                      onChange={(e) => setWaMessage(e.target.value)}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-gray-900 shadow-sm"
+                      placeholder="Hi [Customer Name]..."
+                    />
+                    <p className="mt-2 text-xs text-gray-500">
+                      Placeholders supported: [Customer Name], [Business Name],
+                      [Review Link].
+                    </p>
+                    <div className="mt-3 p-3 bg-gray-50 rounded-lg text-xs text-gray-700 border border-gray-200">
+                      <span className="font-semibold">Preview:</span>{" "}
+                      {sampleWaPreview}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Google Review Redirect Link - Client Setting */}
-        <div className="mb-8 lg:mb-10">
-          <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg p-6 transition-all duration-300 hover:shadow-xl rounded-2xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-              <div className="bg-blue-100 p-1.5 rounded-full">
-                <StarIcon className="h-5 w-5 text-blue-600" />
+          {/* Google Review Redirect Link - Client Setting */}
+          <div className="mb-8 lg:mb-10">
+            <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg p-6 transition-all duration-300 hover:shadow-xl rounded-2xl">
+              <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                <div className="bg-blue-100 p-1.5 rounded-full">
+                  <StarIcon className="h-5 w-5 text-blue-600" />
+                </div>
+                Google Review Link (Positive Redirect)
+              </h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Paste your public Google review URL. When a user selects 4–5
+                stars on the feedback page, we will redirect them here. Saved
+                per client.
+              </p>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <LinkIcon className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  type="url"
+                  value={localGoogleReviewLink}
+                  onChange={(e) => setLocalGoogleReviewLink(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900 bg-white text-gray-900 shadow-sm"
+                  placeholder="https://g.page/r/your-business-id/review"
+                />
               </div>
-              Google Review Link (Positive Redirect)
-            </h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Paste your public Google review URL. When a user selects 4–5 stars
-              on the feedback page, we will redirect them here. Saved per
-              client.
-            </p>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <LinkIcon className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                type="url"
-                value={localGoogleReviewLink}
-                onChange={(e) => setLocalGoogleReviewLink(e.target.value)}
-                className="w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900 bg-white text-gray-900 shadow-sm"
-                placeholder="https://g.page/r/your-business-id/review"
-              />
+              <p className="mt-3 text-xs text-gray-500">
+                Note: Feedback page URL is managed globally by admin.
+              </p>
             </div>
-            <p className="mt-3 text-xs text-gray-500">
-              Note: Feedback page URL is managed globally by admin.
-            </p>
           </div>
-        </div>
 
-        {/* Rating Threshold Configuration */}
-        <div className="mb-8 lg:mb-10">
-          <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg p-6 transition-all duration-300 hover:shadow-xl rounded-2xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-              <div className="bg-yellow-100 p-1.5 rounded-full">
+          {/* Rating Threshold Configuration */}
+          <div className="mb-8 lg:mb-10">
+            <div className="gradient-border glow-on-hover premium-card bg-white shadow-lg p-6 transition-all duration-300 hover:shadow-xl rounded-2xl">
+              <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                <div className="bg-yellow-100 p-1.5 rounded-full">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="h-5 w-5 text-yellow-600"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                Rating Classification
+              </h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Configure how star ratings are classified as positive or
+                negative feedback.
+              </p>
+              <div className="space-y-3">
+                <label
+                  className="flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all hover:border-gray-300 hover:bg-gray-50"
+                  style={{
+                    borderColor:
+                      ratingThreshold === "5"
+                        ? "rgb(99, 102, 241)"
+                        : "rgb(229, 231, 235)",
+                    backgroundColor:
+                      ratingThreshold === "5" ? "rgb(238, 242, 255)" : "white",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="ratingThreshold"
+                    value="5"
+                    checked={ratingThreshold === "5"}
+                    onChange={(e) =>
+                      setRatingThreshold && setRatingThreshold("5")
+                    }
+                    className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div className="ml-3 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-semibold text-gray-900">
+                        Strict Mode
+                      </span>
+                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-bold rounded-full">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">
+                      Only{" "}
+                      <span className="font-semibold text-yellow-600">
+                        ★★★★★ (5 stars)
+                      </span>{" "}
+                      = Positive
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      <span className="font-semibold text-red-600">
+                        ★ to ★★★★ (1-4 stars)
+                      </span>{" "}
+                      = Negative
+                    </p>
+                    <p className="text-xs text-gray-500 mt-2 italic">
+                      Best for maintaining high standards and capturing detailed
+                      feedback for improvement.
+                    </p>
+                  </div>
+                </label>
+
+                <label
+                  className="flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all hover:border-gray-300 hover:bg-gray-50"
+                  style={{
+                    borderColor:
+                      ratingThreshold === "3"
+                        ? "rgb(99, 102, 241)"
+                        : "rgb(229, 231, 235)",
+                    backgroundColor:
+                      ratingThreshold === "3" ? "rgb(238, 242, 255)" : "white",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="ratingThreshold"
+                    value="3"
+                    checked={ratingThreshold === "3"}
+                    onChange={(e) =>
+                      setRatingThreshold && setRatingThreshold("3")
+                    }
+                    className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div className="ml-3 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-semibold text-gray-900">
+                        Lenient Mode
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">
+                      <span className="font-semibold text-yellow-600">
+                        ★★★ to ★★★★★ (3-5 stars)
+                      </span>{" "}
+                      = Positive
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      <span className="font-semibold text-red-600">
+                        ★ to ★★ (1-2 stars)
+                      </span>{" "}
+                      = Negative
+                    </p>
+                    <p className="text-xs text-gray-500 mt-2 italic">
+                      Good for businesses wanting more positive reviews and less
+                      critical feedback tracking.
+                    </p>
+                  </div>
+                </label>
+              </div>
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <svg
+                    className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <p className="text-xs text-blue-800">
+                    <strong>Note:</strong> This setting affects how ratings are
+                    classified in your dashboard analytics and determines when
+                    customers are prompted to leave Google reviews.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Save Button Section */}
+          <div className="flex justify-end items-center gap-4">
+            {showSuccess && (
+              <p className="text-sm text-green-600 transition-opacity duration-300 font-semibold flex items-center gap-2">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 24 24"
                   fill="currentColor"
-                  className="h-5 w-5 text-yellow-600"
+                  className="h-5 w-5"
                 >
                   <path
                     fillRule="evenodd"
-                    d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"
+                    d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"
                     clipRule="evenodd"
                   />
                 </svg>
-              </div>
-              Rating Classification
-            </h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Configure how star ratings are classified as positive or negative
-              feedback.
-            </p>
-            <div className="space-y-3">
-              <label
-                className="flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all hover:border-gray-300 hover:bg-gray-50"
-                style={{
-                  borderColor:
-                    ratingThreshold === "5"
-                      ? "rgb(99, 102, 241)"
-                      : "rgb(229, 231, 235)",
-                  backgroundColor:
-                    ratingThreshold === "5" ? "rgb(238, 242, 255)" : "white",
-                }}
-              >
-                <input
-                  type="radio"
-                  name="ratingThreshold"
-                  value="5"
-                  checked={ratingThreshold === "5"}
-                  onChange={(e) =>
-                    setRatingThreshold && setRatingThreshold("5")
-                  }
-                  className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500"
-                />
-                <div className="ml-3 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold text-gray-900">
-                      Strict Mode
-                    </span>
-                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-bold rounded-full">
-                      Recommended
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-2">
-                    Only{" "}
-                    <span className="font-semibold text-yellow-600">
-                      ★★★★★ (5 stars)
-                    </span>{" "}
-                    = Positive
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <span className="font-semibold text-red-600">
-                      ★ to ★★★★ (1-4 stars)
-                    </span>{" "}
-                    = Negative
-                  </p>
-                  <p className="text-xs text-gray-500 mt-2 italic">
-                    Best for maintaining high standards and capturing detailed
-                    feedback for improvement.
-                  </p>
-                </div>
-              </label>
-
-              <label
-                className="flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all hover:border-gray-300 hover:bg-gray-50"
-                style={{
-                  borderColor:
-                    ratingThreshold === "3"
-                      ? "rgb(99, 102, 241)"
-                      : "rgb(229, 231, 235)",
-                  backgroundColor:
-                    ratingThreshold === "3" ? "rgb(238, 242, 255)" : "white",
-                }}
-              >
-                <input
-                  type="radio"
-                  name="ratingThreshold"
-                  value="3"
-                  checked={ratingThreshold === "3"}
-                  onChange={(e) =>
-                    setRatingThreshold && setRatingThreshold("3")
-                  }
-                  className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500"
-                />
-                <div className="ml-3 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold text-gray-900">
-                      Lenient Mode
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-2">
-                    <span className="font-semibold text-yellow-600">
-                      ★★★ to ★★★★★ (3-5 stars)
-                    </span>{" "}
-                    = Positive
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <span className="font-semibold text-red-600">
-                      ★ to ★★ (1-2 stars)
-                    </span>{" "}
-                    = Negative
-                  </p>
-                  <p className="text-xs text-gray-500 mt-2 italic">
-                    Good for businesses wanting more positive reviews and less
-                    critical feedback tracking.
-                  </p>
-                </div>
-              </label>
-            </div>
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <svg
-                  className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <p className="text-xs text-blue-800">
-                  <strong>Note:</strong> This setting affects how ratings are
-                  classified in your dashboard analytics and determines when
-                  customers are prompted to leave Google reviews.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Save Button Section */}
-        <div className="flex justify-end items-center gap-4">
-          {showSuccess && (
-            <p className="text-sm text-green-600 transition-opacity duration-300 font-semibold flex items-center gap-2">
+                Changes saved successfully!
+              </p>
+            )}
+            <button
+              onClick={handleSave}
+              className="px-6 py-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 font-semibold shadow-md transition-colors inline-flex items-center gap-2"
+            >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
@@ -755,34 +783,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
               >
                 <path
                   fillRule="evenodd"
-                  d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z"
+                  d="M19.916 4.626a.75.75 0 01.208 1.04l-9 13.5a.75.75 0 01-1.154.114l-6-6a.75.75 0 011.06-1.06l5.353 5.353 8.493-12.739a.75.75 0 011.04-.208z"
                   clipRule="evenodd"
                 />
               </svg>
-              Changes saved successfully!
-            </p>
-          )}
-          <button
-            onClick={handleSave}
-            className="px-6 py-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 font-semibold shadow-md transition-colors inline-flex items-center gap-2"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              className="h-5 w-5"
-            >
-              <path
-                fillRule="evenodd"
-                d="M19.916 4.626a.75.75 0 01.208 1.04l-9 13.5a.75.75 0 01-1.154.114l-6-6a.75.75 0 011.06-1.06l5.353 5.353 8.493-12.739a.75.75 0 011.04-.208z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Save All Changes
-          </button>
+              Save All Changes
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };
 

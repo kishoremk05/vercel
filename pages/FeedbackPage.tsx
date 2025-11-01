@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import SEO from "../components/SEO";
 import FeedbackAnalytics from "../components/FeedbackAnalytics";
 import FeedbackReplyModal from "../components/FeedbackReplyModal";
 import FeedbackDeleteModal from "../components/FeedbackDeleteModal";
@@ -931,19 +932,75 @@ const FeedbackPage: React.FC<FeedbackPageProps> = ({
 
   // Sentiment-filtered (internal/admin) view layout
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50 to-amber-50 p-6 lg:p-10">
-      {/* Enhanced Header */}
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col items-center justify-center gap-4 py-8">
-          <div className="flex flex-col md:flex-row items-center gap-4">
-            {onBack && (
-              <button
-                type="button"
-                onClick={onBack}
-                className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-bold hover:bg-gray-50 hover:border-gray-300 shadow-md hover:shadow-lg transition-all duration-200 text-base flex items-center gap-2"
-              >
+    <>
+      <SEO
+        title="Customer Feedback | ReputationFlow360"
+        description="Share your experience and help us improve. Leave your feedback and rating to help other customers make informed decisions."
+        canonical="https://reputationflow360.com/feedback"
+        keywords="customer feedback, review form, leave a review, business feedback, customer satisfaction"
+      />
+      <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50 to-amber-50 p-6 lg:p-10">
+        {/* Enhanced Header */}
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col items-center justify-center gap-4 py-8">
+            <div className="flex flex-col md:flex-row items-center gap-4">
+              {onBack && (
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-bold hover:bg-gray-50 hover:border-gray-300 shadow-md hover:shadow-lg transition-all duration-200 text-base flex items-center gap-2"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                    />
+                  </svg>
+                  Back
+                </button>
+              )}
+              <div className="flex items-center gap-3">
+                <div className="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-red-100 to-orange-100 rounded-2xl shadow-lg">
+                  <svg
+                    className="w-7 h-7 text-red-600"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <h1 className="text-3xl md:text-4xl font-extrabold text-red-800 tracking-tight flex items-center gap-3">
+                    Negative Reviews
+                    <span className="px-4 py-1.5 rounded-full bg-red-600 text-white text-lg font-bold border-2 border-red-700 shadow-md">
+                      {totalCount}
+                    </span>
+                  </h1>
+                  <p className="text-red-700 text-sm mt-1 font-medium">
+                    Showing {filteredCount} of {totalCount} negative review(s)
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+          {/* Enhanced Filter Controls */}
+          <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 p-6 mb-8">
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+              {/* Search Input */}
+              <div className="flex-1 relative">
                 <svg
-                  className="w-5 h-5"
+                  className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -952,131 +1009,51 @@ const FeedbackPage: React.FC<FeedbackPageProps> = ({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={2}
-                    d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                   />
                 </svg>
-                Back
-              </button>
-            )}
-            <div className="flex items-center gap-3">
-              <div className="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-red-100 to-orange-100 rounded-2xl shadow-lg">
+                <input
+                  type="text"
+                  placeholder="Search name, phone, or text..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-12 pr-4 h-12 rounded-xl border-2 border-gray-300 focus:ring-4 focus:ring-red-200 focus:border-red-400 text-base bg-white transition-all duration-200"
+                />
+              </div>
+
+              {/* Sort Dropdown */}
+              <div className="flex items-center gap-3 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200">
                 <svg
-                  className="w-7 h-7 text-red-600"
+                  className="w-5 h-5 text-gray-600"
                   fill="currentColor"
                   viewBox="0 0 20 20"
                 >
-                  <path
-                    fillRule="evenodd"
-                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                    clipRule="evenodd"
-                  />
+                  <path d="M3 3a1 1 0 000 2h11a1 1 0 100-2H3zM3 7a1 1 0 000 2h7a1 1 0 100-2H3zM3 11a1 1 0 100 2h4a1 1 0 100-2H3zM15 8a1 1 0 10-2 0v5.586l-1.293-1.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L15 13.586V8z" />
                 </svg>
-              </div>
-              <div>
-                <h1 className="text-3xl md:text-4xl font-extrabold text-red-800 tracking-tight flex items-center gap-3">
-                  Negative Reviews
-                  <span className="px-4 py-1.5 rounded-full bg-red-600 text-white text-lg font-bold border-2 border-red-700 shadow-md">
-                    {totalCount}
-                  </span>
-                </h1>
-                <p className="text-red-700 text-sm mt-1 font-medium">
-                  Showing {filteredCount} of {totalCount} negative review(s)
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-        {/* Enhanced Filter Controls */}
-        <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 p-6 mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-            {/* Search Input */}
-            <div className="flex-1 relative">
-              <svg
-                className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <input
-                type="text"
-                placeholder="Search name, phone, or text..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 h-12 rounded-xl border-2 border-gray-300 focus:ring-4 focus:ring-red-200 focus:border-red-400 text-base bg-white transition-all duration-200"
-              />
-            </div>
-
-            {/* Sort Dropdown */}
-            <div className="flex items-center gap-3 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200">
-              <svg
-                className="w-5 h-5 text-gray-600"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path d="M3 3a1 1 0 000 2h11a1 1 0 100-2H3zM3 7a1 1 0 000 2h7a1 1 0 100-2H3zM3 11a1 1 0 100 2h4a1 1 0 100-2H3zM15 8a1 1 0 10-2 0v5.586l-1.293-1.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L15 13.586V8z" />
-              </svg>
-              <span className="text-gray-700 text-sm font-medium">Sort:</span>
-              <select
-                value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value as any)}
-                className="bg-transparent border-none focus:ring-0 text-base font-semibold text-gray-900 cursor-pointer"
-              >
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="name">Name A–Z</option>
-              </select>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery("");
-                  setSortOrder("newest");
-                  setPage(1);
-                  setFiltersNotice("✓ Filters cleared");
-                  setTimeout(() => setFiltersNotice(null), 2000);
-                }}
-                className="px-4 h-11 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 flex items-center gap-2"
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+                <span className="text-gray-700 text-sm font-medium">Sort:</span>
+                <select
+                  value={sortOrder}
+                  onChange={(e) => setSortOrder(e.target.value as any)}
+                  className="bg-transparent border-none focus:ring-0 text-base font-semibold text-gray-900 cursor-pointer"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-                Clear
-              </button>
-              {onClearNegative && (
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                  <option value="name">Name A–Z</option>
+                </select>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => {
-                    if (
-                      confirm(
-                        "⚠️ Delete all negative feedback?\n\nThis action cannot be undone. All negative reviews will be permanently removed."
-                      )
-                    ) {
-                      onClearNegative();
-                      setFiltersNotice("✓ All negative feedback cleared");
-                      setTimeout(() => setFiltersNotice(null), 2000);
-                    }
+                    setSearchQuery("");
+                    setSortOrder("newest");
+                    setPage(1);
+                    setFiltersNotice("✓ Filters cleared");
+                    setTimeout(() => setFiltersNotice(null), 2000);
                   }}
-                  className="px-4 h-11 rounded-xl bg-gradient-to-r from-red-600 to-red-700 text-white font-bold hover:from-red-700 hover:to-red-800 shadow-md hover:shadow-lg transition-all duration-200 flex items-center gap-2"
+                  className="px-4 h-11 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 flex items-center gap-2"
                 >
                   <svg
                     className="w-4 h-4"
@@ -1088,219 +1065,26 @@ const FeedbackPage: React.FC<FeedbackPageProps> = ({
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      d="M6 18L18 6M6 6l12 12"
                     />
                   </svg>
-                  Clear Data
+                  Clear
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={exportCsv}
-                className="px-4 h-11 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold hover:from-blue-700 hover:to-indigo-700 shadow-md hover:shadow-lg transition-all duration-200 flex items-center gap-2"
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
-                Export CSV
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {filtersNotice && (
-          <div className="text-center text-xs text-gray-500 mb-4">
-            {filtersNotice}
-          </div>
-        )}
-        {filteredCount === 0 ? (
-          <div className="flex flex-col items-center justify-center py-32 px-4">
-            <div className="w-32 h-32 rounded-full bg-gradient-to-br from-red-100 to-orange-100 flex items-center justify-center mb-6 shadow-inner">
-              <span className="text-6xl">😕</span>
-            </div>
-            <h3 className="text-2xl font-bold text-gray-800 mb-2">
-              No reviews found
-            </h3>
-            <p className="text-gray-500 text-center max-w-md mb-6">
-              {searchQuery
-                ? "Try adjusting your search or filters to find what you're looking for."
-                : "When customers leave negative feedback, it will appear here."}
-            </p>
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery("");
-                  setSortOrder("newest");
-                  setPage(1);
-                }}
-                className="px-6 py-3 rounded-xl bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold hover:from-red-700 hover:to-orange-700 shadow-md hover:shadow-lg transition-all duration-200 flex items-center gap-2"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-                Clear Filters
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {paged.map((r) => (
-              <div
-                key={r.id}
-                className="bg-white rounded-2xl border-2 border-red-100 p-6 shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all duration-200 group relative flex flex-col min-h-[240px]"
-              >
-                {/* Header with Profile Icon */}
-                <div className="flex items-start gap-3 mb-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-100 to-orange-100 flex items-center justify-center flex-shrink-0">
-                    <svg
-                      className="w-6 h-6 text-red-600"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                      />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-gray-900 text-lg truncate">
-                      {isPublicBucketId(r.customerId)
-                        ? "Anonymous"
-                        : r.name || `ID: ${r.customerId}`}
-                    </div>
-                    {r.phone && (
-                      <div className="flex items-center gap-1.5 text-sm text-gray-600 mt-1">
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                          />
-                        </svg>
-                        {r.phone}
-                      </div>
-                    )}
-                  </div>
-                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-red-600 to-orange-600 text-white shadow-sm">
-                    Negative
-                  </span>
-                </div>
-
-                {/* Date */}
-                <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3">
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  {new Date(r.date).toLocaleString()}
-                </div>
-
-                {/* Feedback Text */}
-                <div className="flex-1 mb-4">
-                  <div className="text-gray-800 leading-relaxed whitespace-pre-line bg-gray-50 rounded-lg p-3 border border-gray-200">
-                    {r.text && r.text.length > 180
-                      ? r.text.slice(0, 180) + "…"
-                      : r.text}
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex items-center gap-2 pt-3 border-t border-gray-200">
+                {onClearNegative && (
                   <button
                     type="button"
-                    onClick={() => setSelected(r)}
-                    className="flex-1 px-3 py-2 rounded-lg text-sm font-bold bg-gradient-to-r from-gray-100 to-gray-200 text-gray-800 hover:from-gray-200 hover:to-gray-300 transition-all duration-200 flex items-center justify-center gap-1.5"
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                      />
-                    </svg>
-                    View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setReplyModal({ open: true, phone: r.phone || "" })
-                    }
-                    className="flex-1 px-3 py-2 rounded-lg text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                    title="Reply via SMS/WhatsApp"
-                    disabled={!r.phone}
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                      />
-                    </svg>
-                    Reply
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteModal({ open: true, entry: r })}
-                    className="px-3 py-2 rounded-lg text-sm font-bold bg-gradient-to-r from-red-600 to-red-700 text-white hover:from-red-700 hover:to-red-800 shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-center"
-                    title="Delete feedback"
+                    onClick={() => {
+                      if (
+                        confirm(
+                          "⚠️ Delete all negative feedback?\n\nThis action cannot be undone. All negative reviews will be permanently removed."
+                        )
+                      ) {
+                        onClearNegative();
+                        setFiltersNotice("✓ All negative feedback cleared");
+                        setTimeout(() => setFiltersNotice(null), 2000);
+                      }
+                    }}
+                    className="px-4 h-11 rounded-xl bg-gradient-to-r from-red-600 to-red-700 text-white font-bold hover:from-red-700 hover:to-red-800 shadow-md hover:shadow-lg transition-all duration-200 flex items-center gap-2"
                   >
                     <svg
                       className="w-4 h-4"
@@ -1315,29 +1099,16 @@ const FeedbackPage: React.FC<FeedbackPageProps> = ({
                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
                       />
                     </svg>
+                    Clear Data
                   </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {/* Enhanced Details Modal */}
-        {selected && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
-            role="dialog"
-            aria-modal="true"
-          >
-            <div
-              className="absolute inset-0 bg-black/50"
-              onClick={() => setSelected(null)}
-            ></div>
-            <div className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl border-2 border-red-200 overflow-hidden">
-              {/* Modal Header */}
-              <div className="flex items-start gap-4 px-6 py-5 bg-gradient-to-r from-red-50 to-orange-50 border-b-2 border-red-200">
-                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-red-100 to-orange-100 flex items-center justify-center flex-shrink-0">
+                )}
+                <button
+                  type="button"
+                  onClick={exportCsv}
+                  className="px-4 h-11 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold hover:from-blue-700 hover:to-indigo-700 shadow-md hover:shadow-lg transition-all duration-200 flex items-center gap-2"
+                >
                   <svg
-                    className="w-7 h-7 text-red-600"
+                    className="w-4 h-4"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -1346,20 +1117,72 @@ const FeedbackPage: React.FC<FeedbackPageProps> = ({
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                     />
                   </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-xl font-bold text-gray-900 mb-1">
-                    {isPublicBucketId(selected.customerId)
-                      ? "Anonymous Customer"
-                      : selected.name || `Customer ID: ${selected.customerId}`}
-                  </h3>
-                  {selected.phone && (
-                    <div className="flex items-center gap-2 text-sm text-gray-700">
+                  Export CSV
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {filtersNotice && (
+            <div className="text-center text-xs text-gray-500 mb-4">
+              {filtersNotice}
+            </div>
+          )}
+          {filteredCount === 0 ? (
+            <div className="flex flex-col items-center justify-center py-32 px-4">
+              <div className="w-32 h-32 rounded-full bg-gradient-to-br from-red-100 to-orange-100 flex items-center justify-center mb-6 shadow-inner">
+                <span className="text-6xl">😕</span>
+              </div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                No reviews found
+              </h3>
+              <p className="text-gray-500 text-center max-w-md mb-6">
+                {searchQuery
+                  ? "Try adjusting your search or filters to find what you're looking for."
+                  : "When customers leave negative feedback, it will appear here."}
+              </p>
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSortOrder("newest");
+                    setPage(1);
+                  }}
+                  className="px-6 py-3 rounded-xl bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold hover:from-red-700 hover:to-orange-700 shadow-md hover:shadow-lg transition-all duration-200 flex items-center gap-2"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                  Clear Filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {paged.map((r) => (
+                <div
+                  key={r.id}
+                  className="bg-white rounded-2xl border-2 border-red-100 p-6 shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all duration-200 group relative flex flex-col min-h-[240px]"
+                >
+                  {/* Header with Profile Icon */}
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-100 to-orange-100 flex items-center justify-center flex-shrink-0">
                       <svg
-                        className="w-4 h-4"
+                        className="w-6 h-6 text-red-600"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -1368,13 +1191,42 @@ const FeedbackPage: React.FC<FeedbackPageProps> = ({
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                          d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
                         />
                       </svg>
-                      {selected.phone}
                     </div>
-                  )}
-                  <div className="flex items-center gap-2 text-xs text-gray-600 mt-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-gray-900 text-lg truncate">
+                        {isPublicBucketId(r.customerId)
+                          ? "Anonymous"
+                          : r.name || `ID: ${r.customerId}`}
+                      </div>
+                      {r.phone && (
+                        <div className="flex items-center gap-1.5 text-sm text-gray-600 mt-1">
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                            />
+                          </svg>
+                          {r.phone}
+                        </div>
+                      )}
+                    </div>
+                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-red-600 to-orange-600 text-white shadow-sm">
+                      Negative
+                    </span>
+                  </div>
+
+                  {/* Date */}
+                  <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3">
                     <svg
                       className="w-4 h-4"
                       fill="none"
@@ -1388,89 +1240,247 @@ const FeedbackPage: React.FC<FeedbackPageProps> = ({
                         d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                       />
                     </svg>
-                    {new Date(selected.date).toLocaleString()}
+                    {new Date(r.date).toLocaleString()}
+                  </div>
+
+                  {/* Feedback Text */}
+                  <div className="flex-1 mb-4">
+                    <div className="text-gray-800 leading-relaxed whitespace-pre-line bg-gray-50 rounded-lg p-3 border border-gray-200">
+                      {r.text && r.text.length > 180
+                        ? r.text.slice(0, 180) + "…"
+                        : r.text}
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 pt-3 border-t border-gray-200">
+                    <button
+                      type="button"
+                      onClick={() => setSelected(r)}
+                      className="flex-1 px-3 py-2 rounded-lg text-sm font-bold bg-gradient-to-r from-gray-100 to-gray-200 text-gray-800 hover:from-gray-200 hover:to-gray-300 transition-all duration-200 flex items-center justify-center gap-1.5"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                        />
+                      </svg>
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setReplyModal({ open: true, phone: r.phone || "" })
+                      }
+                      className="flex-1 px-3 py-2 rounded-lg text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      title="Reply via SMS/WhatsApp"
+                      disabled={!r.phone}
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                        />
+                      </svg>
+                      Reply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteModal({ open: true, entry: r })}
+                      className="px-3 py-2 rounded-lg text-sm font-bold bg-gradient-to-r from-red-600 to-red-700 text-white hover:from-red-700 hover:to-red-800 shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-center"
+                      title="Delete feedback"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="p-2.5 rounded-xl hover:bg-white transition-colors duration-200 text-gray-600 hover:text-red-600 flex-shrink-0"
-                  onClick={() => setSelected(null)}
-                  aria-label="Close"
-                >
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+              ))}
+            </div>
+          )}
+          {/* Enhanced Details Modal */}
+          {selected && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="absolute inset-0 bg-black/50"
+                onClick={() => setSelected(null)}
+              ></div>
+              <div className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl border-2 border-red-200 overflow-hidden">
+                {/* Modal Header */}
+                <div className="flex items-start gap-4 px-6 py-5 bg-gradient-to-r from-red-50 to-orange-50 border-b-2 border-red-200">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-red-100 to-orange-100 flex items-center justify-center flex-shrink-0">
+                    <svg
+                      className="w-7 h-7 text-red-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                      />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-xl font-bold text-gray-900 mb-1">
+                      {isPublicBucketId(selected.customerId)
+                        ? "Anonymous Customer"
+                        : selected.name ||
+                          `Customer ID: ${selected.customerId}`}
+                    </h3>
+                    {selected.phone && (
+                      <div className="flex items-center gap-2 text-sm text-gray-700">
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                          />
+                        </svg>
+                        {selected.phone}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 text-xs text-gray-600 mt-2">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      {new Date(selected.date).toLocaleString()}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="p-2.5 rounded-xl hover:bg-white transition-colors duration-200 text-gray-600 hover:text-red-600 flex-shrink-0"
+                    onClick={() => setSelected(null)}
+                    aria-label="Close"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Modal Body */}
-              <div className="px-6 py-5">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-gray-700">
-                    Feedback Details
-                  </span>
-                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-red-600 to-orange-600 text-white shadow-sm">
-                    Negative Review
-                  </span>
+                    <svg
+                      className="w-6 h-6"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
                 </div>
-                <div className="p-4 bg-gradient-to-br from-red-50 to-orange-50 rounded-xl border-2 border-red-200 max-h-96 overflow-auto">
-                  <p className="text-gray-900 leading-relaxed whitespace-pre-line text-base">
-                    {selected.text}
-                  </p>
-                </div>
-              </div>
 
-              {/* Modal Footer */}
-              <div className="px-6 py-4 bg-gray-50 border-t-2 border-gray-200 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelected(null);
-                    if (selected.phone) {
-                      setReplyModal({ open: true, phone: selected.phone });
-                    }
-                  }}
-                  disabled={!selected.phone}
-                  className="flex-1 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold hover:from-blue-700 hover:to-indigo-700 shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                {/* Modal Body */}
+                <div className="px-6 py-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-semibold text-gray-700">
+                      Feedback Details
+                    </span>
+                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-red-600 to-orange-600 text-white shadow-sm">
+                      Negative Review
+                    </span>
+                  </div>
+                  <div className="p-4 bg-gradient-to-br from-red-50 to-orange-50 rounded-xl border-2 border-red-200 max-h-96 overflow-auto">
+                    <p className="text-gray-900 leading-relaxed whitespace-pre-line text-base">
+                      {selected.text}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="px-6 py-4 bg-gray-50 border-t-2 border-gray-200 flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelected(null);
+                      if (selected.phone) {
+                        setReplyModal({ open: true, phone: selected.phone });
+                      }
+                    }}
+                    disabled={!selected.phone}
+                    className="flex-1 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold hover:from-blue-700 hover:to-indigo-700 shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                    />
-                  </svg>
-                  Reply to Customer
-                </button>
-                <button
-                  type="button"
-                  className="px-5 py-3 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-100 hover:border-gray-400 transition-all duration-200"
-                  onClick={() => setSelected(null)}
-                >
-                  Close
-                </button>
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                      />
+                    </svg>
+                    Reply to Customer
+                  </button>
+                  <button
+                    type="button"
+                    className="px-5 py-3 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-100 hover:border-gray-400 transition-all duration-200"
+                    onClick={() => setSelected(null)}
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 

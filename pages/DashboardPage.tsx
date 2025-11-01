@@ -5,6 +5,7 @@ import React, {
   useMemo,
   useCallback,
 } from "react";
+import SEO from "../components/SEO";
 import {
   PieChart,
   Pie,
@@ -3374,330 +3375,341 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   }
 
   return (
-    <DebugBoundary>
-      <div className="min-h-screen grid-pattern relative overflow-hidden ">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
-          {sendBanner && (
-            <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg text-sm">
-              {sendBanner}
-            </div>
-          )}
-          {/* Hidden file input for uploading customers; triggered from Customer List section */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".csv,.xlsx,.xls"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 sm:mb-8 lg:mb-10">
-            <div className="flex flex-col">
-              <div className="gradient-border premium-card bg-white shadow-lg p-5 sm:p-6 transition-all duration-300 rounded-2xl edge-left-rounded hover:shadow-xl h-full flex flex-col justify-center">
-                <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      className="h-5 w-5"
-                    >
-                      <path d="M12 3l9 4.5v9L12 21 3 16.5v-9L12 3z" />
-                    </svg>
-                  </span>
-                  {isEditingName ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={editedName}
-                        onChange={(e) => setEditedName(e.target.value)}
-                        className="text-2xl font-bold text-gray-900 border-b-2 border-primary-500 focus:outline-none bg-transparent"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleSaveName();
-                          if (e.key === "Escape") {
+    <>
+      <SEO
+        title="Dashboard | ReputationFlow360"
+        description="Track reviews, manage feedback, and monitor reputation growth in one dashboard. View analytics, customer feedback, and SMS campaign performance."
+        canonical="https://reputationflow360.com/dashboard"
+        keywords="dashboard, analytics, customer feedback dashboard, review tracking, reputation analytics"
+        noindex={true}
+      />
+      <DebugBoundary>
+        <div className="min-h-screen grid-pattern relative overflow-hidden ">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
+            {sendBanner && (
+              <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg text-sm">
+                {sendBanner}
+              </div>
+            )}
+            {/* Hidden file input for uploading customers; triggered from Customer List section */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".csv,.xlsx,.xls"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 sm:mb-8 lg:mb-10">
+              <div className="flex flex-col">
+                <div className="gradient-border premium-card bg-white shadow-lg p-5 sm:p-6 transition-all duration-300 rounded-2xl edge-left-rounded hover:shadow-xl h-full flex flex-col justify-center">
+                  <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 shadow-lg ring-2 ring-indigo-400/50 text-white">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        className="h-5 w-5"
+                      >
+                        <path d="M12 3l9 4.5v9L12 21 3 16.5v-9L12 3z" />
+                      </svg>
+                    </span>
+                    {isEditingName ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editedName}
+                          onChange={(e) => setEditedName(e.target.value)}
+                          className="text-2xl font-bold text-gray-900 border-b-2 border-primary-500 focus:outline-none bg-transparent"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveName();
+                            if (e.key === "Escape") {
+                              setIsEditingName(false);
+                              setEditedName(businessName);
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={handleSaveName}
+                          className="text-sm bg-primary-600 text-white px-3 py-1 rounded-lg hover:bg-primary-700"
+                          title="Save"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          onClick={() => {
                             setIsEditingName(false);
                             setEditedName(businessName);
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={handleSaveName}
-                        className="text-sm bg-primary-600 text-white px-3 py-1 rounded-lg hover:bg-primary-700"
-                        title="Save"
-                      >
-                        ✓
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsEditingName(false);
-                          setEditedName(businessName);
-                        }}
-                        className="text-sm bg-gray-300 text-gray-700 px-3 py-1 rounded-lg hover:bg-gray-400"
-                        title="Cancel"
-                      >
-                        ✕
-                      </button>
+                          }}
+                          className="text-sm bg-gray-300 text-gray-700 px-3 py-1 rounded-lg hover:bg-gray-400"
+                          title="Cancel"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        {businessName || "Acme Inc."}
+                        <button
+                          onClick={() => {
+                            setIsEditingName(true);
+                            setEditedName(businessName);
+                          }}
+                          className="text-primary-600 hover:text-primary-700 transition-colors"
+                          title="Change business name"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="h-5 w-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                            />
+                          </svg>
+                        </button>
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-sm sm:text-base text-gray-600 leading-relaxed">
+                    Your reputation dashboard — track messages, feedback, and
+                    growth in real time.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col">
+                {/* Right bar: Unified card with stats in 2x2 grid */}
+                <div className="gradient-border premium-card bg-white shadow-lg p-5 sm:p-6 transition-all duration-300 rounded-2xl edge-right-rounded hover:shadow-xl h-full flex flex-col justify-center">
+                  {dashLoading ? (
+                    <div className="h-48 animate-pulse bg-gray-50 rounded-xl" />
+                  ) : dashError ? (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">
+                      <p className="text-sm font-semibold">
+                        Failed to load stats
+                      </p>
+                      <p className="text-xs">{dashError}</p>
                     </div>
                   ) : (
-                    <span className="flex items-center gap-2">
-                      {businessName || "Acme Inc."}
-                      <button
-                        onClick={() => {
-                          setIsEditingName(true);
-                          setEditedName(businessName);
-                        }}
-                        className="text-primary-600 hover:text-primary-700 transition-colors"
-                        title="Change business name"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                          />
-                        </svg>
-                      </button>
-                    </span>
-                  )}
-                </h2>
-                <p className="text-sm sm:text-base text-gray-600 leading-relaxed">
-                  Your reputation dashboard — track messages, feedback, and
-                  growth in real time.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col">
-              {/* Right bar: Unified card with stats in 2x2 grid */}
-              <div className="gradient-border premium-card bg-white shadow-lg p-5 sm:p-6 transition-all duration-300 rounded-2xl edge-right-rounded hover:shadow-xl h-full flex flex-col justify-center">
-                {dashLoading ? (
-                  <div className="h-48 animate-pulse bg-gray-50 rounded-xl" />
-                ) : dashError ? (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">
-                    <p className="text-sm font-semibold">
-                      Failed to load stats
-                    </p>
-                    <p className="text-xs">{dashError}</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-4 sm:gap-5">
-                    {/* 1. Messages Sent Card - Top Left */}
-                    <div className="flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
-                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
-                        Messages Sent
+                    <div className="grid grid-cols-2 gap-4 sm:gap-5">
+                      {/* 1. Messages Sent Card - Top Left */}
+                      <div className="flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
+                        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                          Messages Sent
+                        </div>
+                        <div className="text-4xl sm:text-5xl font-extrabold text-blue-600 mb-2">
+                          {messageCount}
+                        </div>
+                        <div className="bg-blue-100 p-2 rounded-lg inline-flex">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="h-5 w-5 text-blue-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                            />
+                          </svg>
+                        </div>
                       </div>
-                      <div className="text-4xl sm:text-5xl font-extrabold text-blue-600 mb-2">
-                        {messageCount}
+                      {/* 2. Feedback Received Card - Top Right */}
+                      <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-green-50 to-green-100/50 border border-green-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
+                        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                          Feedback Received
+                        </div>
+                        <div className="text-4xl sm:text-5xl font-extrabold text-green-600 mb-2">
+                          {feedbackCount}
+                        </div>
+                        <div className="bg-green-100 p-2 rounded-lg inline-flex">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="h-5 w-5 text-green-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                        </div>
                       </div>
-                      <div className="bg-blue-100 p-2 rounded-lg inline-flex">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5 text-blue-600"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                          />
-                        </svg>
-                      </div>
-                    </div>
-                    {/* 2. Feedback Received Card - Top Right */}
-                    <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-green-50 to-green-100/50 border border-green-200 rounded-xl p-4 sm:p-5 text-center hover:shadow-lg hover:scale-105 transition-all duration-200">
-                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
-                        Feedback Received
-                      </div>
-                      <div className="text-4xl sm:text-5xl font-extrabold text-green-600 mb-2">
-                        {feedbackCount}
-                      </div>
-                      <div className="bg-green-100 p-2 rounded-lg inline-flex">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5 text-green-600"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                      </div>
-                    </div>
-                    {/* 3. Negative Comments Card - Bottom Left */}
-                    <div className="flex flex-col h-full justify-center items-center">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const el = document.getElementById(
-                            "negative-comments-list"
-                          );
-                          if (el) {
-                            el.scrollIntoView({
-                              behavior: "smooth",
-                              block: "start",
-                            });
-                            return;
-                          }
-                          if (
-                            typeof (window as any).openFeedbackFromDashboard ===
-                            "function"
-                          ) {
-                            (window as any).openFeedbackFromDashboard(
-                              "negative"
+                      {/* 3. Negative Comments Card - Bottom Left */}
+                      <div className="flex flex-col h-full justify-center items-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const el = document.getElementById(
+                              "negative-comments-list"
                             );
-                          }
-                        }}
-                        className="flex flex-col h-full items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white p-4 sm:p-5 rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
-                      >
-                        <XCircleIcon className="h-5 w-5" />
-                        <span className="flex items-center gap-2">
-                          Negative Comments
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-red-800/30 text-white border border-red-400/30">
-                            {negativeComments?.length || 0}
+                            if (el) {
+                              el.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start",
+                              });
+                              return;
+                            }
+                            if (
+                              typeof (window as any)
+                                .openFeedbackFromDashboard === "function"
+                            ) {
+                              (window as any).openFeedbackFromDashboard(
+                                "negative"
+                              );
+                            }
+                          }}
+                          className="flex flex-col h-full items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white p-4 sm:p-5 rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
+                        >
+                          <XCircleIcon className="h-5 w-5" />
+                          <span className="flex items-center gap-2">
+                            Negative Comments
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-red-800/30 text-white border border-red-400/30">
+                              {negativeComments?.length || 0}
+                            </span>
                           </span>
-                        </span>
-                      </button>
+                        </button>
+                      </div>
+                      {/* 4. View Feedback Button - Bottom Right */}
+                      <div className="flex flex-col h-full justify-center items-center">
+                        <a
+                          href={`${
+                            (import.meta as any).env?.BASE_URL || "/"
+                          }feedback`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            const base =
+                              (import.meta as any).env?.BASE_URL || "/";
+                            const target = `${base}feedback`;
+                            if (window.location.pathname !== target) {
+                              window.history.pushState(
+                                { page: target },
+                                "",
+                                target
+                              );
+                              window.dispatchEvent(
+                                new PopStateEvent("popstate")
+                              );
+                            }
+                          }}
+                          className="flex flex-col h-full items-center justify-center gap-2 bg-gradient-to-r from-gray-900 to-gray-800 text-white p-4 sm:p-5 rounded-xl font-bold hover:from-gray-800 hover:to-gray-700 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
+                        >
+                          <StarIcon className="h-5 w-5" />
+                          <span>Feedback Page</span>
+                        </a>
+                      </div>
                     </div>
-                    {/* 4. View Feedback Button - Bottom Right */}
-                    <div className="flex flex-col h-full justify-center items-center">
-                      <a
-                        href={`${
-                          (import.meta as any).env?.BASE_URL || "/"
-                        }feedback`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          const base =
-                            (import.meta as any).env?.BASE_URL || "/";
-                          const target = `${base}feedback`;
-                          if (window.location.pathname !== target) {
-                            window.history.pushState(
-                              { page: target },
-                              "",
-                              target
-                            );
-                            window.dispatchEvent(new PopStateEvent("popstate"));
-                          }
-                        }}
-                        className="flex flex-col h-full items-center justify-center gap-2 bg-gradient-to-r from-gray-900 to-gray-800 text-white p-4 sm:p-5 rounded-xl font-bold hover:from-gray-800 hover:to-gray-700 transition-all shadow-lg hover:shadow-xl hover:scale-105 text-base sm:text-lg w-full"
-                      >
-                        <StarIcon className="h-5 w-5" />
-                        <span>Feedback Page</span>
-                      </a>
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Analytics Section: Real-time stats are now summarized in the unified card above */}
+            {/* Analytics Section: Real-time stats are now summarized in the unified card above */}
 
-          {/* Charts Grid: Analytics (fills full width) */}
-          <div className="w-full flex flex-col sm:flex-row gap-4 sm:gap-6 mt-6">
-            <div className="w-full sm:flex-1 min-w-0 px-2 sm:px-0">
-              <AnalyticsSection
-                customers={customers}
-                activityLogs={activityLogs}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 items-start">
-            <div className="lg:col-span-3 float-delay-2">
-              {(() => {
-                let storedDemo = false;
-                try {
-                  storedDemo = localStorage.getItem("dash:demoMode") === "1";
-                } catch {}
-                const funnelShowDemo =
-                  storedDemo ||
-                  (customers.length === 0 && activityLogs.length === 0);
-                return (
-                  <FunnelAnalytics
-                    customers={customers}
-                    demoMode={funnelShowDemo}
-                  />
-                );
-              })()}
-            </div>
-
-            {/* Negative Comments Section - Full Width */}
-            <div className="lg:col-span-3 float-delay-3">
-              <div id="negative-comments-list">
-                <NegativeFeedbackSection
-                  comments={negativeComments}
-                  loading={loadingComments}
-                  onDelete={handleDeleteComment}
-                  onExport={handleExportComments}
-                  onClearAll={handleClearAllComments}
-                  businessName={businessName}
-                  feedbackPageLink={feedbackPageLink}
-                  deletingIds={deletingIds}
+            {/* Charts Grid: Analytics (fills full width) */}
+            <div className="w-full flex flex-col sm:flex-row gap-4 sm:gap-6 mt-6">
+              <div className="w-full sm:flex-1 min-w-0 px-2 sm:px-0">
+                <AnalyticsSection
+                  customers={customers}
+                  activityLogs={activityLogs}
                 />
               </div>
             </div>
 
-            <div className="lg:col-span-2 float-delay-3">
-              <CustomerTable
-                customers={customers.filter((c) => {
-                  if (c.id === "public-feedback") return false;
-                  // Hide known sample/dummy data used in initial seeds
-                  const dummyNames = new Set(["John Doe", "Jane Smith"]);
-                  const dummyPhones = new Set(["+1234567890", "+1987654321"]);
-                  if (dummyNames.has(c.name)) return false;
-                  if (dummyPhones.has(c.phone)) return false;
-                  return true;
-                })}
-                onSendMessage={onSendMessage}
-                onDeleteCustomer={onDeleteCustomer}
-                onOpenFunnel={onOpenFunnel}
-                onOpenFeedback={onOpenFeedback}
-                onClearCustomers={onClearCustomers}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 items-start">
+              <div className="lg:col-span-3 float-delay-2">
+                {(() => {
+                  let storedDemo = false;
+                  try {
+                    storedDemo = localStorage.getItem("dash:demoMode") === "1";
+                  } catch {}
+                  const funnelShowDemo =
+                    storedDemo ||
+                    (customers.length === 0 && activityLogs.length === 0);
+                  return (
+                    <FunnelAnalytics
+                      customers={customers}
+                      demoMode={funnelShowDemo}
+                    />
+                  );
+                })()}
+              </div>
+
+              {/* Negative Comments Section - Full Width */}
+              <div className="lg:col-span-3 float-delay-3">
+                <div id="negative-comments-list">
+                  <NegativeFeedbackSection
+                    comments={negativeComments}
+                    loading={loadingComments}
+                    onDelete={handleDeleteComment}
+                    onExport={handleExportComments}
+                    onClearAll={handleClearAllComments}
+                    businessName={businessName}
+                    feedbackPageLink={feedbackPageLink}
+                    deletingIds={deletingIds}
+                  />
+                </div>
+              </div>
+
+              <div className="lg:col-span-2 float-delay-3">
+                <CustomerTable
+                  customers={customers.filter((c) => {
+                    if (c.id === "public-feedback") return false;
+                    // Hide known sample/dummy data used in initial seeds
+                    const dummyNames = new Set(["John Doe", "Jane Smith"]);
+                    const dummyPhones = new Set(["+1234567890", "+1987654321"]);
+                    if (dummyNames.has(c.name)) return false;
+                    if (dummyPhones.has(c.phone)) return false;
+                    return true;
+                  })}
+                  onSendMessage={onSendMessage}
+                  onDeleteCustomer={onDeleteCustomer}
+                  onOpenFunnel={onOpenFunnel}
+                  onOpenFeedback={onOpenFeedback}
+                  onClearCustomers={onClearCustomers}
+                  businessName={businessName}
+                  feedbackPageLink={feedbackPageLink}
+                  onUploadCustomers={triggerFileUpload}
+                  onOpenAddCustomer={() => openAddCustomer(true)}
+                />
+              </div>
+              <div className="flex flex-col gap-8">
+                <SendMessagesCard
+                  key={selectAllSignal}
+                  customers={customers}
+                  onQueue={onQueueSmsCustomers}
+                  selectAllSignal={selectAllSignal}
+                  twilioConfigured={twilioConfigured}
+                />
+              </div>
+            </div>
+
+            {isModalOpen && (
+              <AddCustomerModal
+                onClose={() => setIsModalOpen(false)}
+                onAddCustomer={
+                  modalOpenForWhatsapp ? () => undefined : onAddCustomer
+                }
+                openWhatsappOnSubmit={modalOpenForWhatsapp}
                 businessName={businessName}
                 feedbackPageLink={feedbackPageLink}
-                onUploadCustomers={triggerFileUpload}
-                onOpenAddCustomer={() => openAddCustomer(true)}
               />
-            </div>
-            <div className="flex flex-col gap-8">
-              <SendMessagesCard
-                key={selectAllSignal}
-                customers={customers}
-                onQueue={onQueueSmsCustomers}
-                selectAllSignal={selectAllSignal}
-                twilioConfigured={twilioConfigured}
-              />
-            </div>
+            )}
           </div>
-
-          {isModalOpen && (
-            <AddCustomerModal
-              onClose={() => setIsModalOpen(false)}
-              onAddCustomer={
-                modalOpenForWhatsapp ? () => undefined : onAddCustomer
-              }
-              openWhatsappOnSubmit={modalOpenForWhatsapp}
-              businessName={businessName}
-              feedbackPageLink={feedbackPageLink}
-            />
-          )}
         </div>
-      </div>
-    </DebugBoundary>
+      </DebugBoundary>
+    </>
   );
 };
 
