@@ -642,9 +642,9 @@ async function handleSendSms(req, res) {
   if (companyIdBody && firestoreEnabled) {
     try {
       const firestore = firebaseAdmin.firestore();
-      
-      // Check billing/subscription first
-      let subRef = firestore
+
+      // First check billing/subscription document
+      const subRef = firestore
         .collection("clients")
         .doc(String(companyIdBody))
         .collection("billing")
@@ -652,77 +652,98 @@ async function handleSendSms(req, res) {
 
       let subSnap = await subRef.get();
 
-      // Fallback to profile/main if billing not found
+      // If not found in billing, check profile/main (primary location)
       if (!subSnap.exists) {
-        subRef = firestore
+        const profileMainRef = firestore
           .collection("clients")
           .doc(String(companyIdBody))
           .collection("profile")
           .doc("main");
-        subSnap = await subRef.get();
+        subSnap = await profileMainRef.get();
+
+        // If still not found, check legacy profile/subscription location
+        if (!subSnap.exists) {
+          const legacyRef = firestore
+            .collection("clients")
+            .doc(String(companyIdBody))
+            .collection("profile")
+            .doc("subscription");
+          subSnap = await legacyRef.get();
+        }
       }
 
       if (subSnap.exists) {
         const subData = subSnap.data();
         const remaining = subData.remainingCredits ?? subData.smsCredits ?? 0;
         const status = subData.status;
+        const planId = subData.planId || subData.plan || null;
 
         console.log(
-          `[sms:limit-check] company=${companyIdBody} remaining=${remaining} status=${status}`
+          `[sms:limit-check] ✅ Found subscription for company=${companyIdBody} plan=${planId} remaining=${remaining} status=${status}`
         );
 
         // Check if subscription is active and has credits
         if (status !== "active") {
           console.error(
-            `[sms:limit-check] ❌ BLOCKED: Subscription not active for company=${companyIdBody}`
+            `[sms:limit-check] ❌ BLOCKED: Subscription not active for company=${companyIdBody} status=${status}`
           );
           return res.status(403).json({
             success: false,
-            error: "Subscription is not active. Please activate your plan on the Profile page.",
+            error: "Subscription is not active. Please activate your plan.",
             remainingCredits: 0,
-            requiresActivation: true,
+            status: status,
           });
         }
 
         if (remaining <= 0) {
           console.error(
-            `[sms:limit-check] ❌ BLOCKED: No credits remaining for company=${companyIdBody}`
+            `[sms:limit-check] ❌ BLOCKED: No credits remaining for company=${companyIdBody} remaining=${remaining}`
           );
           return res.status(403).json({
             success: false,
             error:
               "SMS limit reached. Please upgrade your plan or wait for renewal.",
             remainingCredits: 0,
-            requiresUpgrade: true,
           });
         }
 
-        console.log(`[sms:limit-check] ✅ Credits available: ${remaining}`);
+        console.log(
+          `[sms:limit-check] ✅ Credits available: ${remaining}, allowing SMS`
+        );
       } else {
         // NO SUBSCRIPTION FOUND - BLOCK SMS
         console.error(
-          `[sms:limit-check] ❌ BLOCKED: No subscription found for company=${companyIdBody}. User must purchase a plan first.`
+          `[sms:limit-check] ❌ BLOCKED: No subscription found for company=${companyIdBody} in billing/, profile/main, or profile/subscription`
         );
         return res.status(403).json({
           success: false,
           error:
-            "No active subscription found. Please purchase a plan on the Profile page to send SMS.",
+            "No active subscription found. Please purchase a plan to send SMS.",
           remainingCredits: 0,
-          requiresPurchase: true,
+          hint: "Visit the payment page to select and activate a plan",
         });
       }
     } catch (e) {
       console.error(
-        `[sms:limit-check] ❌ Error checking subscription:`,
+        `[sms:limit-check] ❌ Error checking subscription for company=${companyIdBody}:`,
         e.message
       );
-      // IMPORTANT: Block SMS on check errors for security
+      // BLOCK on errors - don't allow SMS if we can't verify subscription
       return res.status(500).json({
         success: false,
         error: "Failed to verify subscription. Please try again.",
         technicalError: e.message,
       });
     }
+  } else if (!companyIdBody) {
+    // No companyId provided - block SMS
+    console.error(
+      `[sms:limit-check] ❌ BLOCKED: No companyId provided in request`
+    );
+    return res.status(400).json({
+      success: false,
+      error: "companyId required to verify subscription",
+    });
   }
   // ============================================
 

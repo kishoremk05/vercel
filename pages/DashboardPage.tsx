@@ -3084,12 +3084,93 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         .replace(/\[Review Link\]/g, reviewLink);
     }
 
-    const send = () => {
+    const send = async () => {
       const selectedIds = Array.from(selected);
       if (selectedIds.length === 0) {
         setStatus("Select at least one recipient.");
         return;
       }
+
+      // ============== SUBSCRIPTION CHECK ==============
+      // Verify active subscription before sending SMS (except for single WhatsApp)
+      if (selectedIds.length > 1) {
+        try {
+          const companyId = localStorage.getItem("companyId") || "";
+          if (!companyId) {
+            setStatus("⚠️ Error: No company ID found. Please re-login.");
+            return;
+          }
+
+          // Fetch subscription from profile/main
+          const smsServerUrl = localStorage.getItem("smsServerUrl") || "";
+          const response = await fetch(
+            `${smsServerUrl}/api/subscription?companyId=${encodeURIComponent(
+              companyId
+            )}`
+          );
+          const data = await response.json();
+
+          if (!data.success || !data.subscription) {
+            setStatus(
+              "❌ No active subscription found. Please purchase a plan to send SMS."
+            );
+            alert(
+              "⚠️ No Active Subscription\n\nYou need an active subscription to send SMS.\n\nPlease visit the Payment page to select and activate a plan."
+            );
+            // Redirect to payment page
+            const base = (import.meta as any).env?.BASE_URL || "/";
+            window.history.pushState({ page: "payment" }, "", `${base}payment`);
+            window.location.href = `${base}payment`;
+            return;
+          }
+
+          const subscription = data.subscription;
+          const remaining =
+            subscription.remainingCredits ?? subscription.smsCredits ?? 0;
+          const status = subscription.status;
+
+          if (status !== "active") {
+            setStatus(
+              `❌ Subscription is ${status}. Please activate your plan.`
+            );
+            alert(
+              `⚠️ Subscription Not Active\n\nYour subscription status is: ${status}\n\nPlease activate your plan to send SMS.`
+            );
+            return;
+          }
+
+          if (remaining <= 0) {
+            setStatus("❌ No SMS credits remaining. Please upgrade your plan.");
+            alert(
+              `⚠️ No Credits Remaining\n\nYou have 0 SMS credits left.\n\nPlease upgrade your plan or wait for renewal.`
+            );
+            return;
+          }
+
+          // Check if enough credits for bulk send
+          if (selectedIds.length > remaining) {
+            setStatus(
+              `❌ Not enough credits. You have ${remaining} credits but selected ${selectedIds.length} customers.`
+            );
+            alert(
+              `⚠️ Insufficient Credits\n\nYou have ${remaining} SMS credits remaining.\n\nYou selected ${selectedIds.length} customers.\n\nPlease select fewer customers or upgrade your plan.`
+            );
+            return;
+          }
+
+          console.log(
+            `[dashboard:send] ✅ Subscription verified: ${remaining} credits available`
+          );
+        } catch (err) {
+          console.error("[dashboard:send] Subscription check failed:", err);
+          setStatus("❌ Failed to verify subscription. Please try again.");
+          alert(
+            "⚠️ Verification Failed\n\nFailed to verify your subscription status.\n\nPlease check your internet connection and try again."
+          );
+          return;
+        }
+      }
+      // ================================================
 
       // Always use WhatsApp for single customer selection
       if (selectedIds.length === 1) {
