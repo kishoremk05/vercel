@@ -90,15 +90,24 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     "server" | "local" | null
   >(null);
 
-  // Auto-reload after 1.5 seconds (useful after signup redirect)
+  // Auto-reload after 1.5 seconds - BUT ONLY ONCE (useful after signup redirect)
   useEffect(() => {
-    const timer = setTimeout(() => {
-      console.log("[PaymentPage] Auto-reloading after 1.5 seconds...");
-      window.location.reload();
-    }, 1500);
+    const hasReloaded = sessionStorage.getItem("paymentPageReloaded");
 
-    // Cleanup timer if component unmounts before 1.5 seconds
-    return () => clearTimeout(timer);
+    if (!hasReloaded) {
+      const timer = setTimeout(() => {
+        console.log(
+          "[PaymentPage] Auto-reloading after 1.5 seconds (one-time only)..."
+        );
+        sessionStorage.setItem("paymentPageReloaded", "true");
+        window.location.reload();
+      }, 1500);
+
+      // Cleanup timer if component unmounts before 1.5 seconds
+      return () => clearTimeout(timer);
+    } else {
+      console.log("[PaymentPage] Auto-reload already occurred, skipping.");
+    }
   }, []); // Empty deps = runs once on mount
 
   // --- Subscription check that re-runs on auth state changes ---
