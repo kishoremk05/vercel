@@ -1,11 +1,4 @@
 {
-  "redirects": [
-    {
-      "source": "https://www.reputationflow360.com/:path*",
-      "destination": "https://reputationflow360.com/:path*",
-      "permanent": true
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
