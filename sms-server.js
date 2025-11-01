@@ -642,13 +642,25 @@ async function handleSendSms(req, res) {
   if (companyIdBody && firestoreEnabled) {
     try {
       const firestore = firebaseAdmin.firestore();
-      const subRef = firestore
+      
+      // Check billing/subscription first
+      let subRef = firestore
         .collection("clients")
         .doc(String(companyIdBody))
         .collection("billing")
         .doc("subscription");
 
-      const subSnap = await subRef.get();
+      let subSnap = await subRef.get();
+
+      // Fallback to profile/main if billing not found
+      if (!subSnap.exists) {
+        subRef = firestore
+          .collection("clients")
+          .doc(String(companyIdBody))
+          .collection("profile")
+          .doc("main");
+        subSnap = await subRef.get();
+      }
 
       if (subSnap.exists) {
         const subData = subSnap.data();
@@ -661,34 +673,55 @@ async function handleSendSms(req, res) {
 
         // Check if subscription is active and has credits
         if (status !== "active") {
+          console.error(
+            `[sms:limit-check] ❌ BLOCKED: Subscription not active for company=${companyIdBody}`
+          );
           return res.status(403).json({
             success: false,
-            error: "Subscription is not active. Please activate your plan.",
+            error: "Subscription is not active. Please activate your plan on the Profile page.",
             remainingCredits: 0,
+            requiresActivation: true,
           });
         }
 
         if (remaining <= 0) {
+          console.error(
+            `[sms:limit-check] ❌ BLOCKED: No credits remaining for company=${companyIdBody}`
+          );
           return res.status(403).json({
             success: false,
             error:
               "SMS limit reached. Please upgrade your plan or wait for renewal.",
             remainingCredits: 0,
+            requiresUpgrade: true,
           });
         }
 
         console.log(`[sms:limit-check] ✅ Credits available: ${remaining}`);
       } else {
-        console.warn(
-          `[sms:limit-check] ⚠️ No subscription found for company=${companyIdBody}, allowing SMS for now`
+        // NO SUBSCRIPTION FOUND - BLOCK SMS
+        console.error(
+          `[sms:limit-check] ❌ BLOCKED: No subscription found for company=${companyIdBody}. User must purchase a plan first.`
         );
+        return res.status(403).json({
+          success: false,
+          error:
+            "No active subscription found. Please purchase a plan on the Profile page to send SMS.",
+          remainingCredits: 0,
+          requiresPurchase: true,
+        });
       }
     } catch (e) {
       console.error(
         `[sms:limit-check] ❌ Error checking subscription:`,
         e.message
       );
-      // Don't block SMS on check errors - allow it to proceed
+      // IMPORTANT: Block SMS on check errors for security
+      return res.status(500).json({
+        success: false,
+        error: "Failed to verify subscription. Please try again.",
+        technicalError: e.message,
+      });
     }
   }
   // ============================================
