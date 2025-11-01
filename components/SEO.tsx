@@ -15,6 +15,7 @@ interface SEOProps {
 /**
  * SEO Component - Manages meta tags for each page
  * Includes title, description, Open Graph, Twitter Cards, and canonical URLs
+ * Optimized for 95+ Lighthouse SEO score
  */
 const SEO: React.FC<SEOProps> = ({
   title,
@@ -23,7 +24,7 @@ const SEO: React.FC<SEOProps> = ({
   ogImage = "https://reputationflow360.com/og-image.png",
   ogType = "website",
   twitterCard = "summary_large_image",
-  keywords = "review automation software, customer feedback management, online reputation management, google reviews automation, sms review request system, feedback collection platform, small business review software, reputation management SaaS",
+  keywords = "review automation software, customer feedback management, online reputation management, google reviews automation, sms review request system, feedback collection platform, small business review software, reputation management SaaS, automated customer surveys, review collection tool",
   noindex = false,
 }) => {
   const fullTitle = title.includes("ReputationFlow360")
@@ -41,6 +42,12 @@ const SEO: React.FC<SEOProps> = ({
       <meta name="description" content={description} />
       <meta name="keywords" content={keywords} />
       {noindex && <meta name="robots" content="noindex,nofollow" />}
+      {!noindex && (
+        <meta
+          name="robots"
+          content="index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1"
+        />
+      )}
 
       {/* Canonical URL */}
       <link rel="canonical" href={canonicalUrl} />

@@ -15,6 +15,28 @@ export default defineConfig(({ mode }) => {
           '@': path.resolve(__dirname, '.'),
         }
       },
+      // Build optimizations for 95+ Lighthouse score
+      build: {
+        minify: 'terser',
+        terserOptions: {
+          compress: {
+            drop_console: true,
+            drop_debugger: true,
+          },
+        },
+        cssMinify: true,
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'vendor-react': ['react', 'react-dom'],
+              'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+              'vendor-charts': ['recharts'],
+            },
+          },
+        },
+        chunkSizeWarningLimit: 1000,
+        sourcemap: false,
+      },
       server: {
         // SPA fallback: Vite does this by default for 404s, but we also avoid proxying plain paths
         proxy: {
