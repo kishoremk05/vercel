@@ -49,4 +49,5 @@ export enum Page {
   Payment = 'payment',
   PaymentSuccess = 'payment-success',
   PaymentCancel = 'payment-cancel',
+  VerifySubscription = 'verify-subscription',
 }

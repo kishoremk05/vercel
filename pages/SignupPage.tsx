@@ -118,8 +118,8 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess }) => {
         // ignore
       }
 
-      // Navigate to Payment page so users complete payment before seeing Dashboard
-      const target = "/payment";
+      // Navigate to verification page to check if user already has a plan
+      const target = "/verify-subscription";
       window.history.pushState({ page: target }, "", target);
       onSignupSuccess("client");
     } catch (err: any) {
@@ -158,8 +158,8 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess }) => {
         })
       );
 
-      // Navigate to Payment page so users complete payment before seeing Dashboard
-      const target = "/payment";
+      // Navigate to verification page to check if user already has a plan
+      const target = "/verify-subscription";
       window.history.pushState({ page: target }, "", target);
       onSignupSuccess("client");
     } catch (err: any) {

@@ -17,6 +17,7 @@ import CredentialsPage from "./pages/CredentialsPage";
 import PaymentPage from "./pages/PaymentPage";
 import PaymentSuccessPage from "./pages/PaymentSuccessPage";
 import PaymentCancelPage from "./pages/PaymentCancelPage";
+import VerifySubscriptionPage from "./pages/VerifySubscriptionPage";
 import { initializeGlobalConfig, getSmsServerUrl } from "./lib/firebaseConfig";
 import {
   initializeFirebase,
@@ -2020,6 +2021,7 @@ const App: React.FC = () => {
     if (p === "/payment") return Page.Payment;
     if (p === "/payment-success") return Page.PaymentSuccess;
     if (p === "/payment-cancel") return Page.PaymentCancel;
+    if (p === "/verify-subscription") return Page.VerifySubscription;
     return Page.Dashboard;
   };
 
@@ -2053,6 +2055,8 @@ const App: React.FC = () => {
         return joinBase("payment-success");
       case Page.PaymentCancel:
         return joinBase("payment-cancel");
+      case Page.VerifySubscription:
+        return joinBase("verify-subscription");
       default:
         return joinBase("dashboard");
     }
@@ -2516,6 +2520,7 @@ const App: React.FC = () => {
         )}
         {currentPage === Page.PaymentSuccess && <PaymentSuccessPage />}
         {currentPage === Page.PaymentCancel && <PaymentCancelPage />}
+        {currentPage === Page.VerifySubscription && <VerifySubscriptionPage />}
         {currentPage === Page.Profile && (
           <ProfilePage
             user={{
