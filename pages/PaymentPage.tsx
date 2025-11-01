@@ -110,6 +110,60 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
     }
   }, []); // Empty deps = runs once on mount
 
+  // Authentication guard - redirect to signup if not authenticated
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const auth = getFirebaseAuth();
+        const user = auth.currentUser;
+
+        // If no user, wait briefly for auth to initialize
+        if (!user) {
+          await new Promise<void>((resolve) => {
+            const unsubscribe = auth.onAuthStateChanged((u) => {
+              unsubscribe();
+              resolve();
+            });
+            // Timeout after 2 seconds
+            setTimeout(() => {
+              unsubscribe();
+              resolve();
+            }, 2000);
+          });
+        }
+
+        // Check again after waiting
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          console.log(
+            "[PaymentPage] No authenticated user - redirecting to signup"
+          );
+          // Store the current plan if present in URL
+          const params = new URLSearchParams(window.location.search || "");
+          const planParam = params.get("plan");
+          if (planParam) {
+            localStorage.setItem("pendingPlan", planParam);
+          }
+          // Redirect to signup page
+          window.location.href = "/signup";
+          return;
+        }
+
+        // User is authenticated - check if they have companyId
+        const companyId = localStorage.getItem("companyId");
+        if (!companyId && currentUser.uid) {
+          localStorage.setItem("companyId", currentUser.uid);
+        }
+
+        console.log("[PaymentPage] User authenticated:", currentUser.email);
+      } catch (error) {
+        console.error("[PaymentPage] Auth check error:", error);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
   // --- Subscription check that re-runs on auth state changes ---
   const authListenerRef = useRef<any>(null);
   useEffect(() => {
