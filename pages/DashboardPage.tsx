@@ -2323,20 +2323,56 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   // localStorage.auth_uid and finally the Firebase auth currentUser UID.
   // This mirrors the PaymentPage logic so links shared or opened from
   // elsewhere include the client context.
+  // ALSO: Add planId from profile to URL to bypass subscription checks
   useEffect(() => {
     let unsub: any = null;
-    const trySetClientId = (clientId?: string | null) => {
+    const trySetClientIdAndPlanId = async (clientId?: string | null) => {
       try {
         if (!clientId) return false;
         const url = new URL(window.location.href);
+
+        // Set clientId if not present
         if (!url.searchParams.get("clientId")) {
           url.searchParams.set("clientId", clientId);
-          window.history.replaceState(window.history.state, "", url.toString());
         }
+
+        // Fetch planId from profile and add to URL if not present
+        if (!url.searchParams.get("planId")) {
+          try {
+            // Fetch subscription from profile
+            const smsServerUrl = localStorage.getItem("smsServerUrl") || "";
+            const response = await fetch(
+              `${smsServerUrl}/api/subscription?companyId=${encodeURIComponent(
+                clientId
+              )}`
+            );
+            const data = await response.json();
+
+            if (data.success && data.subscription) {
+              const planId =
+                data.subscription.planId ||
+                data.subscription.plan ||
+                data.subscription.planName;
+              if (planId) {
+                url.searchParams.set("planId", planId);
+                console.log(
+                  `[dashboard:url] ✅ Added planId to URL: ${planId}`
+                );
+              }
+            }
+          } catch (err) {
+            console.warn("[dashboard:url] Failed to fetch planId:", err);
+          }
+        }
+
+        window.history.replaceState(window.history.state, "", url.toString());
         return true;
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.debug("DashboardPage: failed to append clientId to URL", e);
+        console.debug(
+          "DashboardPage: failed to append clientId/planId to URL",
+          e
+        );
         return false;
       }
     };
@@ -2349,7 +2385,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       const fromStorage =
         localStorage.getItem("companyId") || localStorage.getItem("auth_uid");
       if (fromStorage) {
-        trySetClientId(fromStorage);
+        trySetClientIdAndPlanId(fromStorage);
         return;
       }
 
@@ -2363,14 +2399,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         if (typeof getFirebaseAuth === "function") {
           const auth = getFirebaseAuth();
           if (auth && auth.currentUser && auth.currentUser.uid) {
-            trySetClientId(auth.currentUser.uid);
+            trySetClientIdAndPlanId(auth.currentUser.uid);
             return;
           }
           // Listen for auth state change for a short period
           try {
             unsub = auth.onAuthStateChanged((u: any) => {
               if (u && u.uid) {
-                trySetClientId(u.uid);
+                trySetClientIdAndPlanId(u.uid);
                 try {
                   unsub && unsub();
                 } catch {}
