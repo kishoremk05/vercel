@@ -120,9 +120,7 @@ const HomePage: React.FC<HomePageProps> = ({
                     Get started—it's free
                   </button>
                 </div>
-                <p className="text-xs text-gray-500">
-                  No credit card required • 14-day free trial • Cancel anytime
-                </p>
+                
               </div>
               <div className="relative lg:block animate-fade-in-delayed">
                 {/* Yellow Survey Mockup */}
