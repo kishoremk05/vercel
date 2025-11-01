@@ -48,7 +48,8 @@ const VerifySubscriptionPage: React.FC = () => {
           setStatus("error");
           setMessage("Authentication failed. Redirecting to login...");
           setTimeout(() => {
-            window.location.href = "/auth";
+            window.history.pushState({ page: "/auth" }, "", "/auth");
+            window.dispatchEvent(new PopStateEvent("popstate"));
           }, 2000);
           return;
         }
@@ -103,7 +104,12 @@ const VerifySubscriptionPage: React.FC = () => {
 
             // Redirect to dashboard after a short delay
             setTimeout(() => {
-              window.location.href = "/dashboard";
+              window.history.pushState(
+                { page: "/dashboard" },
+                "",
+                "/dashboard"
+              );
+              window.dispatchEvent(new PopStateEvent("popstate"));
             }, 1500);
             return;
           }
@@ -115,7 +121,8 @@ const VerifySubscriptionPage: React.FC = () => {
         setMessage("No subscription found. Redirecting to payment...");
 
         setTimeout(() => {
-          window.location.href = "/payment";
+          window.history.pushState({ page: "/payment" }, "", "/payment");
+          window.dispatchEvent(new PopStateEvent("popstate"));
         }, 1500);
       } catch (error: any) {
         console.error("[VerifySubscription] Error:", error);
@@ -125,7 +132,8 @@ const VerifySubscriptionPage: React.FC = () => {
           "Verification failed. Redirecting to payment page as fallback..."
         );
         setTimeout(() => {
-          window.location.href = "/payment";
+          window.history.pushState({ page: "/payment" }, "", "/payment");
+          window.dispatchEvent(new PopStateEvent("popstate"));
         }, 2000);
       }
     };

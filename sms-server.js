@@ -2260,6 +2260,9 @@ app.post("/api/payments/create-session", async (req, res) => {
     const successUrl = `${baseUrl}/payment-success?client_id=${encodeURIComponent(
       companyId || "unknown"
     )}&plan_id=${encodeURIComponent(plan)}`;
+    const cancelUrl = `${baseUrl}/payment-cancel?client_id=${encodeURIComponent(
+      companyId || "unknown"
+    )}&plan_id=${encodeURIComponent(plan)}`;
 
     // Subscription payload matching your working server.js
     const payload = {
@@ -2278,6 +2281,7 @@ app.post("/api/payments/create-session", async (req, res) => {
         zipcode: "10001",
       },
       return_url: successUrl,
+      cancel_url: cancelUrl,
       metadata: {
         companyId: companyId || "unknown",
         plan: plan,
@@ -2294,7 +2298,7 @@ app.post("/api/payments/create-session", async (req, res) => {
     );
     console.log(`[Dodo Payment] API URL: ${DODO_API_BASE}/subscriptions`);
     console.log(
-      `[Dodo Payment] Product ID: ${productId}, Return URL: ${successUrl}`
+      `[Dodo Payment] Product ID: ${productId}, Return URL: ${successUrl}, Cancel URL: ${cancelUrl}`
     );
 
     // Create Dodo subscription using axios
