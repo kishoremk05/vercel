@@ -423,6 +423,18 @@ const PaymentSuccessPage: React.FC = () => {
     window.location.href = "/dashboard";
   };
 
+  // Hide the navbar/header if present
+  useEffect(() => {
+    const header = document.querySelector("header");
+    if (header) {
+      (header as HTMLElement).style.display = "none";
+    }
+    return () => {
+      if (header) {
+        (header as HTMLElement).style.display = "";
+      }
+    };
+  }, []);
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-gray-100 flex items-center justify-center p-4">
       <div className="max-w-md w-full">
