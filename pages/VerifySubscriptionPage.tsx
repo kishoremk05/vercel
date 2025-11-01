@@ -115,7 +115,7 @@ const VerifySubscriptionPage: React.FC = () => {
           }
         }
 
-        // No plan found - redirect to payment page
+        // No plan found - redirect to payment page after 2 seconds
         if (!mounted) return;
         setStatus("no-plan");
         setMessage("No subscription found. Redirecting to payment...");
@@ -123,7 +123,7 @@ const VerifySubscriptionPage: React.FC = () => {
         setTimeout(() => {
           window.history.pushState({ page: "/payment" }, "", "/payment");
           window.dispatchEvent(new PopStateEvent("popstate"));
-        }, 1500);
+        }, 2000);
       } catch (error: any) {
         console.error("[VerifySubscription] Error:", error);
         if (!mounted) return;

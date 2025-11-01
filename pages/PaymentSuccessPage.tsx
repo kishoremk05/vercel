@@ -28,8 +28,33 @@ const PaymentSuccessPage: React.FC = () => {
   const [countdown, setCountdown] = useState(5);
 
   useEffect(() => {
-    // Save selected plan to Firestore and set planInfo
-    const saveSubscription = async () => {
+    // Check if payment actually succeeded - Dodo might redirect here even on failure
+    const checkAndSave = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const status = urlParams.get("status") || urlParams.get("payment_status");
+      const referrer = document.referrer || "";
+      
+      // If status is explicitly "failed" or "cancelled", redirect to cancel page
+      if (status === "failed" || status === "cancelled" || status === "canceled") {
+        console.log("[PaymentSuccess] Payment failed/cancelled, redirecting to cancel page");
+        const clientId = urlParams.get("client_id") || urlParams.get("clientId") || urlParams.get("companyId");
+        const planId = urlParams.get("plan_id") || urlParams.get("planId") || urlParams.get("plan");
+        const cancelUrl = `/payment-cancel?client_id=${clientId || "unknown"}&plan_id=${planId || "unknown"}`;
+        window.location.href = cancelUrl;
+        return;
+      }
+      
+      // If coming from Dodo failed page, redirect to cancel
+      if (referrer.includes("dodopayments.com") && referrer.includes("/failed")) {
+        console.log("[PaymentSuccess] Detected failed payment from Dodo, redirecting to cancel page");
+        const clientId = urlParams.get("client_id") || urlParams.get("clientId") || urlParams.get("companyId");
+        const planId = urlParams.get("plan_id") || urlParams.get("planId") || urlParams.get("plan");
+        const cancelUrl = `/payment-cancel?client_id=${clientId || "unknown"}&plan_id=${planId || "unknown"}`;
+        window.location.href = cancelUrl;
+        return;
+      }
+
+      // Save selected plan to Firestore and set planInfo
       try {
         initializeFirebase();
         const auth = getFirebaseAuth();
@@ -293,13 +318,14 @@ const PaymentSuccessPage: React.FC = () => {
         console.error("Error saving subscription:", error);
       }
     };
-    const savePromise = saveSubscription();
+
+    // Start the async check and save
+    const savePromise = checkAndSave();
 
     // Fetch server-side subscription plan data (if available)
-    const urlParams = new URLSearchParams(window.location.search);
-    const companyId = urlParams.get("companyId");
-    if (companyId) {
-      fetch(`/api/subscription?companyId=${companyId}`)
+    const companyIdParam = new URLSearchParams(window.location.search).get("companyId");
+    if (companyIdParam) {
+      fetch(`/api/subscription?companyId=${companyIdParam}`)
         .then((res) => res.json())
         .then((data) => {
           if (data && (data.plan || data.price)) {
