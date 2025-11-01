@@ -507,49 +507,49 @@ const PaymentPage: React.FC<PaymentPageProps> = ({
         </header>
 
         <div className="mx-auto max-w-7xl px-6 py-12">
-          <div className="text-center mb-12">
+          <div className="text-center mb-6">
             <h1 className="text-4xl font-bold text-gray-900 mb-3">
               Choose Your Plan
             </h1>
             <p className="text-lg text-gray-600 mb-2">
               Welcome <strong>{businessName}</strong> • {userEmail}
             </p>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 mb-4">
               Select a plan to unlock SMS credits.
             </p>
-          </div>
 
-          {/* Reload Note - Visible to all users */}
-          <div className="max-w-3xl mx-auto mb-8">
-            <div className="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-4 shadow-sm">
-              <div className="flex items-start gap-3">
-                <svg
-                  className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold text-blue-900 mb-1">
-                    📌 Important Note
-                  </h3>
-                  <p className="text-sm text-blue-800">
-                    If you've already completed your payment, please{" "}
-                    <button
-                      onClick={() => window.location.reload()}
-                      className="underline font-semibold hover:text-blue-600 transition-colors"
-                    >
-                      reload this page
-                    </button>{" "}
-                    to see your active subscription status.
-                  </p>
+            {/* Reload Note - Visible to all users - Moved below the subtitle */}
+            <div className="max-w-2xl mx-auto mt-4">
+              <div className="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <svg
+                    className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-semibold text-blue-900 mb-1">
+                      📌 Important Note
+                    </h3>
+                    <p className="text-sm text-blue-800">
+                      If you've already completed your payment, please{" "}
+                      <button
+                        onClick={() => window.location.reload()}
+                        className="underline font-semibold hover:text-blue-600 transition-colors"
+                      >
+                        reload this page
+                      </button>{" "}
+                      to see your active subscription status.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
