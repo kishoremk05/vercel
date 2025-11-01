@@ -1342,11 +1342,11 @@ const App: React.FC = () => {
       const sendUrl = base
         ? `${String(base).trim().replace(/\/+$/, "")}/send-sms`
         : `/send-sms`;
-      
+
       // Extract planId from URL if present
       const urlParams = new URLSearchParams(window.location.search);
       const planIdFromUrl = urlParams.get("planId");
-      
+
       const res = await fetch(sendUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
