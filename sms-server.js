@@ -568,6 +568,7 @@ async function handleSendSms(req, res) {
     authToken: authTokenBody,
     companyId: companyIdBody,
     messagingServiceSid: mssFromBody,
+    planId: planIdBody,
   } = bodyData || {};
 
   try {
@@ -639,7 +640,12 @@ async function handleSendSms(req, res) {
 
   // ============== SMS LIMIT CHECK ==============
   // Check subscription SMS credits before sending
-  if (companyIdBody && firestoreEnabled) {
+  // If planId is provided in request body, bypass subscription check
+  if (planIdBody) {
+    console.log(
+      `[sms:limit-check] ✅ Plan ID provided in request: ${planIdBody}, bypassing subscription check`
+    );
+  } else if (companyIdBody && firestoreEnabled) {
     try {
       const firestore = firebaseAdmin.firestore();
 

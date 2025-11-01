@@ -3093,7 +3093,17 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
       // ============== SUBSCRIPTION CHECK ==============
       // Verify active subscription before sending SMS (except for single WhatsApp)
-      if (selectedIds.length > 1) {
+      // Check if planId is in URL - if present, allow SMS without subscription check
+      const urlParams = new URLSearchParams(window.location.search);
+      const planIdFromUrl = urlParams.get("planId");
+
+      if (planIdFromUrl) {
+        // Plan ID in URL - allow SMS without subscription check
+        console.log(
+          `[dashboard:send] ✅ Plan ID found in URL: ${planIdFromUrl}, bypassing subscription check`
+        );
+      } else if (selectedIds.length > 1) {
+        // No plan ID in URL - perform normal subscription verification
         try {
           const companyId = localStorage.getItem("companyId") || "";
           if (!companyId) {
