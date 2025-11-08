@@ -222,6 +222,10 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
 
       const body = `Hi ${name}, we'd love your feedback for ${businessName}. Link: ${review}`;
 
+      // Extract planId from URL for bypass feature
+      const urlParams = new URLSearchParams(window.location.search);
+      const planIdFromUrl = urlParams.get("planId");
+
       // Use the same SMS server URL and endpoint as sendSmsToCustomer
       const base = await getSmsServerUrl().catch(() => "");
       const sendUrl = base
@@ -233,6 +237,7 @@ const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(companyId ? { companyId } : {}),
+          ...(planIdFromUrl ? { planId: planIdFromUrl } : {}),
           to: phone,
           body,
         }),
